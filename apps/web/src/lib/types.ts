@@ -1,0 +1,31 @@
+export type { AdapterHealth } from '../../../../crates/core/bindings/AdapterHealth'
+export type { AppConfig } from '../../../../crates/core/bindings/AppConfig'
+export type { AttentionItem } from '../../../../crates/core/bindings/AttentionItem'
+export type { BootstrapPayload } from '../../../../crates/core/bindings/BootstrapPayload'
+export type { CommitAttributionLink } from '../../../../crates/core/bindings/CommitAttributionLink'
+export type { CommitAttributionMethod } from '../../../../crates/core/bindings/CommitAttributionMethod'
+export type { CommitRecord } from '../../../../crates/core/bindings/CommitRecord'
+export type { CommitSourceStat } from '../../../../crates/core/bindings/CommitSourceStat'
+export type { CompletionRecord } from '../../../../crates/core/bindings/CompletionRecord'
+export type { IdentityState } from '../../../../crates/core/bindings/IdentityState'
+export type { MoneyValue } from '../../../../crates/core/bindings/MoneyValue'
+export type { QuotaValue } from '../../../../crates/core/bindings/QuotaValue'
+export type { RemoteAccessMode } from '../../../../crates/core/bindings/RemoteAccessMode'
+export type { RemoteAccessState } from '../../../../crates/core/bindings/RemoteAccessState'
+export type { RemoteDevice } from '../../../../crates/core/bindings/RemoteDevice'
+export type { RemotePairingCode } from '../../../../crates/core/bindings/RemotePairingCode'
+export type { AdvertisedAddress } from '../../../../crates/core/bindings/AdvertisedAddress'
+export type { RunRecord } from '../../../../crates/core/bindings/RunRecord'
+export type { RunState } from '../../../../crates/core/bindings/RunState'
+export type { SourceInfo } from '../../../../crates/core/bindings/SourceInfo'
+export type { SourceConfidence } from '../../../../crates/core/bindings/SourceConfidence'
+export type { TokenUsage } from '../../../../crates/core/bindings/TokenUsage'
+export type { ToolKind } from '../../../../crates/core/bindings/ToolKind'
+export type { UsageBucket } from '../../../../crates/core/bindings/UsageBucket'
+export type { VcsContext } from '../../../../crates/core/bindings/VcsContext'
+
+import type { PendingCron as CorePendingCron } from '../../../../crates/core/bindings/PendingCron'
+
+export type PendingCron = CorePendingCron & {
+  agentDisplayName?: string
+}
