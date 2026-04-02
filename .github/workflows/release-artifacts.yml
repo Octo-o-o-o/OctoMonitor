@@ -23,7 +23,7 @@ jobs:
             target: aarch64-apple-darwin
             package_dir: packages/octomonitor-darwin-arm64
             artifact_name: octomonitor-darwin-arm64
-          - runner: macos-13
+          - runner: macos-15-intel
             target: x86_64-apple-darwin
             package_dir: packages/octomonitor-darwin-x64
             artifact_name: octomonitor-darwin-x64
@@ -67,7 +67,10 @@ jobs:
       - name: Pack binary package
         run: |
           mkdir -p dist
-          npm pack ${{ matrix.package_dir }} --pack-destination dist
+          (
+            cd ${{ matrix.package_dir }}
+            npm pack --pack-destination "$GITHUB_WORKSPACE/dist"
+          )
 
       - name: Publish binary package
         if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != ''
@@ -98,7 +101,10 @@ jobs:
       - name: Pack wrapper package
         run: |
           mkdir -p dist
-          npm pack packages/octomonitor --pack-destination dist
+          (
+            cd packages/octomonitor
+            npm pack --pack-destination "$GITHUB_WORKSPACE/dist"
+          )
 
       - name: Publish wrapper package
         if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != ''
@@ -120,7 +126,7 @@ jobs:
       matrix:
         include:
           - runner: macos-14
-          - runner: macos-13
+          - runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 

@@ -4,8 +4,8 @@ class Octomonitor < Formula
   license "MIT"
   version "0.1.2"
 
-  url "https://github.com/Octo-o-o-o/OctoMonitor.git",
-      tag: "v0.1.2"
+  url "https://github.com/Octo-o-o-o/OctoMonitor/archive/refs/tags/v0.1.2.tar.gz"
+  sha256 "92655e05478f225239bec40f843befbe2932aefd8dbb3af2854c7f0ac6b4e309"
 
   depends_on "rust" => :build
   depends_on "node" => :build
@@ -27,6 +27,6 @@ class Octomonitor < Formula
   end
 
   test do
-    assert_match "octomonitor", (bin/"octomonitor").to_s
+    assert_predicate bin/"octomonitor", :exist?
   end
 end

@@ -5,7 +5,13 @@ Homebrew tap files for [OctoMonitor](https://github.com/Octo-o-o-o/OctoMonitor).
 ## Install
 
 ```bash
-brew tap Octo-o-o-o/octomonitor https://github.com/Octo-o-o-o/OctoMonitor
+brew install Octo-o-o-o/octomonitor/octomonitor
+```
+
+Or tap first, then use the short formula name:
+
+```bash
+brew tap Octo-o-o-o/octomonitor
 brew install octomonitor
 ```
 
