@@ -12,7 +12,7 @@ import { RemotePairingGate } from './components/RemotePairingGate'
 import { apiFetch, buildWsUrl, normalizeBootstrapPayload } from './lib/api'
 import { buildVisiblePanels, buildVisibleRunIds, buildVisibleRunsBySource } from './lib/monitor'
 import { getRuntimeMode } from './lib/runtimeMode'
-import { useI18n } from './lib/i18n'
+import { useI18n, type I18nKey } from './lib/i18n'
 
 type DesktopBootIssue = {
   title: string
@@ -162,7 +162,7 @@ function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>) {
   }, [runtimeMode, setActiveTab, runIds, focusedRunId, setFocusedRunId, selectRun, toggleShortcutHelp])
 }
 
-function useWaitingNotifications(enabled: boolean) {
+function useWaitingNotifications(enabled: boolean, t: (key: I18nKey) => string) {
   const prevWaitingRef = useRef<Set<string>>(new Set())
 
   return useCallback((data: BootstrapPayload) => {
@@ -181,11 +181,11 @@ function useWaitingNotifications(enabled: boolean) {
     if (Notification.permission !== 'granted') return
 
     for (const run of newWaiting) {
-      const title = `${run.projectName} needs approval`
-      const body = run.lastQuestion ?? run.lastTail ?? 'Session is waiting for approval'
+      const title = t('notification.approvalTitle').replace('{project}', run.projectName)
+      const body = run.lastQuestion ?? run.lastTail ?? t('notification.approvalBody')
       new Notification(title, { body, tag: `octomonitor-wait-${run.id}` })
     }
-  }, [enabled])
+  }, [enabled, t])
 }
 
 export default function App() {
@@ -205,7 +205,7 @@ export default function App() {
     if (typeof window === 'undefined' || runtimeMode !== 'local') return null
     return readDesktopBootIssue()
   })
-  const checkWaitingNotifications = useWaitingNotifications(settings.notificationsEnabled)
+  const checkWaitingNotifications = useWaitingNotifications(settings.notificationsEnabled, t)
   const handleWsMessage = useCallback((payload: unknown) => {
     const data = normalizeBootstrapPayload(payload)
     setData(data)

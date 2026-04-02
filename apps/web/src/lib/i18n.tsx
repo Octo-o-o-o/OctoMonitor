@@ -11,7 +11,7 @@ const en = {
   'tab.commits': 'COMMITS',
   'tab.settings': 'SETTINGS',
   'stat.active': 'ACTIVE',
-  'stat.wait': 'WAIT',
+  'stat.wait': 'APPROVAL',
   'stat.done': 'DONE',
   'stat.tps': 'TPS',
   'stat.tok': 'TOK',
@@ -24,7 +24,7 @@ const en = {
 
   // monitor view — count labels in source column header
   'stateCount.running': 'Running',
-  'stateCount.waiting': 'Waiting',
+  'stateCount.waiting': 'Awaiting approval',
   'stateCount.done': 'Done',
   'monitor.doneIn': 'Done in {period}',
   'monitor.noSessions': 'No active sessions',
@@ -35,6 +35,9 @@ const en = {
 
   // attention
   'attention.required': 'ATTENTION REQUIRED',
+  'attention.permission': 'Approval required',
+  'attention.error': 'Source needs attention',
+  'attention.source': 'Source data stale',
 
   // usage view
   'usage.totalTokens': 'TOTAL TOKENS',
@@ -127,7 +130,7 @@ const en = {
   'settings.showFingerprints': 'Show Account IDs',
   'settings.fingerprintsHint': 'Show account identifiers in the identity section',
   'settings.notifications': 'Approval Notifications',
-  'settings.notificationsHint': 'Only notify when you explicitly enable browser notifications.',
+  'settings.notificationsHint': 'Only notify when you explicitly enable browser notifications for sessions that require approval.',
   'settings.identities': 'Identities',
   'settings.serverConfig': 'Server Configuration',
   'remote.section': 'Remote Access',
@@ -209,7 +212,7 @@ const en = {
 
   // state labels (shared by MonitorView + InspectDrawer)
   'state.active': 'RUNNING',
-  'state.waitingApproval': 'WAITING',
+  'state.waitingApproval': 'APPROVAL REQUIRED',
   'state.completed': 'DONE',
   'state.idle': 'DONE',
   'state.stale': 'DONE',
@@ -237,6 +240,8 @@ const en = {
   'config.history': 'History',
   'config.companion': 'Companion',
   'config.days': 'days',
+  'notification.approvalTitle': '{project} requires approval',
+  'notification.approvalBody': 'This session is waiting for approval.',
 
   // keyboard shortcuts
   'shortcut.title': 'Keyboard Shortcuts',
@@ -256,7 +261,7 @@ const zh: Record<I18nKey, string> = {
   'tab.commits': '\u63D0\u4EA4',
   'tab.settings': '\u8BBE\u7F6E',
   'stat.active': '\u6D3B\u8DC3',
-  'stat.wait': '\u7B49\u5F85',
+  'stat.wait': '\u5F85\u6279\u51C6',
   'stat.done': '\u5DF2\u5B8C\u6210',
   'stat.tps': 'TPS',
   'stat.tok': 'TOK',
@@ -268,7 +273,7 @@ const zh: Record<I18nKey, string> = {
   'stat.all': '\u5168',
 
   'stateCount.running': '\u8FD0\u884C\u4E2D',
-  'stateCount.waiting': '\u7B49\u5F85\u4E2D',
+  'stateCount.waiting': '\u5F85\u6279\u51C6',
   'stateCount.done': '\u5DF2\u5B8C\u6210',
   'monitor.doneIn': '{period}\u5185\u5B8C\u6210',
   'monitor.noSessions': '\u6682\u65E0\u6D3B\u8DC3\u4F1A\u8BDD',
@@ -278,6 +283,9 @@ const zh: Record<I18nKey, string> = {
   'monitor.offlineHint': '\u5F53\u524D\u663E\u793A\u7684\u662F\u6700\u65B0\u672C\u5730\u5FEB\u7167\uFF0C\u91CD\u8FDE\u540E\u4F1A\u81EA\u52A8\u6062\u590D\u5B9E\u65F6\u66F4\u65B0\u3002',
 
   'attention.required': '\u9700\u8981\u6CE8\u610F',
+  'attention.permission': '\u9700\u8981\u6279\u51C6',
+  'attention.error': '\u6765\u6E90\u9700\u8981\u5904\u7406',
+  'attention.source': '\u6765\u6E90\u6570\u636E\u5DF2\u8FC7\u65F6',
 
   'usage.totalTokens': '\u603B TOKEN',
   'usage.totalCost': '\u603B\u8D39\u7528',
@@ -365,8 +373,8 @@ const zh: Record<I18nKey, string> = {
   'settings.companionUrl': '其他设备访问地址：',
   'settings.showFingerprints': '显示账号标识',
   'settings.fingerprintsHint': '在身份信息中显示账号 ID',
-  'settings.notifications': '\u5BA1\u6279\u901A\u77E5',
-  'settings.notificationsHint': '\u53EA\u5728\u4F60\u663E\u5F0F\u5F00\u542F\u6D4F\u89C8\u5668\u901A\u77E5\u540E\u624D\u4F1A\u53D1\u9001\u63D0\u9192\u3002',
+  'settings.notifications': '\u6279\u51C6\u63D0\u9192',
+  'settings.notificationsHint': '\u53EA\u5728\u4F60\u663E\u5F0F\u5F00\u542F\u6D4F\u89C8\u5668\u901A\u77E5\u540E\uFF0C\u624D\u4F1A\u5728\u4F1A\u8BDD\u9700\u8981\u6279\u51C6\u65F6\u63D0\u9192\u3002',
   'settings.identities': '\u8EAB\u4EFD\u4FE1\u606F',
   'settings.serverConfig': '\u670D\u52A1\u5668\u914D\u7F6E',
   'remote.section': '\u8FDC\u7A0B\u8BBF\u95EE',
@@ -444,7 +452,7 @@ const zh: Record<I18nKey, string> = {
   'settings.fontSize.xlarge': 'XL',
 
   'state.active': '运行中',
-  'state.waitingApproval': '等待中',
+  'state.waitingApproval': '待批准',
   'state.completed': '已完成',
   'state.idle': '已完成',
   'state.stale': '已完成',
@@ -470,6 +478,8 @@ const zh: Record<I18nKey, string> = {
   'config.history': '历史记录',
   'config.companion': '伴侣模式',
   'config.days': '天',
+  'notification.approvalTitle': '{project} 需要批准',
+  'notification.approvalBody': '该会话正在等待批准。',
 
   'shortcut.title': '\u952E\u76D8\u5FEB\u6377\u952E',
   'shortcut.switchTab': '\u5207\u6362\u6807\u7B7E\u9875\uFF08\u76D1\u63A7 / \u7528\u91CF / \u63D0\u4EA4 / \u8BBE\u7F6E\uFF09',

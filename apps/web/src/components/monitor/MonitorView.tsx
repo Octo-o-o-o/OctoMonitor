@@ -597,34 +597,36 @@ export function MonitorView() {
           <span>{t('monitor.emptyHint')}</span>
         </div>
       )}
-      <MobileSourceTabs
-        selected={effectiveMobileSource}
-        onSelect={setMobileSource}
-        counts={sourceCounts}
-        visibleTools={visiblePanels}
-      />
-      <div
-        className={`source-columns source-columns-desktop ${columnLayout === 'adaptive' ? 'adaptive' : ''}`}
-        style={adaptiveStyle}
-      >
-        {visiblePanels.map((tool) => (
+      <section className="monitor-board-panel">
+        <MobileSourceTabs
+          selected={effectiveMobileSource}
+          onSelect={setMobileSource}
+          counts={sourceCounts}
+          visibleTools={visiblePanels}
+        />
+        <div
+          className={`source-columns source-columns-desktop ${columnLayout === 'adaptive' ? 'adaptive' : ''}`}
+          style={adaptiveStyle}
+        >
+          {visiblePanels.map((tool) => (
+            <SourceColumn
+              key={tool}
+              tool={tool}
+              runs={sessionsBySource[tool]}
+              crons={tool === 'openClaw' ? data.pendingCrons : undefined}
+              showEmptyState={hasVisibleRuns}
+            />
+          ))}
+        </div>
+        <div className="source-columns-mobile">
           <SourceColumn
-            key={tool}
-            tool={tool}
-            runs={sessionsBySource[tool]}
-            crons={tool === 'openClaw' ? data.pendingCrons : undefined}
+            tool={effectiveMobileSource}
+            runs={sessionsBySource[effectiveMobileSource]}
+            crons={effectiveMobileSource === 'openClaw' ? data.pendingCrons : undefined}
             showEmptyState={hasVisibleRuns}
           />
-        ))}
-      </div>
-      <div className="source-columns-mobile">
-        <SourceColumn
-          tool={effectiveMobileSource}
-          runs={sessionsBySource[effectiveMobileSource]}
-          crons={effectiveMobileSource === 'openClaw' ? data.pendingCrons : undefined}
-          showEmptyState={hasVisibleRuns}
-        />
-      </div>
+        </div>
+      </section>
     </div>
   )
 }

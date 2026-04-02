@@ -142,9 +142,11 @@ export function StatusBar({ runtimeMode, wsConnected }: { runtimeMode: RuntimeMo
           <span className="stat">
             {t('stat.active')} <strong className="stat-active">{stats.active}</strong>
           </span>
-          <span className="stat">
-            {t('stat.wait')} <strong className="stat-wait">{stats.waiting}</strong>
-          </span>
+          {stats.waiting > 0 && (
+            <span className="stat">
+              {t('stat.wait')} <strong className="stat-wait">{stats.waiting}</strong>
+            </span>
+          )}
           <span className="stat">
             {t('stat.done')} <strong className="stat-done">{stats.done}</strong>
           </span>

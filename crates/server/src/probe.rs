@@ -1054,7 +1054,7 @@ pub fn rebuild_derived(payload: &mut BootstrapPayload, pricing: &PricingStore) {
 
 pub fn build_attention_from_run(run: &RunRecord) -> Option<AttentionItem> {
     let kind = match run.state {
-        RunState::WaitingApproval => Some(("permission", "warn", "Approval needed")),
+        RunState::WaitingApproval => Some(("permission", "warn", "Approval required")),
         RunState::Error | RunState::GatewayOffline => {
             Some(("error", "critical", "Source needs attention"))
         }

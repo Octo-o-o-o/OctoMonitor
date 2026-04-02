@@ -34,16 +34,16 @@ interface ThemeColors {
 
 const builtinThemes: Record<string, ThemeColors> = {
   dark: {
-    bg: '#09090b',       // zinc-950
-    surface: '#09090b',  // zinc-950
-    surface2: '#18181b', // zinc-900
-    border: '#27272a',   // zinc-800
-    text: '#fafafa',     // zinc-50
-    muted: '#a1a1aa',    // zinc-400
-    accent: '#34d399',   // emerald-400
-    warn: '#f59e0b',     // amber-500
-    danger: '#ef4444',   // red-500
-    barBg: '#09090b',    // zinc-950
+    bg: '#08101f',
+    surface: '#131d34',
+    surface2: '#17233f',
+    border: '#263554',
+    text: '#eff5ff',
+    muted: '#9fb0cf',
+    accent: '#40d39d',
+    warn: '#f2bb4a',
+    danger: '#ef7b8f',
+    barBg: '#0d1528',
   },
   light: {
     bg: '#fafafa',       // zinc-50

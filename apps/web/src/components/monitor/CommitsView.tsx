@@ -329,39 +329,38 @@ export function CommitsView() {
                         </div>
                       </div>
 
-                      <div className="commit-categories-row">
-                        <div className="commit-categories">
+                      <div className="commit-categories">
+                        <div className="commit-categories-row">
                           <span className="commit-subsection-label">{t('commits.categories')}</span>
-                          <div className="commit-category-list">
-                            {sources.length === 0 ? (
-                              <span className="commit-category-pill commit-category-pill-muted">
-                                {t('commits.unattributed')}
-                              </span>
-                            ) : (
-                              sources.map((source) => (
-                                <span
-                                  key={`${commit.id}-${source.tool}`}
-                                  className={`commit-category-pill tool-${sourceClass(source.tool)}`}
-                                >
-                                  {sourceLabels[source.tool]}
-                                </span>
-                              ))
-                            )}
-                            <span className="commit-category-pill commit-category-pill-secondary">
-                              {t('commits.allocation')}
-                            </span>
-                          </div>
+                          {links.length > 0 && (
+                            <button
+                              className="commit-sessions-toggle"
+                              onClick={() => toggleCommitSessions(commit.id)}
+                              aria-expanded={isExpanded}
+                            >
+                              {isExpanded ? t('commits.hideSessions') : t('commits.viewSessions')}
+                            </button>
+                          )}
                         </div>
-
-                        {links.length > 0 && (
-                          <button
-                            className="commit-sessions-toggle"
-                            onClick={() => toggleCommitSessions(commit.id)}
-                            aria-expanded={isExpanded}
-                          >
-                            {isExpanded ? t('commits.hideSessions') : t('commits.viewSessions')}
-                          </button>
-                        )}
+                        <div className="commit-category-list">
+                          {sources.length === 0 ? (
+                            <span className="commit-category-pill commit-category-pill-muted">
+                              {t('commits.unattributed')}
+                            </span>
+                          ) : (
+                            sources.map((source) => (
+                              <span
+                                key={`${commit.id}-${source.tool}`}
+                                className={`commit-category-pill tool-${sourceClass(source.tool)}`}
+                              >
+                                {sourceLabels[source.tool]}
+                              </span>
+                            ))
+                          )}
+                          <span className="commit-category-pill commit-category-pill-secondary">
+                            {t('commits.allocation')}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
