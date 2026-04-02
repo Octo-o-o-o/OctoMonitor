@@ -1,0 +1,149 @@
+name: Release Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  npm-binaries:
+    name: NPM binary package (${{ matrix.artifact_name }})
+    runs-on: ${{ matrix.runner }}
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            package_dir: packages/octomonitor-darwin-arm64
+            artifact_name: octomonitor-darwin-arm64
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            package_dir: packages/octomonitor-darwin-x64
+            artifact_name: octomonitor-darwin-x64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            package_dir: packages/octomonitor-linux-x64
+            artifact_name: octomonitor-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web assets
+        run: pnpm --filter @octomonitor/web build
+
+      - name: Build server binary
+        run: cargo build --release -p octomonitor-server --target ${{ matrix.target }}
+
+      - name: Stage binary package
+        run: |
+          mkdir -p ${{ matrix.package_dir }}/bin
+          cp target/${{ matrix.target }}/release/octomonitor-server ${{ matrix.package_dir }}/bin/octomonitor-server
+          chmod +x ${{ matrix.package_dir }}/bin/octomonitor-server
+
+      - name: Pack binary package
+        run: |
+          mkdir -p dist
+          npm pack ${{ matrix.package_dir }} --pack-destination dist
+
+      - name: Publish binary package
+        if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != ''
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          (cd ${{ matrix.package_dir }} && npm publish --access public)
+
+      - name: Upload binary package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/*.tgz
+
+  npm-wrapper:
+    name: NPM wrapper package
+    runs-on: ubuntu-latest
+    needs: npm-binaries
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Pack wrapper package
+        run: |
+          mkdir -p dist
+          npm pack packages/octomonitor --pack-destination dist
+
+      - name: Publish wrapper package
+        if: startsWith(github.ref, 'refs/tags/v') && env.NPM_TOKEN != ''
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          (cd packages/octomonitor && npm publish --access public)
+
+      - name: Upload wrapper package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: octomonitor-wrapper
+          path: dist/*.tgz
+
+  desktop-bundle:
+    name: Desktop bundle (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+          - runner: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build unsigned desktop bundle
+        run: pnpm build:desktop
+
+      - name: Upload desktop bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.runner }}
+          path: target/release/bundle/**

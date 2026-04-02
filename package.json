@@ -1,0 +1,14 @@
+{
+  "name": "octomonitor",
+  "private": true,
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "build": "pnpm --filter @octomonitor/web build",
+    "build:desktop": "pnpm --filter @octomonitor/desktop tauri:build",
+    "build:desktop:signed": "bash ./scripts/build-macos-signed.sh",
+    "build:desktop:notarized": "bash ./scripts/build-macos-notarized.sh",
+    "release:check": "cargo test --workspace && cargo clippy --workspace -- -D warnings && pnpm --filter @octomonitor/web test --run && pnpm test:a11y && pnpm build:desktop",
+    "test": "pnpm --filter @octomonitor/web test --run",
+    "test:a11y": "pnpm --filter @octomonitor/web a11y"
+  }
+}

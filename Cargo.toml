@@ -1,0 +1,32 @@
+[workspace]
+members = [
+  "crates/core",
+  "crates/server",
+  "crates/installer",
+  "crates/companion",
+  "crates/adapters/common",
+  "crates/adapters/claude",
+  "crates/adapters/codex",
+  "crates/adapters/openclaw",
+  "apps/desktop/src-tauri"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.2"
+
+[workspace.dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws", "macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ts-rs = { version = "12", features = ["serde-compat", "chrono-impl"] }
+uuid = { version = "1", features = ["v4", "serde"] }

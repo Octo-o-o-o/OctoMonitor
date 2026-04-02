@@ -1,0 +1,9 @@
+{
+  "test_command": "cargo test --workspace && pnpm --filter @octomonitor/web test --run",
+  "build_command": "cargo check --workspace && pnpm --filter @octomonitor/web build",
+  "deploy_url": "",
+  "auto_deploy": false,
+  "deploy_target": "",
+  "deploy_command": "",
+  "deploy_branch": "main"
+}
