@@ -1,0 +1,269 @@
+use serde::{Deserialize, Serialize};
+use std::{env, fs, path::PathBuf, process::Command};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCapability {
+    pub tool: &'static str,
+    pub detected: bool,
+    pub mode: &'static str,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallAction {
+    pub id: String,
+    pub kind: String,
+    pub path: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallPlan {
+    pub tool: String,
+    pub dry_run: bool,
+    pub actions: Vec<InstallAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallResult {
+    pub tool: String,
+    pub applied: bool,
+    pub paths: Vec<String>,
+    pub message: String,
+}
+
+fn command_exists(name: &str) -> bool {
+    Command::new("sh")
+        .arg("-lc")
+        .arg(format!("command -v {} >/dev/null 2>&1", name))
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn integration_root() -> PathBuf {
+    env::temp_dir().join("octomonitor-integrations")
+}
+
+fn tool_mode(tool: &str) -> &'static str {
+    match tool {
+        "claude" => "statusline+hooks",
+        "codex" => "app-server+hooks",
+        "openclaw" => "gateway+status",
+        _ => "custom",
+    }
+}
+
+pub fn detect_tools() -> Vec<ToolCapability> {
+    vec![
+        ToolCapability {
+            tool: "claude",
+            detected: command_exists("claude"),
+            mode: tool_mode("claude"),
+            notes: if command_exists("claude") {
+                "Claude CLI detected; local hook/statusline install possible".into()
+            } else {
+                "Claude CLI not found on PATH".into()
+            },
+        },
+        ToolCapability {
+            tool: "codex",
+            detected: command_exists("codex"),
+            mode: tool_mode("codex"),
+            notes: if command_exists("codex") {
+                "Codex CLI detected; app-server/hook path available".into()
+            } else {
+                "Codex CLI not found on PATH".into()
+            },
+        },
+        ToolCapability {
+            tool: "openclaw",
+            detected: command_exists("openclaw"),
+            mode: tool_mode("openclaw"),
+            notes: if command_exists("openclaw") {
+                "OpenClaw CLI detected; gateway-first path available".into()
+            } else {
+                "OpenClaw CLI not found on PATH".into()
+            },
+        },
+    ]
+}
+
+pub fn doctor_report() -> Vec<String> {
+    let tools = detect_tools();
+    let detected = tools.iter().filter(|tool| tool.detected).count();
+    let mut checks = vec![
+        "No database configured — expected for local-first mode".to_string(),
+        "Companion access disabled by default until config changes".to_string(),
+        "Sandbox manifest mode only — no tool config files are modified automatically".to_string(),
+        format!("Detected {detected}/3 monitored CLIs on current PATH"),
+        format!("Installer sandbox path: {}", integration_root().display()),
+    ];
+    checks.extend(tools.into_iter().map(|tool| {
+        if tool.detected {
+            format!("{}: detected ({})", tool.tool, tool.mode)
+        } else {
+            format!("{}: missing from PATH", tool.tool)
+        }
+    }));
+    checks
+}
+
+pub fn install_plan(tool: &str) -> InstallPlan {
+    let root = integration_root().join(tool);
+    InstallPlan {
+        tool: tool.to_string(),
+        dry_run: true,
+        actions: vec![
+            InstallAction {
+                id: format!("{}-mkdir", tool),
+                kind: "mkdir".into(),
+                path: root.display().to_string(),
+                description: format!("Create local sandbox directory for {tool}"),
+            },
+            InstallAction {
+                id: format!("{}-manifest", tool),
+                kind: "write-file".into(),
+                path: root.join("manifest.json").display().to_string(),
+                description: format!(
+                    "Write a local read-only sandbox manifest for {tool} (no live tool config changes)"
+                ),
+            },
+        ],
+    }
+}
+
+pub fn apply_install(tool: &str) -> InstallResult {
+    let root = integration_root().join(tool);
+    let _ = fs::create_dir_all(&root);
+    let manifest_path = root.join("manifest.json");
+    let payload = serde_json::json!({
+        "tool": tool,
+        "mode": tool_mode(tool),
+        "installedBy": "octomonitor",
+        "readOnly": true
+    });
+    let _ = fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&payload).unwrap(),
+    );
+    InstallResult {
+        tool: tool.to_string(),
+        applied: true,
+        paths: vec![
+            root.display().to_string(),
+            manifest_path.display().to_string(),
+        ],
+        message: format!(
+            "Wrote local sandbox manifest for {tool}; live tool config was not changed"
+        ),
+    }
+}
+
+pub fn rollback_install(tool: &str) -> InstallResult {
+    let root = integration_root().join(tool);
+    let manifest_path = root.join("manifest.json");
+    let existed = manifest_path.exists();
+    let _ = fs::remove_file(&manifest_path);
+    let _ = fs::remove_dir_all(&root);
+    InstallResult {
+        tool: tool.to_string(),
+        applied: existed,
+        paths: vec![root.display().to_string()],
+        message: if existed {
+            format!("Removed local sandbox manifest for {tool}")
+        } else {
+            format!("Nothing to remove for {tool} — no sandbox manifest found")
+        },
+    }
+}
+
+/// Verify installed manifests are valid
+pub fn verify_install(tool: &str) -> InstallResult {
+    let root = integration_root().join(tool);
+    let manifest_path = root.join("manifest.json");
+    if !manifest_path.exists() {
+        return InstallResult {
+            tool: tool.to_string(),
+            applied: false,
+            paths: vec![],
+            message: format!("No installation found for {tool}"),
+        };
+    }
+    match fs::read_to_string(&manifest_path) {
+        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(val) => {
+                let matches_tool = val.get("tool").and_then(|v| v.as_str()) == Some(tool);
+                let read_only = val
+                    .get("readOnly")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                InstallResult {
+                    tool: tool.to_string(),
+                    applied: matches_tool && read_only,
+                    paths: vec![manifest_path.display().to_string()],
+                    message: if matches_tool && read_only {
+                        format!("Installation for {tool} verified: manifest valid and read-only")
+                    } else {
+                        format!(
+                            "Installation for {tool}: manifest exists but integrity check failed"
+                        )
+                    },
+                }
+            }
+            Err(e) => InstallResult {
+                tool: tool.to_string(),
+                applied: false,
+                paths: vec![manifest_path.display().to_string()],
+                message: format!("Manifest for {tool} is not valid JSON: {e}"),
+            },
+        },
+        Err(e) => InstallResult {
+            tool: tool.to_string(),
+            applied: false,
+            paths: vec![manifest_path.display().to_string()],
+            message: format!("Cannot read manifest for {tool}: {e}"),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_tools_returns_three() {
+        let tools = detect_tools();
+        assert_eq!(tools.len(), 3);
+    }
+
+    #[test]
+    fn doctor_report_is_nonempty() {
+        let checks = doctor_report();
+        assert!(!checks.is_empty());
+    }
+
+    #[test]
+    fn install_plan_has_actions() {
+        let plan = install_plan("claude");
+        assert_eq!(plan.tool, "claude");
+        assert!(plan.dry_run);
+        assert!(!plan.actions.is_empty());
+    }
+
+    #[test]
+    fn install_and_rollback_cycle() {
+        let result = apply_install("test-tool");
+        assert!(result.applied);
+        let verify = verify_install("test-tool");
+        assert!(verify.applied);
+        let rollback = rollback_install("test-tool");
+        assert!(rollback.applied);
+        let verify_after = verify_install("test-tool");
+        assert!(!verify_after.applied);
+    }
+}

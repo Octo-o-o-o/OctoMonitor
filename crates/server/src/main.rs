@@ -1,0 +1,184 @@
+mod commits;
+mod config;
+mod handlers;
+mod network;
+mod pricing;
+mod probe;
+mod remote_access;
+mod state;
+mod static_files;
+
+use std::net::{IpAddr, SocketAddr};
+
+use axum::{
+    http::{header, HeaderValue, Method},
+    routing::{get, post},
+    Router,
+};
+use tower_http::cors::CorsLayer;
+
+use config::load_config;
+use handlers::{
+    bootstrap, config as config_handler, ingest, inspect, installer, pairing, remote, stream,
+};
+use pricing::PricingStore;
+use probe::{build_bootstrap, spawn_probe_refresh};
+use remote_access::spawn_remote_server;
+use state::AppState;
+
+const SERVER_PORT: u16 = 46321;
+
+fn local_allowed_origins() -> Vec<HeaderValue> {
+    [
+        "http://127.0.0.1:4173",
+        "http://localhost:4173",
+        "http://127.0.0.1:46321",
+        "http://localhost:46321",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost",
+    ]
+    .into_iter()
+    .map(HeaderValue::from_static)
+    .collect()
+}
+
+fn build_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(local_allowed_origins())
+        .allow_methods([Method::GET, Method::POST, Method::PATCH])
+        .allow_headers([header::CONTENT_TYPE, header::ACCEPT])
+}
+
+fn parse_bind_ip(raw: Option<&str>) -> anyhow::Result<IpAddr> {
+    raw.unwrap_or("127.0.0.1")
+        .parse::<IpAddr>()
+        .map_err(|e| anyhow::anyhow!("Invalid OCTOMONITOR_BIND_ADDR: {e}"))
+}
+
+fn resolve_bind_addr() -> anyhow::Result<SocketAddr> {
+    let bind_ip = parse_bind_ip(std::env::var("OCTOMONITOR_BIND_ADDR").ok().as_deref())?;
+    Ok(SocketAddr::from((bind_ip, SERVER_PORT)))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt().with_env_filter("info").init();
+
+    // Initialise LiteLLM pricing (loads from disk cache, fetches in background)
+    let pricing = PricingStore::new();
+    pricing.spawn_refresh();
+
+    let mut initial = build_bootstrap(&pricing);
+    if let Some(saved) = load_config() {
+        if let Some(v) = saved.companion_enabled {
+            initial.config.companion_enabled = v;
+        }
+    }
+    let state = AppState::new(initial, pricing);
+
+    spawn_probe_refresh(state.clone());
+    spawn_remote_server(state.clone());
+
+    let app = Router::new()
+        .route("/api/bootstrap", get(bootstrap::get_bootstrap))
+        .route("/api/health", get(bootstrap::health))
+        .route("/api/runs/{run_id}/inspect", get(inspect::get_run_inspect))
+        .route(
+            "/api/config",
+            get(config_handler::get_config).patch(config_handler::patch_config),
+        )
+        .route("/api/installer/detect", get(installer::installer_detect))
+        .route("/api/installer/doctor", get(installer::installer_doctor))
+        .route(
+            "/api/installer/install-plan",
+            post(installer::installer_install_plan),
+        )
+        .route("/api/installer/install", post(installer::installer_install))
+        .route(
+            "/api/installer/rollback",
+            post(installer::installer_rollback),
+        )
+        .route("/api/pair/request", post(pairing::pair_request))
+        .route("/api/pair/approve/{token}", post(pairing::pair_approve))
+        .route("/api/pair/revoke/{token}", post(pairing::pair_revoke))
+        .route(
+            "/api/remote/access",
+            get(remote::get_remote_access).patch(remote::patch_remote_access),
+        )
+        .route("/api/remote/devices", get(remote::list_remote_devices))
+        .route("/api/remote/pairings", post(remote::create_remote_pairing))
+        .route(
+            "/api/remote/devices/{device_id}",
+            axum::routing::delete(remote::revoke_remote_device),
+        )
+        .route(
+            "/api/ingest/claude/statusline",
+            post(ingest::ingest_claude_statusline),
+        )
+        .route("/api/ingest/claude/hook", post(ingest::ingest_claude_hook))
+        .route("/api/ingest/codex/hook", post(ingest::ingest_codex_hook))
+        .route("/api/stream", get(stream::stream))
+        .layer(build_cors_layer())
+        .with_state(state)
+        .fallback(static_files::static_handler);
+
+    let addr = resolve_bind_addr()?;
+    let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AddrInUse {
+            anyhow::anyhow!(
+                "Port {SERVER_PORT} is already in use — is another OctoMonitor instance running?\n\
+                 Stop the other instance or check with: lsof -i :{SERVER_PORT}"
+            )
+        } else {
+            anyhow::anyhow!("Failed to bind to {}: {}", addr, e)
+        }
+    })?;
+
+    let open_browser = std::env::var("OCTOMONITOR_NO_OPEN").is_err();
+    tracing::info!("OctoMonitor server listening on http://{}", addr);
+    if open_browser {
+        let _ = open::that(format!("http://{}", addr));
+    }
+
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_bind_addr_defaults_to_localhost() {
+        let addr = SocketAddr::from((
+            parse_bind_ip(None).expect("bind ip should parse"),
+            SERVER_PORT,
+        ));
+
+        assert_eq!(addr, SocketAddr::from(([127, 0, 0, 1], SERVER_PORT)));
+    }
+
+    #[test]
+    fn resolve_bind_addr_respects_env_override() {
+        let addr = SocketAddr::from((
+            parse_bind_ip(Some("0.0.0.0")).expect("bind ip should parse"),
+            SERVER_PORT,
+        ));
+
+        assert_eq!(addr, SocketAddr::from(([0, 0, 0, 0], SERVER_PORT)));
+    }
+
+    #[test]
+    fn local_allowed_origins_include_loopback_and_tauri() {
+        let origins = local_allowed_origins()
+            .into_iter()
+            .map(|value| value.to_str().expect("origin should be utf-8").to_string())
+            .collect::<Vec<_>>();
+
+        assert!(origins.contains(&"http://127.0.0.1:4173".to_string()));
+        assert!(origins.contains(&"http://localhost:4173".to_string()));
+        assert!(origins.contains(&"https://tauri.localhost".to_string()));
+        assert!(origins.contains(&"tauri://localhost".to_string()));
+    }
+}

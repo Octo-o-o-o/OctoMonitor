@@ -1,0 +1,454 @@
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::{
+    env, fs,
+    io::{BufRead, BufReader},
+    path::{Path, PathBuf},
+};
+
+pub use octomonitor_adapter_common::{
+    probe_file, resolve_home_dir, run_command_probe, AdapterDescriptor, CommandProbeResult,
+    FileProbeResult,
+};
+
+pub fn descriptor() -> AdapterDescriptor {
+    AdapterDescriptor {
+        tool: "codex",
+        preferred_mode: "app-server+hook",
+        fallback_mode: "local-state",
+        confidence: "live",
+    }
+}
+
+/// Extracted session data from a Codex JSONL session file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSession {
+    pub session_id: String,
+    pub thread_name: Option<String>,
+    pub cwd: Option<String>,
+    pub model: Option<String>,
+    pub cli_version: Option<String>,
+    pub transcript_path: String,
+    pub started_at: String,
+    pub last_activity_at: String,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+    /// 5-hour window used percentage (from rate_limits.primary)
+    pub five_hour_used_pct: Option<f64>,
+    /// 7-day/weekly window used percentage (from rate_limits.secondary)
+    pub seven_day_used_pct: Option<f64>,
+    pub five_hour_resets_at: Option<i64>,
+    pub seven_day_resets_at: Option<i64>,
+    pub plan_type: Option<String>,
+    pub first_question: Option<String>,
+    pub last_question: Option<String>,
+    pub message_count: u64,
+    /// Sum of (user_message → next_response) intervals in ms, excluding idle gaps.
+    pub active_elapsed_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSnapshot {
+    pub probed_at: String,
+    pub cli_available: bool,
+    pub cli_version: Option<String>,
+    pub config_dir: Option<String>,
+    pub config_exists: bool,
+    pub history_exists: bool,
+    pub recent_history_hint: Option<String>,
+    pub sessions: Vec<CodexSession>,
+    pub command_probes: Vec<CommandProbeResult>,
+    pub file_probes: Vec<FileProbeResult>,
+}
+
+/// Codex config directory: ~/.codex
+fn codex_config_dir() -> PathBuf {
+    env::var("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| resolve_home_dir(".codex"))
+}
+
+/// Load thread names from session_index.jsonl
+fn load_thread_index(config_dir: &Path) -> std::collections::HashMap<String, String> {
+    let mut index = std::collections::HashMap::new();
+    let index_path = config_dir.join("session_index.jsonl");
+    if let Ok(file) = fs::File::open(&index_path) {
+        let reader = BufReader::new(file);
+        for line in reader.lines().map_while(Result::ok) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let (Some(id), Some(name)) = (
+                    val.get("id").and_then(|v| v.as_str()),
+                    val.get("thread_name").and_then(|v| v.as_str()),
+                ) {
+                    // Truncate thread name to first 80 chars for display
+                    let name_short: String = name.chars().take(80).collect();
+                    index.insert(id.to_string(), name_short);
+                }
+            }
+        }
+    }
+    index
+}
+
+/// Scan all available Codex session files and extract session data
+fn scan_sessions(config_dir: &Path) -> Vec<CodexSession> {
+    let sessions_dir = config_dir.join("sessions");
+    if !sessions_dir.is_dir() {
+        return vec![];
+    }
+
+    let thread_index = load_thread_index(config_dir);
+    let mut sessions = Vec::new();
+
+    // Walk year/month/day directories
+    let years = match fs::read_dir(&sessions_dir) {
+        Ok(entries) => entries,
+        Err(_) => return vec![],
+    };
+
+    for year_entry in years.flatten() {
+        if !year_entry.path().is_dir() {
+            continue;
+        }
+        if let Ok(months) = fs::read_dir(year_entry.path()) {
+            for month_entry in months.flatten() {
+                if !month_entry.path().is_dir() {
+                    continue;
+                }
+                if let Ok(days) = fs::read_dir(month_entry.path()) {
+                    for day_entry in days.flatten() {
+                        if !day_entry.path().is_dir() {
+                            continue;
+                        }
+                        if let Ok(files) = fs::read_dir(day_entry.path()) {
+                            for file_entry in files.flatten() {
+                                let path = file_entry.path();
+                                if path.extension().is_none_or(|ext| ext != "jsonl") {
+                                    continue;
+                                }
+                                if let Some(session) = parse_codex_session(&path, &thread_index) {
+                                    sessions.push(session);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Also scan archived_sessions
+    let archived_dir = config_dir.join("archived_sessions");
+    if archived_dir.is_dir() {
+        scan_flat_sessions(&archived_dir, &thread_index, &mut sessions);
+    }
+
+    // Sort by last_activity_at descending
+    sessions.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    sessions
+}
+
+fn scan_flat_sessions(
+    dir: &Path,
+    thread_index: &std::collections::HashMap<String, String>,
+    sessions: &mut Vec<CodexSession>,
+) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // Recurse into subdirectories
+                scan_flat_sessions(&path, thread_index, sessions);
+                continue;
+            }
+            if path.extension().is_none_or(|ext| ext != "jsonl") {
+                continue;
+            }
+            if let Some(session) = parse_codex_session(&path, thread_index) {
+                sessions.push(session);
+            }
+        }
+    }
+}
+
+/// Parse a single Codex session JSONL file
+fn parse_codex_session(
+    path: &Path,
+    thread_index: &std::collections::HashMap<String, String>,
+) -> Option<CodexSession> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    let mut session_id: Option<String> = None;
+    let mut cwd: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut cli_version: Option<String> = None;
+    let mut started_at: Option<String> = None;
+    let mut last_timestamp: Option<String> = None;
+
+    // Token/rate data from last token_count event
+    let mut input_tokens: u64 = 0;
+    let mut cached_input_tokens: u64 = 0;
+    let mut output_tokens: u64 = 0;
+    let mut total_tokens: u64 = 0;
+    let mut five_hour_used_pct: Option<f64> = None;
+    let mut seven_day_used_pct: Option<f64> = None;
+    let mut five_hour_resets_at: Option<i64> = None;
+    let mut seven_day_resets_at: Option<i64> = None;
+    let mut plan_type: Option<String> = None;
+    let mut first_question: Option<String> = None;
+    let mut last_question: Option<String> = None;
+    let mut message_count: u64 = 0;
+    let mut active_elapsed_ms: i64 = 0;
+    let mut pending_user_ts: Option<chrono::DateTime<chrono::FixedOffset>> = None;
+
+    for line in reader.lines().map_while(Result::ok) {
+        let val: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let timestamp = val
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        if let Some(ref ts) = timestamp {
+            if started_at.is_none() {
+                started_at = Some(ts.clone());
+            }
+            last_timestamp = Some(ts.clone());
+        }
+
+        let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        match msg_type {
+            "session_meta" => {
+                if let Some(payload) = val.get("payload") {
+                    session_id = payload.get("id").and_then(|v| v.as_str()).map(String::from);
+                    cwd = payload
+                        .get("cwd")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    cli_version = payload
+                        .get("cli_version")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                }
+            }
+            "turn_context" => {
+                if let Some(payload) = val.get("payload") {
+                    let m = payload
+                        .get("model")
+                        .or_else(|| payload.pointer("/info/model"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    if m.is_some() {
+                        model = m;
+                    }
+                }
+            }
+            "event_msg" => {
+                if let Some(payload) = val.get("payload") {
+                    let event_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    if event_type == "token_count" {
+                        // token_count marks end of a turn — close active interval
+                        let line_dt = timestamp
+                            .as_deref()
+                            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
+                        if let (Some(user_dt), Some(asst_dt)) = (pending_user_ts.take(), line_dt) {
+                            active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
+                        }
+                        if let Some(info) = payload.get("info") {
+                            if let Some(usage) = info.get("total_token_usage") {
+                                input_tokens = usage
+                                    .get("input_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                cached_input_tokens = usage
+                                    .get("cached_input_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                output_tokens = usage
+                                    .get("output_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                total_tokens = usage
+                                    .get("total_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                            }
+                        }
+                        if let Some(rate_limits) = payload.get("rate_limits") {
+                            if let Some(primary) = rate_limits.get("primary") {
+                                five_hour_used_pct =
+                                    primary.get("used_percent").and_then(|v| v.as_f64());
+                                five_hour_resets_at =
+                                    primary.get("resets_at").and_then(|v| v.as_i64());
+                            }
+                            if let Some(secondary) = rate_limits.get("secondary") {
+                                seven_day_used_pct =
+                                    secondary.get("used_percent").and_then(|v| v.as_f64());
+                                seven_day_resets_at =
+                                    secondary.get("resets_at").and_then(|v| v.as_i64());
+                            }
+                            plan_type = rate_limits
+                                .get("plan_type")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                        }
+                    }
+                }
+            }
+            "turn_complete" | "assistant_message" | "assistant_msg" => {
+                // Close active interval on any response-like event
+                let line_dt = timestamp
+                    .as_deref()
+                    .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
+                if let (Some(user_dt), Some(asst_dt)) = (pending_user_ts.take(), line_dt) {
+                    active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
+                }
+            }
+            "user_message" | "user_msg" => {
+                // Record user timestamp for active interval
+                if let Some(dt) = timestamp
+                    .as_deref()
+                    .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                {
+                    // Close any prior unclosed interval (e.g. if no turn_complete was emitted)
+                    if let Some(prev_user_dt) = pending_user_ts.take() {
+                        active_elapsed_ms += (dt - prev_user_dt).num_milliseconds().max(0);
+                    }
+                    pending_user_ts = Some(dt);
+                }
+                message_count += 1;
+                if let Some(payload) = val.get("payload") {
+                    let text = payload
+                        .get("content")
+                        .or_else(|| payload.get("text"))
+                        .and_then(|v| {
+                            if let Some(s) = v.as_str() {
+                                Some(s.to_string())
+                            } else if let Some(arr) = v.as_array() {
+                                arr.iter().find_map(|block| {
+                                    block.get("text").and_then(|t| t.as_str()).map(String::from)
+                                })
+                            } else {
+                                None
+                            }
+                        });
+                    if let Some(t) = text {
+                        let truncated: String = t.chars().take(200).collect();
+                        if first_question.is_none() {
+                            first_question = Some(truncated.clone());
+                        }
+                        last_question = Some(truncated);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // If there's a pending user message without a response (still active), count up to now
+    if let Some(user_dt) = pending_user_ts {
+        let now = chrono::Utc::now().fixed_offset();
+        active_elapsed_ms += (now - user_dt).num_milliseconds().max(0);
+    }
+
+    let sid = session_id?;
+    let thread_name = thread_index.get(&sid).cloned();
+
+    Some(CodexSession {
+        session_id: sid,
+        thread_name: thread_name.clone(),
+        cwd,
+        model,
+        cli_version,
+        transcript_path: path.display().to_string(),
+        started_at: started_at.unwrap_or_default(),
+        last_activity_at: last_timestamp.unwrap_or_default(),
+        input_tokens,
+        cached_input_tokens,
+        output_tokens,
+        total_tokens,
+        five_hour_used_pct,
+        seven_day_used_pct,
+        five_hour_resets_at,
+        seven_day_resets_at,
+        plan_type,
+        last_question: last_question
+            .or_else(|| first_question.clone())
+            .or_else(|| thread_name.clone()),
+        first_question: first_question.or_else(|| thread_name.clone()),
+        message_count,
+        active_elapsed_ms,
+    })
+}
+
+pub fn probe() -> CodexSnapshot {
+    let config_dir = codex_config_dir();
+
+    let version_probe = run_command_probe("codex", &["--version"]);
+    let cli_available = version_probe.success;
+    let cli_version = version_probe
+        .stdout_snippet
+        .as_ref()
+        .map(|s| s.trim().to_string());
+
+    let config_file = config_dir.join("config.toml");
+    let config_json = config_dir.join("config.json");
+    let history_file = config_dir.join("history.jsonl");
+    // Check both config.toml (newer) and config.json (older)
+    let config_probe = probe_file(&config_file);
+    let config_json_probe = probe_file(&config_json);
+    let history_probe = probe_file(&history_file);
+
+    let config_exists = config_probe.exists || config_json_probe.exists;
+
+    let recent_history_hint = if history_probe.exists {
+        history_probe
+            .modified_at
+            .as_ref()
+            .map(|t| format!("history last modified: {}", t))
+    } else {
+        None
+    };
+
+    // Scan real session files
+    let sessions = scan_sessions(&config_dir);
+
+    CodexSnapshot {
+        probed_at: Utc::now().to_rfc3339(),
+        cli_available,
+        cli_version,
+        config_dir: Some(config_dir.display().to_string()),
+        config_exists,
+        history_exists: history_probe.exists,
+        recent_history_hint,
+        sessions,
+        command_probes: vec![version_probe],
+        file_probes: vec![config_probe, config_json_probe, history_probe],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descriptor_returns_codex() {
+        let d = descriptor();
+        assert_eq!(d.tool, "codex");
+    }
+
+    #[test]
+    fn probe_runs_without_panic() {
+        let snap = probe();
+        assert!(!snap.probed_at.is_empty());
+        assert!(!snap.command_probes.is_empty());
+    }
+}

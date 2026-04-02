@@ -1,0 +1,30 @@
+[package]
+name = "octomonitor-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
+mime_guess = "2"
+open = "5"
+reqwest.workspace = true
+rust-embed = { version = "8", features = ["mime-guess"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+octomonitor-core = { path = "../core" }
+octomonitor-installer = { path = "../installer" }
+octomonitor-companion = { path = "../companion" }
+octomonitor-claude-adapter = { path = "../adapters/claude" }
+octomonitor-codex-adapter = { path = "../adapters/codex" }
+octomonitor-openclaw-adapter = { path = "../adapters/openclaw" }
+
+[[bin]]
+name = "octomonitor-server"
+path = "src/main.rs"
