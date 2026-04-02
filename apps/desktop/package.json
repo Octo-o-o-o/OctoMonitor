@@ -1,0 +1,17 @@
+{
+  "name": "@octomonitor/desktop",
+  "private": true,
+  "version": "0.1.2",
+  "scripts": {
+    "build:web": "pnpm --dir ../.. --filter @octomonitor/web build",
+    "build:server": "cargo build --release -p octomonitor-server",
+    "prepare:bundle-resources": "mkdir -p src-tauri/bundled && cp ../../target/release/octomonitor-server src-tauri/bundled/octomonitor-server && chmod +x src-tauri/bundled/octomonitor-server",
+    "build": "pnpm run build:web && pnpm run build:server && cargo build --release --manifest-path src-tauri/Cargo.toml",
+    "tauri:build": "pnpm run build:web && pnpm run build:server && pnpm run prepare:bundle-resources && tauri build --config src-tauri/tauri.conf.json --no-sign",
+    "tauri:build:signed": "bash ../../scripts/build-macos-signed.sh",
+    "tauri:build:notarized": "bash ../../scripts/build-macos-notarized.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
