@@ -26,7 +26,7 @@ OctoMonitor 用一个统一仪表盘实时查看你的 AI 编码会话状态，�
 如果你是最终使用者，不想从源码启动，可以直接使用分发包：
 
 - **macOS 桌面版**：从 [GitHub Releases](https://github.com/Octo-o-o-o/OctoMonitor/releases) 下载已公证的 `.dmg`
-- **Homebrew 服务 / 本地服务端**：`brew tap Octo-o-o-o/octomonitor https://github.com/Octo-o-o-o/homebrew-octomonitor && brew install octomonitor`
+- **Homebrew 服务 / 本地服务端**：`brew tap Octo-o-o-o/octomonitor https://github.com/Octo-o-o-o/OctoMonitor && brew install octomonitor`
 - **npm 包**：`npm install -g octomonitor` 或 `npx octomonitor`
 
 Homebrew 和 npm 分发的是本地 `octomonitor-server` 二进制；桌面 `.dmg` 会单独通过 GitHub Releases 分发。

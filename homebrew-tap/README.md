@@ -1,11 +1,11 @@
 # homebrew-octomonitor
 
-Homebrew tap for [OctoMonitor](https://github.com/Octo-o-o-o/OctoMonitor).
+Homebrew tap files for [OctoMonitor](https://github.com/Octo-o-o-o/OctoMonitor).
 
 ## Install
 
 ```bash
-brew tap Octo-o-o-o/octomonitor https://github.com/Octo-o-o-o/homebrew-octomonitor
+brew tap Octo-o-o-o/octomonitor https://github.com/Octo-o-o-o/OctoMonitor
 brew install octomonitor
 ```
 

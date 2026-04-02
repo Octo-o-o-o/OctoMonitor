@@ -26,7 +26,7 @@ OctoMonitor gives you a single dashboard to watch all your AI coding sessions in
 For end users who want a packaged build instead of running from source:
 
 - **macOS desktop app** — download the notarized `.dmg` from [GitHub Releases](https://github.com/Octo-o-o-o/OctoMonitor/releases)
-- **Homebrew service / local server** — `brew tap Octo-o-o-o/octomonitor https://github.com/Octo-o-o-o/homebrew-octomonitor && brew install octomonitor`
+- **Homebrew service / local server** — `brew tap Octo-o-o-o/octomonitor https://github.com/Octo-o-o-o/OctoMonitor && brew install octomonitor`
 - **npm package** — `npm install -g octomonitor` or `npx octomonitor`
 
 The Homebrew and npm packages install the local `octomonitor-server` binary. The desktop `.dmg` is distributed separately through GitHub Releases.
