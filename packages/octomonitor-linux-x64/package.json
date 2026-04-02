@@ -1,0 +1,14 @@
+{
+  "name": "octomonitor-linux-x64",
+  "version": "0.1.2",
+  "description": "OctoMonitor binary for Linux x64",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin/octomonitor-server"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Octo-o-o-o/OctoMonitor"
+  },
+  "homepage": "https://github.com/Octo-o-o-o/OctoMonitor"
+}

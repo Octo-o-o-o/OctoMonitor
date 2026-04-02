@@ -1,0 +1,30 @@
+{
+  "name": "octomonitor",
+  "version": "0.1.2",
+  "description": "Local-first unified monitor for Claude Code, Codex & OpenClaw",
+  "license": "MIT",
+  "bin": {
+    "octomonitor": "bin/octomonitor.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "optionalDependencies": {
+    "octomonitor-darwin-arm64": "0.1.2",
+    "octomonitor-darwin-x64": "0.1.2",
+    "octomonitor-linux-x64": "0.1.2"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "openclaw",
+    "monitor",
+    "vibe-coding",
+    "ai-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Octo-o-o-o/OctoMonitor"
+  },
+  "homepage": "https://github.com/Octo-o-o-o/OctoMonitor"
+}
