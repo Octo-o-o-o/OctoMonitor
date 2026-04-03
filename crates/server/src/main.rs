@@ -2,6 +2,7 @@ mod commits;
 mod config;
 mod handlers;
 mod network;
+mod platform;
 mod pricing;
 mod probe;
 mod remote_access;
@@ -142,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
         if e.kind() == std::io::ErrorKind::AddrInUse {
             anyhow::anyhow!(
                 "Port {SERVER_PORT} is already in use — is another OctoMonitor instance running?\n\
-                 Stop the other instance or check with: lsof -i :{SERVER_PORT}"
+                 Stop the other instance or inspect port {SERVER_PORT} with your OS networking tools."
             )
         } else {
             anyhow::anyhow!("Failed to bind to {}: {}", addr, e)

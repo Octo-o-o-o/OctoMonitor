@@ -12,7 +12,8 @@
   "optionalDependencies": {
     "octomonitor-darwin-arm64": "0.1.4",
     "octomonitor-darwin-x64": "0.1.4",
-    "octomonitor-linux-x64": "0.1.4"
+    "octomonitor-linux-x64": "0.1.4",
+    "octomonitor-win32-x64": "0.1.4"
   },
   "keywords": [
     "claude-code",

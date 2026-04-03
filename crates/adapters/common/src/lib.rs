@@ -1,6 +1,12 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path, process::Command};
+use std::{
+    env,
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 // --- Shared probe types ---
 
@@ -92,8 +98,25 @@ pub fn mask_value(value: &str, min_visible: usize) -> String {
     }
 }
 
-/// Resolve a home-relative directory, falling back to $HOME or "."
-pub fn resolve_home_dir(relative: &str) -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home).join(relative)
+/// Resolve a home-relative directory, falling back to HOME / USERPROFILE or "."
+pub fn resolve_home_dir(relative: &str) -> PathBuf {
+    home_dir()
+        .map(|home| home.join(relative))
+        .unwrap_or_else(|| PathBuf::from(".").join(relative))
+}
+
+fn home_drive_path() -> Option<OsString> {
+    let (Some(drive), Some(path)) = (env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH")) else {
+        return None;
+    };
+    let mut combined = drive;
+    combined.push(path);
+    Some(combined)
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .or_else(home_drive_path)
+        .map(PathBuf::from)
 }

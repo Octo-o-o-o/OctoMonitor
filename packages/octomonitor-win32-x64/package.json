@@ -1,0 +1,14 @@
+{
+  "name": "octomonitor-win32-x64",
+  "version": "0.1.4",
+  "description": "OctoMonitor binary for Windows x64",
+  "license": "MIT",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/octomonitor-server.exe"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Octo-o-o-o/OctoMonitor"
+  },
+  "homepage": "https://github.com/Octo-o-o-o/OctoMonitor"
+}

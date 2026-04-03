@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,12 +43,61 @@ pub struct InstallResult {
 }
 
 fn command_exists(name: &str) -> bool {
-    Command::new("sh")
-        .arg("-lc")
-        .arg(format!("command -v {} >/dev/null 2>&1", name))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    let candidate = Path::new(name);
+    if candidate.components().count() > 1 {
+        return is_executable(candidate);
+    }
+
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+
+    for dir in env::split_paths(&paths) {
+        let direct = dir.join(name);
+        if is_executable(&direct) {
+            return true;
+        }
+
+        #[cfg(windows)]
+        if candidate.extension().is_none() {
+            for ext in windows_path_exts() {
+                if is_executable(&dir.join(format!("{name}{ext}"))) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+#[cfg(windows)]
+fn windows_path_exts() -> Vec<String> {
+    env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+        .split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn integration_root() -> PathBuf {

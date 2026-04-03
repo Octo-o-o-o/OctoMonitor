@@ -99,9 +99,8 @@ fn decode_project_folder(folder_name: &str) -> String {
 
 /// Extract short project name from a workspace path
 fn project_name_from_path(path: &str) -> String {
-    path.split('/')
-        .filter(|s| !s.is_empty())
-        .next_back()
+    path.rsplit(['/', '\\'])
+        .find(|segment| !segment.is_empty())
         .unwrap_or("unknown")
         .to_string()
 }

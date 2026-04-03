@@ -12,6 +12,7 @@ use axum::{
 use octomonitor_core::{RunRecord, ToolKind};
 use serde::Serialize;
 
+use crate::platform::{expand_home_path, home_relative_path};
 use crate::state::AppState;
 
 const MAX_ENTRY_CHARS: usize = 1200;
@@ -88,20 +89,10 @@ fn resolve_transcript_path(run: &RunRecord) -> Option<PathBuf> {
         })
 }
 
-fn expand_home_path(raw: &str) -> PathBuf {
-    if let Some(rest) = raw.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
-    }
-    PathBuf::from(raw)
-}
-
 fn find_codex_transcript_path(thread_id: &str) -> Option<PathBuf> {
     let config_dir = std::env::var("CODEX_HOME")
         .map(PathBuf::from)
-        .or_else(|_| std::env::var("HOME").map(|home| PathBuf::from(home).join(".codex")))
-        .ok()?;
+        .unwrap_or_else(|_| home_relative_path(".codex"));
 
     find_file_containing_id(&config_dir.join("sessions"), thread_id)
         .or_else(|| find_file_containing_id(&config_dir.join("archived_sessions"), thread_id))

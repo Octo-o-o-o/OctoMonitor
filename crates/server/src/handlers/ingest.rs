@@ -5,6 +5,7 @@ use octomonitor_core::{
 };
 use serde::Deserialize;
 
+use crate::platform::last_path_component;
 use crate::probe::{elapsed_from_timestamps, rebuild_derived, shorten_path};
 use crate::state::AppState;
 
@@ -142,7 +143,7 @@ pub async fn ingest_claude_hook(
         project_name: input
             .cwd
             .as_ref()
-            .and_then(|cwd| cwd.split('/').next_back())
+            .and_then(|cwd| last_path_component(cwd))
             .unwrap_or("Claude Session")
             .into(),
         workspace_path: input.cwd.clone().unwrap_or_else(|| "~/.claude".into()),
@@ -226,7 +227,7 @@ pub async fn ingest_codex_hook(
         source_mode: "codex_hook".into(),
         project_name: resolved_cwd
             .as_deref()
-            .and_then(|cwd| cwd.split('/').next_back())
+            .and_then(last_path_component)
             .unwrap_or("Codex Thread")
             .into(),
         workspace_path: workspace_path.clone(),

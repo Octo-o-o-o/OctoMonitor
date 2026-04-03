@@ -13,6 +13,9 @@ jobs:
   npm-binaries:
     name: NPM binary package (${{ matrix.artifact_name }})
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     strategy:
@@ -23,14 +26,22 @@ jobs:
             target: aarch64-apple-darwin
             package_dir: packages/octomonitor-darwin-arm64
             artifact_name: octomonitor-darwin-arm64
+            bin_name: octomonitor-server
           - runner: macos-15-intel
             target: x86_64-apple-darwin
             package_dir: packages/octomonitor-darwin-x64
             artifact_name: octomonitor-darwin-x64
+            bin_name: octomonitor-server
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             package_dir: packages/octomonitor-linux-x64
             artifact_name: octomonitor-linux-x64
+            bin_name: octomonitor-server
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            package_dir: packages/octomonitor-win32-x64
+            artifact_name: octomonitor-win32-x64
+            bin_name: octomonitor-server.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -61,8 +72,10 @@ jobs:
       - name: Stage binary package
         run: |
           mkdir -p ${{ matrix.package_dir }}/bin
-          cp target/${{ matrix.target }}/release/octomonitor-server ${{ matrix.package_dir }}/bin/octomonitor-server
-          chmod +x ${{ matrix.package_dir }}/bin/octomonitor-server
+          cp target/${{ matrix.target }}/release/${{ matrix.bin_name }} ${{ matrix.package_dir }}/bin/${{ matrix.bin_name }}
+          if [[ "${{ matrix.bin_name }}" != *.exe ]]; then
+            chmod +x ${{ matrix.package_dir }}/bin/${{ matrix.bin_name }}
+          fi
 
       - name: Pack binary package
         run: |

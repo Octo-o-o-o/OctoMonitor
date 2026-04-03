@@ -21,6 +21,8 @@ use std::sync::{Arc, RwLock};
 use octomonitor_core::{RunRecord, ToolKind};
 use serde::{Deserialize, Serialize};
 
+use crate::platform::home_relative_path;
+
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const LITELLM_PRICING_URL: &str =
@@ -404,8 +406,7 @@ async fn fetch_litellm_pricing() -> anyhow::Result<HashMap<String, ModelPricing>
 // ── Disk cache ─────────────────────────────────────────────────────────────────
 
 fn cache_path() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    let dir = PathBuf::from(home).join(".octomonitor");
+    let dir = home_relative_path(".octomonitor");
     if !dir.exists() {
         let _ = std::fs::create_dir_all(&dir);
     }

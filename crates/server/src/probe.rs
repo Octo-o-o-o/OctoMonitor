@@ -12,6 +12,7 @@ use octomonitor_core::{
 use octomonitor_openclaw_adapter as openclaw_adapter;
 
 use crate::commits::{build_commit_records, hydrate_run_vcs};
+use crate::platform::last_path_component;
 use crate::pricing::PricingStore;
 use crate::state::AppState;
 
@@ -574,7 +575,7 @@ fn build_run_from_codex_session(
 
     let project_name = resolved_cwd
         .as_deref()
-        .and_then(|cwd| cwd.split('/').next_back())
+        .and_then(last_path_component)
         .unwrap_or("Codex")
         .to_string();
 
@@ -1848,10 +1849,5 @@ pub fn resolve_worktree_cwd(cwd: &str) -> String {
 }
 
 pub fn shorten_path(path: &str) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    if !home.is_empty() && path.starts_with(&home) {
-        path.replacen(&home, "~", 1)
-    } else {
-        path.into()
-    }
+    crate::platform::shorten_path(path)
 }

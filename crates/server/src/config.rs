@@ -1,6 +1,8 @@
 use octomonitor_core::AppConfig;
 use serde::{Deserialize, Serialize};
 
+use crate::platform::home_relative_path;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigPatch {
@@ -10,10 +12,7 @@ pub struct ConfigPatch {
 }
 
 pub fn config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home)
-        .join(".octomonitor")
-        .join("config.json")
+    home_relative_path(".octomonitor").join("config.json")
 }
 
 pub fn load_config() -> Option<ConfigPatch> {
