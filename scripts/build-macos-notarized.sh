@@ -56,6 +56,7 @@ APP_PATH="$ROOT_DIR/target/release/bundle/macos/$PRODUCT_NAME.app"
 ZIP_PATH="$ROOT_DIR/target/release/bundle/macos/$PRODUCT_NAME-notarize.zip"
 DMG_PATH="$ROOT_DIR/target/release/bundle/dmg/${PRODUCT_NAME}_${VERSION}_${BUNDLE_ARCH}.dmg"
 DMG_STAGE_DIR="$(mktemp -d "$ROOT_DIR/target/release/bundle/dmg/${PRODUCT_NAME}.stage.XXXXXX")"
+APP_EXEC_PATH=""
 
 cleanup() {
   rm -rf "$DMG_STAGE_DIR"
@@ -151,8 +152,21 @@ codesign_with_retry "$DMG_PATH"
 submit_with_retry "$DMG_PATH"
 staple_with_retry "$DMG_PATH"
 
+for candidate in "$APP_PATH"/Contents/MacOS/*; do
+  if [[ -f "$candidate" ]]; then
+    APP_EXEC_PATH="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$APP_EXEC_PATH" ]]; then
+  echo "Could not find app executable inside $APP_PATH" >&2
+  exit 1
+fi
+
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-spctl -a -t exec -vv "$APP_PATH"
+spctl -a -t open --context context:primary-signature -vv "$APP_PATH"
+spctl -a -t exec -vv "$APP_EXEC_PATH"
 spctl -a -t open --context context:primary-signature -vv "$DMG_PATH"
 
 echo "Notarized artifacts:"
