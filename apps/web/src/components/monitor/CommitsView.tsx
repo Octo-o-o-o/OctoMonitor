@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useMonitorStore } from '../../store/monitorStore'
-import { useI18n } from '../../lib/i18n'
+import { useI18n, type I18nKey } from '../../lib/i18n'
 import { buildCommitDateRange } from '../../lib/dateRange'
 import { formatCost, formatDateTime, formatTokens } from '../../lib/format'
 import { createHistorySelection, fetchCommitHistory, type DataMode } from '../../lib/history'
@@ -11,11 +11,7 @@ import { DataModeSwitch } from './DataModeSwitch'
 import { SnapshotWindowSwitch } from './SnapshotWindowSwitch'
 import { CommitsSkeleton } from './Skeleton'
 
-const sourceLabels: Record<ToolKind, string> = {
-  claude: 'CLAUDE CODE',
-  codex: 'CODEX',
-  openClaw: 'OPENCLAW',
-}
+import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
 const historyPresets = ['7d', '30d', '90d', '180d'] as const
 
 type ProjectOption = {
@@ -31,14 +27,12 @@ function sourceClass(tool: ToolKind): string {
   return tool === 'openClaw' ? 'openclaw' : tool
 }
 
-function confidenceLabel(value: SourceConfidence) {
-  switch (value) {
-    case 'heuristic': return 'commits.confidence.heuristic'
-    case 'derived': return 'commits.confidence.derived'
-    case 'live': return 'commits.confidence.live'
-    case 'official': return 'commits.confidence.official'
-    case 'estimated': return 'commits.confidence.estimated'
-  }
+const confidenceLabelKeys: Record<SourceConfidence, I18nKey> = {
+  heuristic: 'commits.confidence.heuristic',
+  derived: 'commits.confidence.derived',
+  live: 'commits.confidence.live',
+  official: 'commits.confidence.official',
+  estimated: 'commits.confidence.estimated',
 }
 
 function sessionCountLabel(count: number, sessionLabel: string, sessionsLabel: string) {
@@ -373,7 +367,7 @@ export const CommitsView = memo(function CommitsView() {
                           {sessionCountLabel(sessionCount, t('commits.session'), t('commits.sessionsLabel'))}
                         </span>
                         <span className={`commit-confidence confidence-${commit.confidence}`}>
-                          {t(confidenceLabel(commit.confidence))}
+                          {t(confidenceLabelKeys[commit.confidence])}
                         </span>
                       </div>
                     </div>

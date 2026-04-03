@@ -1,3 +1,4 @@
+import { allTools } from './constants'
 import type { ToolKind } from './types'
 
 export type MonitorPeriod = '30m' | '1h' | '2h' | '4h' | '8h' | '24h'
@@ -7,6 +8,7 @@ export type ColumnLayout = 'fixed' | 'adaptive'
 export type AgentDisplayFormat = 'id' | 'name' | 'id:name'
 export type FontSize = 'xsmall' | 'small' | 'default' | 'large' | 'xlarge'
 export type FilterMode = 'off' | 'include' | 'exclude'
+export type DailySummaryMode = 'claude' | 'codex' | 'basic'
 
 export interface PanelEntry {
   tool: ToolKind
@@ -31,6 +33,9 @@ export interface FrontendSettings {
   agentDisplayFormat: AgentDisplayFormat
   fontSize: FontSize
   notificationsEnabled: boolean
+  dailySummaryEnabled: boolean
+  dailySummaryMode: DailySummaryMode
+  dailySummaryDayStart: number // 0-23, hour when a "day" begins for reporting
 }
 
 interface StoredFrontendSettings extends Partial<FrontendSettings> {
@@ -41,7 +46,6 @@ interface StoredFrontendSettings extends Partial<FrontendSettings> {
 
 const STORAGE_KEY = 'octomonitor-settings'
 const SETTINGS_VERSION = 3
-const allTools: ToolKind[] = ['claude', 'codex', 'openClaw']
 const allSnapshotWindows: SnapshotWindow[] = ['day', 'week', 'month', 'all']
 
 export const defaultPanelConfig: PanelEntry[] = [
@@ -67,14 +71,18 @@ export const defaultSettings: FrontendSettings = {
   agentDisplayFormat: 'id',
   fontSize: 'default',
   notificationsEnabled: false,
+  dailySummaryEnabled: true,
+  dailySummaryMode: 'basic',
+  dailySummaryDayStart: 0,
 }
 
 function cloneDefaultFilterRules(): FilterRules {
-  return {
-    claude: { ...defaultFilterRules.claude, patterns: [...defaultFilterRules.claude.patterns] },
-    codex: { ...defaultFilterRules.codex, patterns: [...defaultFilterRules.codex.patterns] },
-    openClaw: { ...defaultFilterRules.openClaw, patterns: [...defaultFilterRules.openClaw.patterns] },
+  const clone: Partial<FilterRules> = {}
+  for (const tool of allTools) {
+    const src = defaultFilterRules[tool]
+    clone[tool] = { mode: src.mode, patterns: [...src.patterns] }
   }
+  return clone as FilterRules
 }
 
 export function migratePanelConfig(panels: PanelEntry[] | undefined): PanelEntry[] {
@@ -144,6 +152,11 @@ export function loadFrontendSettings(): FrontendSettings {
       agentDisplayFormat: parsed.agentDisplayFormat ?? defaultSettings.agentDisplayFormat,
       fontSize: parsed.fontSize ?? defaultSettings.fontSize,
       notificationsEnabled: parsed.notificationsEnabled ?? defaultSettings.notificationsEnabled,
+      dailySummaryEnabled: parsed.dailySummaryEnabled ?? defaultSettings.dailySummaryEnabled,
+      dailySummaryMode: parsed.dailySummaryMode ?? defaultSettings.dailySummaryMode,
+      dailySummaryDayStart: typeof parsed.dailySummaryDayStart === 'number'
+        ? Math.max(0, Math.min(23, Math.round(parsed.dailySummaryDayStart)))
+        : defaultSettings.dailySummaryDayStart,
     }
   } catch {
     return { ...defaultSettings, panelConfig: migratePanelConfig(undefined), filterRules: cloneDefaultFilterRules() }

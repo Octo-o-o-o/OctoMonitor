@@ -8,8 +8,6 @@ use std::{
     process::Command,
 };
 
-// --- Shared probe types ---
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdapterDescriptor {
@@ -36,8 +34,6 @@ pub struct FileProbeResult {
     pub size_bytes: Option<u64>,
     pub modified_at: Option<String>,
 }
-
-// --- Shared probe functions ---
 
 pub fn run_command_probe(cmd: &str, args: &[&str]) -> CommandProbeResult {
     match Command::new(cmd).args(args).output() {
@@ -69,15 +65,10 @@ pub fn run_command_probe(cmd: &str, args: &[&str]) -> CommandProbeResult {
 }
 
 pub fn probe_file(path: &Path) -> FileProbeResult {
-    let exists = path.exists();
-    let meta = if exists {
-        fs::metadata(path).ok()
-    } else {
-        None
-    };
+    let meta = fs::metadata(path).ok();
     FileProbeResult {
         path: path.display().to_string(),
-        exists,
+        exists: meta.is_some(),
         size_bytes: meta.as_ref().map(|m| m.len()),
         modified_at: meta
             .and_then(|m| m.modified().ok())

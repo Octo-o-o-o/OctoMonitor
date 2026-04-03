@@ -17,9 +17,7 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 pub fn home_relative_path(relative: &str) -> PathBuf {
-    home_dir()
-        .map(|home| home.join(relative))
-        .unwrap_or_else(|| PathBuf::from(".").join(relative))
+    home_dir().unwrap_or_else(|| PathBuf::from(".")).join(relative)
 }
 
 pub fn expand_home_path(raw: &str) -> PathBuf {

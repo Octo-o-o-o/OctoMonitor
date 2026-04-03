@@ -162,7 +162,7 @@ function measureCommitMetric(
   let count = 0
   for (const commit of parsedCommits) {
     if (commit.committedAtMs < startMs) break
-    if (commit.committedAtMs >= startMs && commit.committedAtMs < endMs) {
+    if (commit.committedAtMs < endMs) {
       count += 1
     }
   }

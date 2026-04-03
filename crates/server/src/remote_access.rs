@@ -111,47 +111,50 @@ async fn stop_remote_listener(
 pub async fn build_remote_access_state(state: &AppState) -> RemoteAccessState {
     prune_expired_remote_state(state).await;
 
-    let config = state.bootstrap.read().await.config.clone();
-    let (devices, pending_pairings) = if config.companion_enabled {
-        let devices = state
-            .viewer_sessions
-            .read()
-            .await
-            .iter()
-            .map(|session| RemoteDevice {
-                id: session.id.clone(),
-                label: session.label.clone(),
-                paired_at: session.paired_at.clone(),
-                last_seen_at: session.last_seen_at.clone(),
-                expires_at: session.expires_at.clone(),
-            })
-            .collect::<Vec<_>>();
-        let pending_pairings = state
-            .pairings
-            .read()
-            .await
-            .iter()
-            .filter(|record| record.claimed_at.is_none() && !pairing_is_expired(record))
-            .map(|record| RemotePairingCode {
-                id: record.id.clone(),
-                code: record.code.clone(),
-                label: record.label.clone(),
-                expires_at: record.expires_at.clone(),
-            })
-            .collect::<Vec<_>>();
-        (devices, pending_pairings)
-    } else {
-        (Vec::new(), Vec::new())
-    };
+    let enabled = state.bootstrap.read().await.config.companion_enabled;
 
-    let addresses = if config.companion_enabled {
-        detect_advertised_addresses(REMOTE_VIEWER_PORT)
-    } else {
-        Vec::new()
-    };
-    let mode = if !config.companion_enabled {
-        RemoteAccessMode::Off
-    } else if addresses
+    if !enabled {
+        return RemoteAccessState {
+            enabled: false,
+            mode: RemoteAccessMode::Off,
+            listener_host: "0.0.0.0".into(),
+            listener_port: REMOTE_VIEWER_PORT,
+            addresses: Vec::new(),
+            devices: Vec::new(),
+            pending_pairings: Vec::new(),
+        };
+    }
+
+    let devices = state
+        .viewer_sessions
+        .read()
+        .await
+        .iter()
+        .map(|session| RemoteDevice {
+            id: session.id.clone(),
+            label: session.label.clone(),
+            paired_at: session.paired_at.clone(),
+            last_seen_at: session.last_seen_at.clone(),
+            expires_at: session.expires_at.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let pending_pairings = state
+        .pairings
+        .read()
+        .await
+        .iter()
+        .filter(|record| record.claimed_at.is_none() && !pairing_is_expired(record))
+        .map(|record| RemotePairingCode {
+            id: record.id.clone(),
+            code: record.code.clone(),
+            label: record.label.clone(),
+            expires_at: record.expires_at.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let addresses = detect_advertised_addresses(REMOTE_VIEWER_PORT);
+    let mode = if addresses
         .iter()
         .any(|address| matches!(address.kind.as_str(), "tailscale" | "private"))
     {
@@ -161,7 +164,7 @@ pub async fn build_remote_access_state(state: &AppState) -> RemoteAccessState {
     };
 
     RemoteAccessState {
-        enabled: config.companion_enabled,
+        enabled: true,
         mode,
         listener_host: "0.0.0.0".into(),
         listener_port: REMOTE_VIEWER_PORT,
@@ -337,12 +340,14 @@ async fn remote_stream_socket(mut socket: WebSocket, state: AppState, session_se
 }
 
 async fn ensure_remote_enabled(state: &AppState) -> Result<(), StatusCode> {
-    let enabled = state.bootstrap.read().await.config.companion_enabled;
-    if enabled {
-        Ok(())
-    } else {
-        Err(StatusCode::FORBIDDEN)
-    }
+    state
+        .bootstrap
+        .read()
+        .await
+        .config
+        .companion_enabled
+        .then_some(())
+        .ok_or(StatusCode::FORBIDDEN)
 }
 
 async fn authenticate_viewer(headers: &HeaderMap, state: &AppState) -> Option<String> {

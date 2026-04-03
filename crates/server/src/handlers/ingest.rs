@@ -9,6 +9,23 @@ use crate::platform::last_path_component;
 use crate::probe::{elapsed_from_timestamps, rebuild_derived, shorten_path};
 use crate::state::AppState;
 
+fn default_quota() -> octomonitor_core::QuotaValue {
+    octomonitor_core::QuotaValue {
+        five_hour_used_pct: None,
+        seven_day_used_pct: None,
+        reset_at: vec![],
+        confidence: SourceConfidence::Derived,
+    }
+}
+
+fn live_source() -> SourceInfo {
+    SourceInfo {
+        confidence: SourceConfidence::Live,
+        freshness: Freshness::Hot,
+        last_updated_at: Utc::now().to_rfc3339(),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeStatuslineIngest {
@@ -52,21 +69,19 @@ pub async fn ingest_claude_statusline(
     State(state): State<AppState>,
     Json(input): Json<ClaudeStatuslineIngest>,
 ) -> Json<serde_json::Value> {
+    let session_id = input.session_id;
+    let workspace_path = input.workspace_path.unwrap_or_else(|| "~/.claude".into());
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
-            input.session_id.clone().unwrap_or_else(|| "unknown".into())
+            session_id.as_deref().unwrap_or("unknown")
         ),
         tool: ToolKind::Claude,
         source_mode: "claude_statusline".into(),
         project_name: input
             .project_name
             .unwrap_or_else(|| "Claude Session".into()),
-        workspace_path: input
-            .workspace_path
-            .clone()
-            .unwrap_or_else(|| "~/.claude".into()),
-        workspace_short: shorten_path(input.workspace_path.as_deref().unwrap_or("~/.claude")),
+        workspace_short: shorten_path(&workspace_path),
         model: input.model,
         provider: input.provider,
         agent_name: Some("live-ingest".into()),
@@ -74,7 +89,7 @@ pub async fn ingest_claude_statusline(
         account_alias: Some("local-ingest".into()),
         auth_mode: Some("claude.ai".into()),
         auth_verified: true,
-        session_id: input.session_id.clone(),
+        session_id: session_id,
         thread_id: None,
         session_key: None,
         transcript_path: input.transcript_path,
@@ -105,21 +120,10 @@ pub async fn ingest_claude_statusline(
             usd: input.total_cost_usd,
             confidence: SourceConfidence::Live,
         },
-        quota: octomonitor_core::QuotaValue {
-            five_hour_used_pct: None,
-            seven_day_used_pct: None,
-            reset_at: vec![],
-            confidence: SourceConfidence::Derived,
-        },
-        source: SourceInfo {
-            confidence: SourceConfidence::Live,
-            freshness: Freshness::Hot,
-            last_updated_at: Utc::now().to_rfc3339(),
-        },
-        vcs: input
-            .workspace_path
-            .as_deref()
-            .and_then(crate::commits::discover_vcs_context),
+        quota: default_quota(),
+        source: live_source(),
+        vcs: crate::commits::discover_vcs_context(&workspace_path),
+        workspace_path,
         origin_label: None,
         origin_provider: None,
     };
@@ -133,21 +137,18 @@ pub async fn ingest_claude_hook(
 ) -> Json<serde_json::Value> {
     let event = input.event.unwrap_or_else(|| "notification".into());
     let pending = event.contains("permission");
+    let workspace_path = input.cwd.unwrap_or_else(|| "~/.claude".into());
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
-            input.session_id.clone().unwrap_or_else(|| "hook".into())
+            input.session_id.as_deref().unwrap_or("hook")
         ),
         tool: ToolKind::Claude,
         source_mode: "claude_hook".into(),
-        project_name: input
-            .cwd
-            .as_ref()
-            .and_then(|cwd| last_path_component(cwd))
+        project_name: last_path_component(&workspace_path)
             .unwrap_or("Claude Session")
             .into(),
-        workspace_path: input.cwd.clone().unwrap_or_else(|| "~/.claude".into()),
-        workspace_short: shorten_path(input.cwd.as_deref().unwrap_or("~/.claude")),
+        workspace_short: shorten_path(&workspace_path),
         model: input.model,
         provider: Some("claude".into()),
         agent_name: Some("hook".into()),
@@ -176,33 +177,15 @@ pub async fn ingest_claude_hook(
         last_question: None,
         error_message: None,
         message_count: 0,
-        tokens: TokenUsage {
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_write: 0,
-            total: 0,
-            context: 0,
-        },
+        tokens: TokenUsage::default(),
         cost: MoneyValue {
             usd: None,
             confidence: SourceConfidence::Derived,
         },
-        quota: octomonitor_core::QuotaValue {
-            five_hour_used_pct: None,
-            seven_day_used_pct: None,
-            reset_at: vec![],
-            confidence: SourceConfidence::Derived,
-        },
-        source: SourceInfo {
-            confidence: SourceConfidence::Live,
-            freshness: Freshness::Hot,
-            last_updated_at: Utc::now().to_rfc3339(),
-        },
-        vcs: input
-            .cwd
-            .as_deref()
-            .and_then(crate::commits::discover_vcs_context),
+        quota: default_quota(),
+        source: live_source(),
+        vcs: crate::commits::discover_vcs_context(&workspace_path),
+        workspace_path,
         origin_label: None,
         origin_provider: None,
     };
@@ -216,21 +199,21 @@ pub async fn ingest_codex_hook(
 ) -> Json<serde_json::Value> {
     let pending = input.waiting_on_approval.unwrap_or(false);
     let event = input.event.unwrap_or_else(|| "hook".into());
-    let resolved_cwd = input.cwd.as_deref().map(crate::probe::resolve_worktree_cwd);
-    let workspace_path = resolved_cwd.clone().unwrap_or_else(|| "~/.codex".into());
+    let workspace_path = input
+        .cwd
+        .as_deref()
+        .map(crate::probe::resolve_worktree_cwd)
+        .unwrap_or_else(|| "~/.codex".into());
     let run = RunRecord {
         id: format!(
             "ingest-codex-{}",
-            input.thread_id.clone().unwrap_or_else(|| "thread".into())
+            input.thread_id.as_deref().unwrap_or("thread")
         ),
         tool: ToolKind::Codex,
         source_mode: "codex_hook".into(),
-        project_name: resolved_cwd
-            .as_deref()
-            .and_then(last_path_component)
+        project_name: last_path_component(&workspace_path)
             .unwrap_or("Codex Thread")
             .into(),
-        workspace_path: workspace_path.clone(),
         workspace_short: shorten_path(&workspace_path),
         model: input.model,
         provider: Some("openai".into()),
@@ -261,32 +244,17 @@ pub async fn ingest_codex_hook(
         error_message: None,
         message_count: 0,
         tokens: TokenUsage {
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_write: 0,
             total: input.total_tokens.unwrap_or(0),
-            context: 0,
+            ..TokenUsage::default()
         },
         cost: MoneyValue {
             usd: None,
             confidence: SourceConfidence::Estimated,
         },
-        quota: octomonitor_core::QuotaValue {
-            five_hour_used_pct: None,
-            seven_day_used_pct: None,
-            reset_at: vec![],
-            confidence: SourceConfidence::Derived,
-        },
-        source: SourceInfo {
-            confidence: SourceConfidence::Live,
-            freshness: Freshness::Hot,
-            last_updated_at: Utc::now().to_rfc3339(),
-        },
-        vcs: input
-            .cwd
-            .as_deref()
-            .and_then(crate::commits::discover_vcs_context),
+        quota: default_quota(),
+        source: live_source(),
+        vcs: crate::commits::discover_vcs_context(&workspace_path),
+        workspace_path,
         origin_label: None,
         origin_provider: None,
     };
@@ -297,7 +265,6 @@ pub async fn ingest_codex_hook(
 async fn upsert_runtime_run(state: &AppState, mut run: RunRecord) {
     let mut payload = state.bootstrap.write().await;
     if let Some(existing) = payload.runs.iter_mut().find(|item| item.id == run.id) {
-        // Preserve the original start time across updates
         run.started_at = existing.started_at.clone();
         run.elapsed_ms = elapsed_from_timestamps(&run.started_at, &run.last_activity_at);
         *existing = run;
@@ -308,7 +275,5 @@ async fn upsert_runtime_run(state: &AppState, mut run: RunRecord) {
     payload.generated_at = Utc::now().to_rfc3339();
     drop(payload);
     state.signal_change();
-    // Wake the probe loop so it picks up fresh adapter data soon
-    // (e.g. updated quota after a new session starts).
     state.wake_probe();
 }

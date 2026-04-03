@@ -23,8 +23,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::platform::home_relative_path;
 
-// ── Constants ──────────────────────────────────────────────────────────────────
-
 const LITELLM_PRICING_URL: &str =
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 
@@ -37,14 +35,10 @@ const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 
 /// HTTP request timeout.
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-// ── Provider prefixes to try when model name lacks a provider ───────────────
-
 const PROVIDER_PREFIXES: &[&str] = &["anthropic/", "openai/", "azure/", "openrouter/openai/"];
 
 const CODEX_MODEL_ALIASES: &[(&str, &str)] =
     &[("gpt-5-codex", "gpt-5"), ("gpt-5.3-codex", "gpt-5.2-codex")];
-
-// ── Types ──────────────────────────────────────────────────────────────────────
 
 /// Per-model pricing entry from LiteLLM's JSON.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -92,8 +86,6 @@ struct CacheEnvelope {
     data: HashMap<String, ModelPricing>,
 }
 
-// ── PricingStore ───────────────────────────────────────────────────────────────
-
 /// Thread-safe pricing store.  Uses `std::sync::RwLock` so it can be read from
 /// both async handlers and blocking probe threads without requiring `.await`.
 #[derive(Clone)]
@@ -102,9 +94,6 @@ pub struct PricingStore {
 }
 
 impl PricingStore {
-    // ── Construction ────────────────────────────────────────────────────────
-
-    /// Create a new PricingStore, loading from disk cache if available.
     pub fn new() -> Self {
         let data = match load_cache() {
             Some((data, fresh)) => {
@@ -129,7 +118,6 @@ impl PricingStore {
         }
     }
 
-    /// Spawn a background tokio task that keeps the pricing data fresh.
     pub fn spawn_refresh(&self) {
         let store = self.clone();
         tokio::spawn(async move {
@@ -149,15 +137,6 @@ impl PricingStore {
         });
     }
 
-    // ── Cost calculation (sync — callable from any thread) ──────────────────
-
-    /// Calculate USD cost for a run.  Returns `None` when cost is zero.
-    ///
-    /// Uses base (non-tiered) rates only.  The token counts passed here are
-    /// session-level aggregates (summed across many API requests).  Tiered
-    /// pricing (200K threshold) is designed for per-request context windows,
-    /// not for session totals.  Applying it to aggregates would massively
-    /// inflate costs — matching ccusage's per-entry calculation behaviour.
     pub fn estimate_cost(
         &self,
         tool: &ToolKind,
@@ -182,7 +161,6 @@ impl PricingStore {
         Some(cost)
     }
 
-    /// Calculate USD cost for a run, preferring adapter-provided USD when present.
     pub fn estimate_run_cost(&self, run: &RunRecord) -> Option<f64> {
         if run.cost.usd.is_some() {
             return run.cost.usd;
@@ -198,13 +176,6 @@ impl PricingStore {
         )
     }
 
-    // ── Model resolution ────────────────────────────────────────────────────
-
-    /// Find pricing for a model name.  Tries, in order:
-    ///   1. Exact match in LiteLLM data
-    ///   2. Provider-prefixed matches (anthropic/, openai/, azure/, etc.)
-    ///   3. Substring match (for partial model names from adapters)
-    ///   4. Compiled-in fallback defaults
     fn resolve_rates(&self, tool: &ToolKind, model: &str) -> PricingResolution {
         if model.trim().is_empty() || is_openrouter_free_model(model) {
             return PricingResolution::Zero;
@@ -213,16 +184,6 @@ impl PricingStore {
         let models = self.models.read().unwrap_or_else(|p| p.into_inner());
         let store_empty = models.is_empty();
 
-        let zero_rates = || {
-            PricingResolution::Rates(ResolvedRates {
-                input: 0.0,
-                output: 0.0,
-                cache_read: 0.0,
-                cache_write: 0.0,
-            })
-        };
-
-        // 1. Exact/provider-prefixed/substring match
         let direct = Self::lookup_model_pricing(&models, model);
         if let Some(p) = direct {
             if has_non_zero_token_pricing(p) {
@@ -230,7 +191,6 @@ impl PricingStore {
             }
         }
 
-        // 2. Codex-style aliases when direct pricing is missing or all-zero.
         if let Some(alias) = codex_model_alias(model) {
             if let Some(p) = Self::lookup_model_pricing(&models, alias) {
                 if has_non_zero_token_pricing(p) {
@@ -245,12 +205,10 @@ impl PricingStore {
 
         drop(models);
 
-        // Match ccusage's behavior: once pricing data is available, an
-        // unknown model should not be heuristically charged.
         if store_empty {
             PricingResolution::Rates(Self::fallback_rates(model))
         } else {
-            zero_rates()
+            PricingResolution::Zero
         }
     }
 
@@ -293,8 +251,6 @@ impl PricingStore {
         ResolvedRates {
             input: p.input_cost_per_token.unwrap_or(0.0),
             output: p.output_cost_per_token.unwrap_or(0.0),
-            // Match ccusage's Codex rules: cached input falls back to input
-            // pricing when LiteLLM omits an explicit cache-read rate.
             cache_read: p
                 .cache_read_input_token_cost
                 .unwrap_or(codex_cache_fallback),
@@ -302,7 +258,6 @@ impl PricingStore {
         }
     }
 
-    /// Hard-coded fallback base rates (per-token) when LiteLLM data is unavailable.
     fn fallback_rates(model: &str) -> ResolvedRates {
         let (inp, out, cr, cw) = if model.contains("opus") {
             (15e-6, 75e-6, 1.5e-6, 18.75e-6)
@@ -325,8 +280,6 @@ impl PricingStore {
             cache_write: cw,
         }
     }
-
-    // ── Background fetch ────────────────────────────────────────────────────
 
     async fn fetch_and_update(&self) {
         match fetch_litellm_pricing().await {
@@ -372,20 +325,14 @@ fn billable_usage(tool: &ToolKind, input: u64, cache_read: u64) -> (u64, u64) {
     }
 }
 
-// ── HTTP fetch ─────────────────────────────────────────────────────────────────
-
 async fn fetch_litellm_pricing() -> anyhow::Result<HashMap<String, ModelPricing>> {
     let client = reqwest::Client::builder().timeout(FETCH_TIMEOUT).build()?;
-
-    tracing::debug!("Fetching LiteLLM pricing from {}", LITELLM_PRICING_URL);
 
     let resp = client.get(LITELLM_PRICING_URL).send().await?;
     if !resp.status().is_success() {
         anyhow::bail!("HTTP {}", resp.status());
     }
 
-    // LiteLLM JSON is a flat object: { "model-name": { ...fields }, ... }
-    // Some entries have non-object values (e.g. "sample_spec"), filter those.
     let raw: HashMap<String, serde_json::Value> = resp.json().await?;
     let mut models = HashMap::with_capacity(raw.len());
 
@@ -403,8 +350,6 @@ async fn fetch_litellm_pricing() -> anyhow::Result<HashMap<String, ModelPricing>
     Ok(models)
 }
 
-// ── Disk cache ─────────────────────────────────────────────────────────────────
-
 fn cache_path() -> Option<PathBuf> {
     let dir = home_relative_path(".octomonitor");
     if !dir.exists() {
@@ -414,19 +359,10 @@ fn cache_path() -> Option<PathBuf> {
 }
 
 fn is_cache_fresh() -> bool {
-    let Some(path) = cache_path() else {
-        return false;
-    };
-    match std::fs::metadata(&path) {
-        Ok(meta) => {
-            if let Ok(modified) = meta.modified() {
-                modified.elapsed().unwrap_or(CACHE_TTL) < CACHE_TTL
-            } else {
-                false
-            }
-        }
-        Err(_) => false,
-    }
+    cache_path()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .and_then(|meta| meta.modified().ok())
+        .is_some_and(|modified| modified.elapsed().unwrap_or(CACHE_TTL) < CACHE_TTL)
 }
 
 /// Load cache from disk.  Returns `(data, is_fresh)`.

@@ -14,10 +14,10 @@ import type { ToolKind, UsageHistoryPayload } from '../../lib/types'
 import { DateRangePicker } from './DateRangePicker'
 
 const sourceOrder: ToolKind[] = ['claude', 'codex', 'openClaw']
-const sourceLabels: Record<ToolKind, string> = {
-  claude: 'CLAUDE CODE',
-  codex: 'CODEX',
-  openClaw: 'OPENCLAW',
+import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
+
+function accentClass(tool: ToolKind): string {
+  return tool === 'openClaw' ? 'openclaw' : tool
 }
 const sourceTagLabels: Record<ToolKind, string> = {
   claude: 'Project',
@@ -26,13 +26,10 @@ const sourceTagLabels: Record<ToolKind, string> = {
 }
 const historyPresets = ['7d', '30d', '90d', '180d'] as const
 
-function getBarColor(tool: ToolKind): string {
-  switch (tool) {
-    case 'claude': return 'var(--warn)'
-    case 'codex': return 'var(--accent)'
-    case 'openClaw': return 'var(--openclaw-accent)'
-    default: return 'var(--accent)'
-  }
+const barColors: Record<ToolKind, string> = {
+  claude: 'var(--warn)',
+  codex: 'var(--accent)',
+  openClaw: 'var(--openclaw-accent)',
 }
 
 interface GroupedUsage {
@@ -258,7 +255,7 @@ export function UsageView() {
           {grouped.map((group) => {
             const maxTokens = Math.max(1, ...group.items.map((item) => item.tokens))
             return (
-              <div key={group.tool} className={`usage-source-card accent-${group.tool === 'openClaw' ? 'openclaw' : group.tool}`}>
+              <div key={group.tool} className={`usage-source-card accent-${accentClass(group.tool)}`}>
                 <div className="usage-source-header">
                   <span className="usage-source-name">{sourceLabels[group.tool]}</span>
                   <span className="usage-source-tag-type">{sourceTagLabels[group.tool]}</span>
@@ -282,7 +279,7 @@ export function UsageView() {
                           className="usage-item-fill"
                           style={{
                             width: `${(item.tokens / maxTokens) * 100}%`,
-                            background: getBarColor(group.tool),
+                            background: barColors[group.tool],
                           }}
                         />
                       </div>
@@ -313,7 +310,7 @@ export function UsageView() {
             threshold={36}
             getKey={(item) => `${item.tool}-${item.tag}`}
             renderItem={(item) => (
-              <div className={`usage-all-row accent-${item.tool === 'openClaw' ? 'openclaw' : item.tool}-left`}>
+              <div className={`usage-all-row accent-${accentClass(item.tool)}-left`}>
                 <div className="usage-all-info">
                   <span className="usage-all-tag">{item.tag}</span>
                   <span className="usage-all-source">{sourceLabels[item.tool]}</span>

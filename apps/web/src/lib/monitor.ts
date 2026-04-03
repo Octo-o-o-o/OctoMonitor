@@ -1,8 +1,7 @@
+import { allTools } from './constants'
+import { getGroupKey } from './format'
 import type { AgentDisplayFormat, FilterRules, MonitorPeriod, PanelEntry, ToolFilter } from './preferences'
 import type { RunRecord, ToolKind } from './types'
-import { getGroupKey } from './format'
-
-const allTools: ToolKind[] = ['claude', 'codex', 'openClaw']
 
 export interface MonitorRunCounts {
   active: number

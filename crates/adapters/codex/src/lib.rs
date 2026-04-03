@@ -65,14 +65,12 @@ pub struct CodexSnapshot {
     pub file_probes: Vec<FileProbeResult>,
 }
 
-/// Codex config directory: ~/.codex
 fn codex_config_dir() -> PathBuf {
     env::var("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| resolve_home_dir(".codex"))
 }
 
-/// Load thread names from session_index.jsonl
 fn load_thread_index(config_dir: &Path) -> std::collections::HashMap<String, String> {
     let mut index = std::collections::HashMap::new();
     let index_path = config_dir.join("session_index.jsonl");
@@ -94,7 +92,6 @@ fn load_thread_index(config_dir: &Path) -> std::collections::HashMap<String, Str
     index
 }
 
-/// Scan all available Codex session files and extract session data
 fn scan_sessions(config_dir: &Path) -> Vec<CodexSession> {
     let sessions_dir = config_dir.join("sessions");
     if !sessions_dir.is_dir() {
@@ -105,41 +102,7 @@ fn scan_sessions(config_dir: &Path) -> Vec<CodexSession> {
     let mut sessions = Vec::new();
 
     // Walk year/month/day directories
-    let years = match fs::read_dir(&sessions_dir) {
-        Ok(entries) => entries,
-        Err(_) => return vec![],
-    };
-
-    for year_entry in years.flatten() {
-        if !year_entry.path().is_dir() {
-            continue;
-        }
-        if let Ok(months) = fs::read_dir(year_entry.path()) {
-            for month_entry in months.flatten() {
-                if !month_entry.path().is_dir() {
-                    continue;
-                }
-                if let Ok(days) = fs::read_dir(month_entry.path()) {
-                    for day_entry in days.flatten() {
-                        if !day_entry.path().is_dir() {
-                            continue;
-                        }
-                        if let Ok(files) = fs::read_dir(day_entry.path()) {
-                            for file_entry in files.flatten() {
-                                let path = file_entry.path();
-                                if path.extension().is_none_or(|ext| ext != "jsonl") {
-                                    continue;
-                                }
-                                if let Some(session) = parse_codex_session(&path, &thread_index) {
-                                    sessions.push(session);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    scan_flat_sessions(&sessions_dir, &thread_index, &mut sessions);
 
     // Also scan archived_sessions
     let archived_dir = config_dir.join("archived_sessions");
@@ -175,7 +138,19 @@ fn scan_flat_sessions(
     }
 }
 
-/// Parse a single Codex session JSONL file
+fn extract_text_content(payload: &serde_json::Value) -> Option<String> {
+    let content = payload.get("content").or_else(|| payload.get("text"))?;
+    if let Some(s) = content.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(arr) = content.as_array() {
+        return arr
+            .iter()
+            .find_map(|block| block.get("text").and_then(|t| t.as_str()).map(String::from));
+    }
+    None
+}
+
 fn parse_codex_session(
     path: &Path,
     thread_index: &std::collections::HashMap<String, String>,
@@ -212,15 +187,12 @@ fn parse_codex_session(
             Err(_) => continue,
         };
 
-        let timestamp = val
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        if let Some(ref ts) = timestamp {
+        let timestamp = val.get("timestamp").and_then(|v| v.as_str());
+        if let Some(ts) = timestamp {
             if started_at.is_none() {
-                started_at = Some(ts.clone());
+                started_at = Some(ts.to_string());
             }
-            last_timestamp = Some(ts.clone());
+            last_timestamp = Some(ts.to_string());
         }
 
         let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -257,7 +229,6 @@ fn parse_codex_session(
                     if event_type == "token_count" {
                         // token_count marks end of a turn — close active interval
                         let line_dt = timestamp
-                            .as_deref()
                             .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
                         if let (Some(user_dt), Some(asst_dt)) = (pending_user_ts.take(), line_dt) {
                             active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
@@ -304,9 +275,7 @@ fn parse_codex_session(
                 }
             }
             "turn_complete" | "assistant_message" | "assistant_msg" => {
-                // Close active interval on any response-like event
                 let line_dt = timestamp
-                    .as_deref()
                     .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
                 if let (Some(user_dt), Some(asst_dt)) = (pending_user_ts.take(), line_dt) {
                     active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
@@ -315,7 +284,6 @@ fn parse_codex_session(
             "user_message" | "user_msg" => {
                 // Record user timestamp for active interval
                 if let Some(dt) = timestamp
-                    .as_deref()
                     .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
                 {
                     // Close any prior unclosed interval (e.g. if no turn_complete was emitted)
@@ -325,28 +293,12 @@ fn parse_codex_session(
                     pending_user_ts = Some(dt);
                 }
                 message_count += 1;
-                if let Some(payload) = val.get("payload") {
-                    let text = payload
-                        .get("content")
-                        .or_else(|| payload.get("text"))
-                        .and_then(|v| {
-                            if let Some(s) = v.as_str() {
-                                Some(s.to_string())
-                            } else if let Some(arr) = v.as_array() {
-                                arr.iter().find_map(|block| {
-                                    block.get("text").and_then(|t| t.as_str()).map(String::from)
-                                })
-                            } else {
-                                None
-                            }
-                        });
-                    if let Some(t) = text {
-                        let truncated: String = t.chars().take(200).collect();
-                        if first_question.is_none() {
-                            first_question = Some(truncated.clone());
-                        }
-                        last_question = Some(truncated);
+                if let Some(t) = val.get("payload").and_then(extract_text_content) {
+                    let truncated: String = t.chars().take(200).collect();
+                    if first_question.is_none() {
+                        first_question = Some(truncated.clone());
                     }
+                    last_question = Some(truncated);
                 }
             }
             _ => {}
@@ -361,10 +313,12 @@ fn parse_codex_session(
 
     let sid = session_id?;
     let thread_name = thread_index.get(&sid).cloned();
+    let first_q = first_question.or_else(|| thread_name.clone());
+    let last_q = last_question.or_else(|| first_q.clone());
 
     Some(CodexSession {
         session_id: sid,
-        thread_name: thread_name.clone(),
+        thread_name,
         cwd,
         model,
         cli_version,
@@ -380,10 +334,8 @@ fn parse_codex_session(
         five_hour_resets_at,
         seven_day_resets_at,
         plan_type,
-        last_question: last_question
-            .or_else(|| first_question.clone())
-            .or_else(|| thread_name.clone()),
-        first_question: first_question.or_else(|| thread_name.clone()),
+        first_question: first_q,
+        last_question: last_q,
         message_count,
         active_elapsed_ms,
     })

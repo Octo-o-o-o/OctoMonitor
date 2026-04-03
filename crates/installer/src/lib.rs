@@ -114,38 +114,26 @@ fn tool_mode(tool: &str) -> &'static str {
 }
 
 pub fn detect_tools() -> Vec<ToolCapability> {
-    vec![
-        ToolCapability {
-            tool: "claude",
-            detected: command_exists("claude"),
-            mode: tool_mode("claude"),
-            notes: if command_exists("claude") {
-                "Claude CLI detected; local hook/statusline install possible".into()
-            } else {
-                "Claude CLI not found on PATH".into()
-            },
-        },
-        ToolCapability {
-            tool: "codex",
-            detected: command_exists("codex"),
-            mode: tool_mode("codex"),
-            notes: if command_exists("codex") {
-                "Codex CLI detected; app-server/hook path available".into()
-            } else {
-                "Codex CLI not found on PATH".into()
-            },
-        },
-        ToolCapability {
-            tool: "openclaw",
-            detected: command_exists("openclaw"),
-            mode: tool_mode("openclaw"),
-            notes: if command_exists("openclaw") {
-                "OpenClaw CLI detected; gateway-first path available".into()
-            } else {
-                "OpenClaw CLI not found on PATH".into()
-            },
-        },
+    [
+        ("claude", "Claude CLI", "local hook/statusline install possible"),
+        ("codex", "Codex CLI", "app-server/hook path available"),
+        ("openclaw", "OpenClaw CLI", "gateway-first path available"),
     ]
+    .into_iter()
+    .map(|(name, label, capability)| {
+        let detected = command_exists(name);
+        ToolCapability {
+            tool: name,
+            detected,
+            mode: tool_mode(name),
+            notes: if detected {
+                format!("{label} detected; {capability}")
+            } else {
+                format!("{label} not found on PATH")
+            },
+        }
+    })
+    .collect()
 }
 
 pub fn doctor_report() -> Vec<String> {
@@ -237,10 +225,11 @@ pub fn rollback_install(tool: &str) -> InstallResult {
     }
 }
 
-/// Verify installed manifests are valid
 pub fn verify_install(tool: &str) -> InstallResult {
     let root = integration_root().join(tool);
     let manifest_path = root.join("manifest.json");
+    let manifest_display = manifest_path.display().to_string();
+
     if !manifest_path.exists() {
         return InstallResult {
             tool: tool.to_string(),
@@ -249,39 +238,46 @@ pub fn verify_install(tool: &str) -> InstallResult {
             message: format!("No installation found for {tool}"),
         };
     }
-    match fs::read_to_string(&manifest_path) {
-        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(val) => {
-                let matches_tool = val.get("tool").and_then(|v| v.as_str()) == Some(tool);
-                let read_only = val
-                    .get("readOnly")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                InstallResult {
-                    tool: tool.to_string(),
-                    applied: matches_tool && read_only,
-                    paths: vec![manifest_path.display().to_string()],
-                    message: if matches_tool && read_only {
-                        format!("Installation for {tool} verified: manifest valid and read-only")
-                    } else {
-                        format!(
-                            "Installation for {tool}: manifest exists but integrity check failed"
-                        )
-                    },
-                }
-            }
-            Err(e) => InstallResult {
+
+    let content = match fs::read_to_string(&manifest_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return InstallResult {
                 tool: tool.to_string(),
                 applied: false,
-                paths: vec![manifest_path.display().to_string()],
+                paths: vec![manifest_display],
+                message: format!("Cannot read manifest for {tool}: {e}"),
+            };
+        }
+    };
+
+    let val = match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            return InstallResult {
+                tool: tool.to_string(),
+                applied: false,
+                paths: vec![manifest_display],
                 message: format!("Manifest for {tool} is not valid JSON: {e}"),
-            },
-        },
-        Err(e) => InstallResult {
-            tool: tool.to_string(),
-            applied: false,
-            paths: vec![manifest_path.display().to_string()],
-            message: format!("Cannot read manifest for {tool}: {e}"),
+            };
+        }
+    };
+
+    let matches_tool = val.get("tool").and_then(|v| v.as_str()) == Some(tool);
+    let read_only = val
+        .get("readOnly")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let valid = matches_tool && read_only;
+
+    InstallResult {
+        tool: tool.to_string(),
+        applied: valid,
+        paths: vec![manifest_display],
+        message: if valid {
+            format!("Installation for {tool} verified: manifest valid and read-only")
+        } else {
+            format!("Installation for {tool}: manifest exists but integrity check failed")
         },
     }
 }

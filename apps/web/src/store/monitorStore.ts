@@ -21,6 +21,7 @@ export type ActiveTab = 'monitor' | 'usage' | 'commits' | 'heatmap' | 'settings'
 export type {
   AgentDisplayFormat,
   ColumnLayout,
+  DailySummaryMode,
   FilterMode,
   FilterRules,
   FontSize,
@@ -33,6 +34,14 @@ export type {
 
 export type ConnectionStatus = 'connecting' | 'live' | 'offline'
 
+export type HistoricalReportStatus = 'pending' | 'generating' | 'done' | 'error'
+
+export interface HistoricalReportEntry {
+  date: string // YYYY-MM-DD
+  status: HistoricalReportStatus
+  text?: string
+}
+
 interface MonitorState {
   data: BootstrapPayload | null
   selectedRunId?: string
@@ -44,6 +53,7 @@ interface MonitorState {
   settings: FrontendSettings
   acknowledgedErrors: Set<string>
   dismissedAttentionKeys: Set<string>
+  historicalReports: HistoricalReportEntry[]
   setData: (data: BootstrapPayload | null) => void
   setConfig: (config: AppConfig) => void
   selectRun: (id?: string) => void
@@ -55,6 +65,9 @@ interface MonitorState {
   setActiveTab: (tab: ActiveTab) => void
   setSettingsOpen: (open: boolean) => void
   updateSettings: (patch: Partial<FrontendSettings>) => void
+  setHistoricalReports: (reports: HistoricalReportEntry[]) => void
+  updateHistoricalReport: (date: string, patch: Partial<HistoricalReportEntry>) => void
+  clearHistoricalReports: () => void
 }
 
 export const useMonitorStore = create<MonitorState>((set, get) => ({
@@ -66,6 +79,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   settings: loadFrontendSettings(),
   acknowledgedErrors: new Set<string>(),
   dismissedAttentionKeys: new Set<string>(loadDismissedAttentionKeys()),
+  historicalReports: [],
   setData: (data) => set({ data }),
   setConfig: (config) => set((s) => (s.data ? { data: { ...s.data, config } } : {})),
   selectRun: (selectedRunId) => set({ selectedRunId }),
@@ -90,6 +104,13 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     saveFrontendSettings(next)
     set({ settings: next })
   },
+  setHistoricalReports: (historicalReports) => set({ historicalReports }),
+  updateHistoricalReport: (date, patch) => set((s) => ({
+    historicalReports: s.historicalReports.map((r) =>
+      r.date === date ? { ...r, ...patch } : r,
+    ),
+  })),
+  clearHistoricalReports: () => set({ historicalReports: [] }),
 }))
 
 /** Selector: derive the selected run from data + selectedRunId */

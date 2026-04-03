@@ -8,46 +8,27 @@ import { AttentionBanner } from './AttentionBanner'
 import { MonitorSkeleton } from './Skeleton'
 import type { PendingCron, RunRecord, ToolKind } from '../../lib/types'
 
-const allTools: ToolKind[] = ['claude', 'codex', 'openClaw']
-const sourceLabels: Record<ToolKind, string> = {
-  claude: 'CLAUDE CODE',
-  codex: 'CODEX',
-  openClaw: 'OPENCLAW',
-}
+import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
 const sourceAccents: Record<ToolKind, string> = {
   claude: 'accent-claude',
   codex: 'accent-codex',
   openClaw: 'accent-openclaw',
 }
 
-const stateClasses: Record<string, string> = {
-  active: 'state-running',
-  waitingApproval: 'state-waiting',
-  completed: 'state-done',
-  idle: 'state-done',
-  error: 'state-error',
-  stale: 'state-done',
-  gatewayOffline: 'state-error',
-  limitExceeded: 'state-error',
-  contextExceeded: 'state-error',
-}
-// Map state to row-level class
-const stateRowClasses: Record<string, string> = {
-  active: 'state-active',
-  waitingApproval: 'state-waiting',
-  completed: 'state-done',
-  idle: 'state-done',
-  error: 'state-error',
-  stale: 'state-done',
-  gatewayOffline: 'state-error',
-  limitExceeded: 'state-error',
-  contextExceeded: 'state-error',
+const stateStyles: Record<string, { badge: string; row: string }> = {
+  active: { badge: 'state-running', row: 'state-active' },
+  waitingApproval: { badge: 'state-waiting', row: 'state-waiting' },
+  completed: { badge: 'state-done', row: 'state-done' },
+  idle: { badge: 'state-done', row: 'state-done' },
+  error: { badge: 'state-error', row: 'state-error' },
+  stale: { badge: 'state-done', row: 'state-done' },
+  gatewayOffline: { badge: 'state-error', row: 'state-error' },
+  limitExceeded: { badge: 'state-error', row: 'state-error' },
+  contextExceeded: { badge: 'state-error', row: 'state-error' },
 }
 
+const defaultStateStyle = { badge: 'state-done', row: 'state-done' }
 
-
-
-// Deterministic tag color palette (bg + text pairs)
 const tagPalette = [
   { bg: 'var(--tag-violet-bg)', text: 'var(--tag-violet-text)' },
   { bg: 'var(--tag-cyan-bg)', text: 'var(--tag-cyan-text)' },
@@ -109,14 +90,13 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
     : run.workspaceShort
   const stateKey = `state.${run.state}` as any
   const stateLabel = t(stateKey)
-  const stateClass = stateClasses[run.state] ?? 'state-done'
-  const isError = stateRowClasses[run.state] === 'state-error'
+  const style = stateStyles[run.state] ?? defaultStateStyle
+  const isError = style.row === 'state-error'
   const isAcknowledged = isError && acknowledgedErrors.has(run.id)
-  const rowClass = isAcknowledged ? 'state-error-ack' : (stateRowClasses[run.state] ?? 'state-done')
+  const rowClass = isAcknowledged ? 'state-error-ack' : style.row
   const tagColor = getTagColor(tag)
   const isWaiting = run.state === 'waitingApproval'
 
-  // Origin badge for OpenClaw sessions (telegram, cron, heartbeat, etc.)
   const originBadge = run.tool === 'openClaw' && run.originProvider && run.originProvider !== 'heartbeat'
     ? run.originLabel ?? run.originProvider
     : undefined
@@ -131,7 +111,7 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
   return (
     <button className={`session-row ${rowClass}${focused ? ' session-focused' : ''}`} data-run-id={run.id} onClick={handleClick}>
       <div className="session-header">
-        {!hideBadge && <span className={`state-badge ${stateClass}`}>{stateLabel}</span>}
+        {!hideBadge && <span className={`state-badge ${style.badge}`}>{stateLabel}</span>}
         <span className="session-duration">{formatDuration(run.elapsedMs)}</span>
         <span className="session-updated">{formatLastUpdated(run.lastActivityAt)}</span>
         {run.tool === 'openClaw' && run.model && (
@@ -167,11 +147,11 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
 
 function ProjectGroupSection({ group, selectRun, focusedRunId }: { group: ProjectGroup; selectRun: (id: string) => void; focusedRunId?: string }) {
   const tagColor = getTagColor(group.key)
-  // Determine the dominant state row class for the group border color
+  const firstStyle = stateStyles[group.runs[0].state] ?? defaultStateStyle
   const uniformState = group.runs.every(
-    (r) => (stateClasses[r.state] ?? 'state-done') === (stateClasses[group.runs[0].state] ?? 'state-done'),
+    (r) => (stateStyles[r.state] ?? defaultStateStyle).badge === firstStyle.badge,
   )
-  const groupRowClass = uniformState ? (stateRowClasses[group.runs[0].state] ?? 'state-done') : ''
+  const groupRowClass = uniformState ? firstStyle.row : ''
   const isMulti = group.runs.length > 1
   return (
     <div className={`project-group has-header ${groupRowClass}`}>
@@ -242,7 +222,6 @@ const cronParseField = (field: string, max: number): number[] => {
 
 const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-/** Expand a single PendingCron into one entry per fire-time when hours/minutes have commas. */
 type ExpandedCron = PendingCron & { _fireMinutes: number }
 function expandCrons(crons: PendingCron[]): ExpandedCron[] {
   const now = new Date()
@@ -292,8 +271,6 @@ function expandCrons(crons: PendingCron[]): ExpandedCron[] {
       continue
     }
 
-    // Expand into one row per fire-time
-    // Derive the prefix from scheduleHuman or day-of-week
     const prefix = dows
       ? dows.map((d) => dowNames[d]).join(',')
       : 'Daily'
@@ -328,7 +305,6 @@ function expandCrons(crons: PendingCron[]): ExpandedCron[] {
   return result.sort((a, b) => a._fireMinutes - b._fireMinutes)
 }
 
-/** Pad short day-of-week prefixes to align with "Daily" and strip seconds. */
 function formatScheduleHuman(s: string): string {
   let r = s.replace(/(\d{1,2}:\d{2}):\d{2}/g, '$1')
   r = r.replace(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/, (_, day: string) => day.padEnd(6))
@@ -387,7 +363,6 @@ function CronList({ crons }: { crons: PendingCron[] }) {
   )
 }
 
-
 function SourceColumn({
   tool,
   runs,
@@ -414,7 +389,6 @@ function SourceColumn({
 
   const grouped = useMemo(() => groupRunsByProject(runs, agentDisplayFormat), [runs, agentDisplayFormat])
 
-  // Determine authMode: prefer identity, fall back to first run
   const authMode = identity?.authMode ?? runs[0]?.authMode
   const isApiKey = authMode === 'api_key'
 
@@ -423,8 +397,6 @@ function SourceColumn({
     return activeRun?.quota
   }, [runs])
 
-  // For subscription users: show loading bars when quota data hasn't arrived yet
-  // OpenClaw does not have quota limits — skip quota display entirely
   const hasQuotaConcept = tool !== 'openClaw'
   const subscriptionHasRuns = hasQuotaConcept && !isApiKey && runs.length > 0
   const quotaLoading = subscriptionHasRuns && !quota
@@ -579,7 +551,6 @@ export function MonitorView() {
     openClaw: sessionsBySource.openClaw.length,
   }
 
-  // Ensure mobile tab falls back to first visible panel if current is hidden
   const effectiveMobileSource = visiblePanels.includes(mobileSource)
     ? mobileSource
     : visiblePanels[0] ?? 'claude'

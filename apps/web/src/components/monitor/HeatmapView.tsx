@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useMonitorStore } from '../../store/monitorStore'
 import { useI18n, type I18nKey } from '../../lib/i18n'
 import { fetchCommitHistory, fetchUsageHistory } from '../../lib/history'
@@ -10,10 +10,13 @@ import {
   type HeatmapMetric,
   type HeatmapScope,
 } from '../../lib/heatmap'
-import { formatDateTime, formatTokens } from '../../lib/format'
+import { formatCost, formatDateTime, formatDuration, formatTokens, pad2 } from '../../lib/format'
+import { sourceLabels } from '../../lib/constants'
 import type { CommitHistoryPayload, CommitRecord, RunRecord, UsageBucket, UsageHistoryPayload } from '../../lib/types'
 import { HeatmapSkeleton } from './Skeleton'
 import { buildUsageBucketIndex, intervalOverlapMs, sliceRunUsage } from '../../lib/usage'
+import { buildAiPrompt, buildBasicReport, buildDailySummary, type DailySummaryData } from '../../lib/dailySummary'
+import { apiFetch } from '../../lib/api'
 
 const scopeOrder: HeatmapScope[] = ['week', 'month', 'total']
 const metricOrder: HeatmapMetric[] = ['input', 'token', 'commit']
@@ -74,10 +77,6 @@ function filterCommitsForRange(commits: CommitRecord[], fromMs: number, toMs: nu
   })
 }
 
-function padHour(hour: number): string {
-  return String(hour).padStart(2, '0')
-}
-
 function weekdayShort(date: Date, locale: 'en' | 'zh'): string {
   return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
     weekday: 'short',
@@ -113,11 +112,189 @@ function selectionMetricValue(metric: HeatmapMetric, value: number): string {
 function selectionLabel(cell: HeatmapCell, locale: 'en' | 'zh'): string {
   const dayLabel = `${shortDate(cell.date, locale)} ${weekdayShort(cell.date, locale)}`
   if (cell.hour == null) return dayLabel
-  return `${dayLabel} ${padHour(cell.hour)}:00 - ${padHour(cell.hour + 1)}:00`
+  return `${dayLabel} ${pad2(cell.hour)}:00 - ${pad2(cell.hour + 1)}:00`
 }
 
 function commitMetaLabel(commit: CommitRecord): string {
   return `${commit.repoName} · ${commit.shortSha} · ${formatDateTime(commit.committedAt).slice(5, 16)}`
+}
+
+function DailySummaryCard({
+  data,
+  locale,
+}: {
+  data: DailySummaryData
+  locale: 'en' | 'zh'
+}) {
+  const { t } = useI18n()
+  const dailySummaryEnabled = useMonitorStore((s) => s.settings.dailySummaryEnabled)
+  const dailySummaryMode = useMonitorStore((s) => s.settings.dailySummaryMode)
+  const [aiReport, setAiReport] = useState<string>()
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  // Reset AI report when date changes
+  const dateKey = data.date.toISOString().slice(0, 10)
+  useEffect(() => {
+    setAiReport(undefined)
+    setAiError(false)
+  }, [dateKey])
+
+  const handleGenerate = useCallback(async () => {
+    if (dailySummaryMode === 'basic') return
+    setAiLoading(true)
+    setAiError(false)
+    try {
+      const prompt = buildAiPrompt(data)
+      const res = await apiFetch('/api/daily-summary/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, mode: dailySummaryMode }),
+      })
+      if (!res.ok) throw new Error('generation failed')
+      const result = await res.json()
+      setAiReport(result.text ?? '')
+    } catch {
+      setAiError(true)
+    } finally {
+      setAiLoading(false)
+    }
+  }, [data, dailySummaryMode])
+
+  const handleCopy = useCallback(() => {
+    const text = aiReport ?? buildBasicReport(data, locale)
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [aiReport, data, locale])
+
+  if (!dailySummaryEnabled) return null
+  if (data.sessions === 0) {
+    return (
+      <div className="daily-summary-card">
+        <div className="daily-summary-head">
+          <span className="usage-section-label">{t('daily.title')}</span>
+        </div>
+        <div className="empty-state-panel heatmap-empty">
+          <strong>{t('daily.noData')}</strong>
+          <span>{t('daily.noDataHint')}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const showAiSection = dailySummaryMode !== 'basic'
+
+  return (
+    <div className="daily-summary-card">
+      <div className="daily-summary-head">
+        <span className="usage-section-label">{t('daily.title')}</span>
+        <span className="daily-summary-date">{dateKey}</span>
+      </div>
+
+      <div className="daily-summary-stats">
+        <div className="daily-summary-stat">
+          <span className="daily-summary-stat-label">{t('daily.sessions')}</span>
+          <strong className="daily-summary-stat-value">{data.sessions}</strong>
+        </div>
+        <div className="daily-summary-stat">
+          <span className="daily-summary-stat-label">{t('daily.inputs')}</span>
+          <strong className="daily-summary-stat-value">{data.inputs}</strong>
+        </div>
+        <div className="daily-summary-stat">
+          <span className="daily-summary-stat-label">{t('daily.tokens')}</span>
+          <strong className="daily-summary-stat-value">{formatTokens(data.totalTokens)}</strong>
+          <span className="daily-summary-stat-sub">
+            {t('daily.in')} {formatTokens(data.inputTokens)} / {t('daily.out')} {formatTokens(data.outputTokens)}
+          </span>
+        </div>
+        <div className="daily-summary-stat">
+          <span className="daily-summary-stat-label">{t('daily.cost')}</span>
+          <strong className="daily-summary-stat-value">{formatCost(data.cost)}</strong>
+        </div>
+        <div className="daily-summary-stat">
+          <span className="daily-summary-stat-label">{t('daily.commits')}</span>
+          <strong className="daily-summary-stat-value">{data.commits}</strong>
+        </div>
+        <div className="daily-summary-stat">
+          <span className="daily-summary-stat-label">{t('daily.duration')}</span>
+          <strong className="daily-summary-stat-value">{formatDuration(data.durationMs)}</strong>
+        </div>
+      </div>
+
+      {data.bySource.length > 0 && (
+        <div className="daily-summary-breakdown">
+          <span className="daily-summary-breakdown-label">{t('daily.bySource')}</span>
+          <div className="daily-summary-rows">
+            {data.bySource.map((s) => (
+              <div key={s.source} className="daily-summary-row">
+                <span className="daily-summary-row-name">{sourceLabels[s.source]}</span>
+                <span className="daily-summary-row-meta">{s.sessions} sess</span>
+                <span className="daily-summary-row-value">{formatTokens(s.tokens)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.byProject.length > 0 && (
+        <div className="daily-summary-breakdown">
+          <span className="daily-summary-breakdown-label">{t('daily.byProject')}</span>
+          <div className="daily-summary-rows">
+            {data.byProject.map((p) => (
+              <div key={p.project} className="daily-summary-row">
+                <span className="daily-summary-row-name">{p.project}</span>
+                <span className="daily-summary-row-meta">{p.sessions} sess</span>
+                <span className="daily-summary-row-value">{formatCost(p.cost)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showAiSection && (
+        <div className="daily-summary-ai">
+          <div className="daily-summary-ai-head">
+            <span className="daily-summary-breakdown-label">{t('daily.aiReport')}</span>
+            <div className="daily-summary-ai-actions">
+              <button
+                type="button"
+                className="daily-summary-btn"
+                onClick={handleCopy}
+                disabled={aiLoading}
+              >
+                {copied ? t('daily.copied') : t('daily.copy')}
+              </button>
+              <button
+                type="button"
+                className="daily-summary-btn daily-summary-btn-accent"
+                onClick={handleGenerate}
+                disabled={aiLoading}
+              >
+                {aiLoading ? t('daily.generating') : aiReport ? t('daily.regenerate') : t('daily.generate')}
+              </button>
+            </div>
+          </div>
+          {aiError && <div className="daily-summary-ai-error">{t('daily.generateError')}</div>}
+          {aiReport && <div className="daily-summary-ai-text">{aiReport}</div>}
+        </div>
+      )}
+
+      {!showAiSection && (
+        <div className="daily-summary-copy-row">
+          <button
+            type="button"
+            className="daily-summary-btn"
+            onClick={handleCopy}
+          >
+            {copied ? t('daily.copied') : t('daily.copy')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export const HeatmapView = memo(function HeatmapView() {
@@ -248,6 +425,12 @@ export const HeatmapView = memo(function HeatmapView() {
 
     return { input }
   }, [activeRuns, activeUsageBuckets, selectedCell.endMs, selectedCell.startMs])
+  const dayStartHour = useMonitorStore((s) => s.settings.dailySummaryDayStart)
+  const dailySummary = useMemo(
+    () => buildDailySummary(selectedCell.date, activeRuns, activeUsageBuckets, activeCommits, dayStartHour),
+    [selectedCell.date, activeRuns, activeUsageBuckets, activeCommits, dayStartHour],
+  )
+
   const visibleSidebarCommits = selectedCommits.slice(0, maxSidebarCommits)
   const extraCommitCount = Math.max(selectedCommits.length - visibleSidebarCommits.length, 0)
 
@@ -255,13 +438,10 @@ export const HeatmapView = memo(function HeatmapView() {
     return <HeatmapSkeleton />
   }
 
-  const dynamicSummaryLabel = scope === 'total' ? t('heatmap.longestStreak') : t('heatmap.activeDays')
-  const dynamicSummaryValue = scope === 'total'
-    ? `${heatmap.summary.longestStreak}d`
-    : String(heatmap.summary.activeDays)
-  const dynamicSummaryHint = scope === 'total'
-    ? t('heatmap.longestStreakHint')
-    : t('heatmap.activeDaysHint')
+  const isTotal = scope === 'total'
+  const dynamicSummaryLabel = isTotal ? t('heatmap.longestStreak') : t('heatmap.activeDays')
+  const dynamicSummaryValue = isTotal ? `${heatmap.summary.longestStreak}d` : String(heatmap.summary.activeDays)
+  const dynamicSummaryHint = isTotal ? t('heatmap.longestStreakHint') : t('heatmap.activeDaysHint')
 
   return (
     <div className="heatmap-view" data-metric={metric}>
@@ -364,11 +544,9 @@ export const HeatmapView = memo(function HeatmapView() {
             <div className="heatmap-legend">
               <span>{t('heatmap.legend.less')}</span>
               <div className="heatmap-legend-swatches">
-                <span className="heatmap-legend-cell" data-level="0" />
-                <span className="heatmap-legend-cell" data-level="1" />
-                <span className="heatmap-legend-cell" data-level="2" />
-                <span className="heatmap-legend-cell" data-level="3" />
-                <span className="heatmap-legend-cell" data-level="4" />
+                {[0, 1, 2, 3, 4].map((level) => (
+                  <span key={level} className="heatmap-legend-cell" data-level={level} />
+                ))}
               </div>
               <span>{t('heatmap.legend.more')}</span>
             </div>
@@ -379,7 +557,7 @@ export const HeatmapView = memo(function HeatmapView() {
               <div className="heatmap-hour-axis">
                 <div className="heatmap-axis-spacer" />
                 {Array.from({ length: 24 }, (_, hour) => (
-                  <span key={hour} className="heatmap-hour-axis-label">{padHour(hour)}</span>
+                  <span key={hour} className="heatmap-hour-axis-label">{pad2(hour)}</span>
                 ))}
               </div>
               {heatmap.rows.map((row) => (
@@ -476,6 +654,8 @@ export const HeatmapView = memo(function HeatmapView() {
               {selectedCell.hour == null ? t('heatmap.selectedDayHint') : t('heatmap.selectedHourHint')}
             </div>
           </div>
+
+          <DailySummaryCard data={dailySummary} locale={locale} />
 
           <div className="heatmap-commit-card">
             <div className="heatmap-commit-head">

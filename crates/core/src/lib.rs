@@ -47,7 +47,7 @@ pub enum Freshness {
     Cold,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct TokenUsage {
@@ -442,7 +442,10 @@ pub fn classify_freshness(seconds: i64) -> Freshness {
 }
 
 #[cfg(test)]
-pub fn demo_bootstrap() -> BootstrapPayload {
+mod tests {
+    use super::*;
+
+    fn demo_bootstrap() -> BootstrapPayload {
     use chrono::{Duration, Utc};
     let now = Utc::now();
     let started = now - Duration::minutes(37);
@@ -927,9 +930,6 @@ pub fn demo_bootstrap() -> BootstrapPayload {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
     #[test]
     fn freshness_thresholds_work() {
         assert!(matches!(classify_freshness(1), Freshness::Hot));
