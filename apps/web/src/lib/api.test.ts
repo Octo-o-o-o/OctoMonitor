@@ -64,4 +64,26 @@ describe('api helpers', () => {
     expect(normalized.runs).toEqual([])
     expect(normalized.config.listenPort).toBe(46321)
   })
+
+  it('falls back to the server default history window when config is incomplete', async () => {
+    const { normalizeBootstrapPayload } = await import('./api')
+
+    const normalized = normalizeBootstrapPayload({
+      generatedAt: '2026-04-02T00:00:00.000Z',
+      runs: [],
+      attentions: [],
+      usageBuckets: [],
+      commits: [],
+      identities: [],
+      adapterHealth: [],
+      recentCompletions: [],
+      pendingCrons: [],
+      config: {
+        listenHost: '127.0.0.1',
+        listenPort: 46321,
+      },
+    })
+
+    expect(normalized.config.historyDays).toBe(30)
+  })
 })

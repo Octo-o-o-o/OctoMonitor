@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMonitorStore } from '../../store/monitorStore'
 import { useI18n } from '../../lib/i18n'
-import { buildUsageDateRange, endOfDay, startOfDay } from '../../lib/dateRange'
-import { formatTokens, formatCost, getGroupKey } from '../../lib/format'
+import { buildUsageDateRange } from '../../lib/dateRange'
+import { formatCost, formatTokens, getGroupKey } from '../../lib/format'
+import { createHistorySelection, fetchUsageHistory, type DataMode } from '../../lib/history'
+import { buildSnapshotRange, isSnapshotWindowClamped } from '../../lib/snapshotWindow'
 import { collectRunUsageSlices, hasUsage, sumUsageSlices } from '../../lib/usage'
+import { FixedSizeVirtualList } from '../FixedSizeVirtualList'
+import { DataModeSwitch } from './DataModeSwitch'
+import { SnapshotWindowSwitch } from './SnapshotWindowSwitch'
 import { UsageSkeleton } from './Skeleton'
-import type { ToolKind } from '../../lib/types'
-import { DateRangePicker, type DateRange } from './DateRangePicker'
+import type { ToolKind, UsageHistoryPayload } from '../../lib/types'
+import { DateRangePicker } from './DateRangePicker'
 
 const sourceOrder: ToolKind[] = ['claude', 'codex', 'openClaw']
 const sourceLabels: Record<ToolKind, string> = {
@@ -19,7 +24,7 @@ const sourceTagLabels: Record<ToolKind, string> = {
   codex: 'Project',
   openClaw: 'Agent',
 }
-
+const historyPresets = ['7d', '30d', '90d', '180d'] as const
 
 function getBarColor(tool: ToolKind): string {
   switch (tool) {
@@ -41,41 +46,71 @@ export function UsageView() {
   const data = useMonitorStore((s) => s.data)
   const connectionStatus = useMonitorStore((s) => s.connectionStatus)
   const agentDisplayFormat = useMonitorStore((s) => s.settings.agentDisplayFormat)
+  const snapshotWindow = useMonitorStore((s) => s.settings.snapshotWindow)
+  const updateSettings = useMonitorStore((s) => s.updateSettings)
   const { t } = useI18n()
-  const [dateRange, setDateRange] = useState<DateRange>(() => {
-    const to = endOfDay(new Date())
-    const from = startOfDay(new Date())
-    return { from, to }
-  })
-  const [dateRangeLocked, setDateRangeLocked] = useState(false)
+  const [mode, setMode] = useState<DataMode>('snapshot')
+  const [historyRange, setHistoryRange] = useState(() => createHistorySelection(30))
+  const [historyData, setHistoryData] = useState<UsageHistoryPayload | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState(false)
 
-  const allRange = useMemo(
+  useEffect(() => {
+    if (mode !== 'history') return
+
+    const controller = new AbortController()
+    setHistoryLoading(true)
+    setHistoryError(false)
+
+    void fetchUsageHistory(historyRange, controller.signal)
+      .then((payload) => {
+        setHistoryData(payload)
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+        setHistoryError(true)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setHistoryLoading(false)
+        }
+      })
+
+    return () => controller.abort()
+  }, [mode, historyRange])
+
+  const snapshotRange = useMemo(
     () => (data ? buildUsageDateRange(data.runs, data.usageBuckets) : null),
     [data],
   )
 
-  useEffect(() => {
-    if (!allRange || dateRangeLocked) return
-    setDateRange(allRange)
-  }, [allRange, dateRangeLocked])
+  const activeRuns = mode === 'history'
+    ? (historyData?.runs ?? [])
+    : (data?.runs ?? [])
+  const activeBuckets = mode === 'history'
+    ? (historyData?.usageBuckets ?? [])
+    : (data?.usageBuckets ?? [])
 
-  const runUsageSlices = useMemo(() => {
-    if (!data) return []
-    return collectRunUsageSlices(
-      data.runs,
-      data.usageBuckets,
-      dateRange.from.getTime(),
-      dateRange.to.getTime(),
-    )
-  }, [data, dateRange])
+  const effectiveRange = useMemo(() => {
+    if (mode === 'history') {
+      return historyRange
+    }
+    return buildSnapshotRange(snapshotWindow, snapshotRange) ?? createHistorySelection(1)
+  }, [historyRange, mode, snapshotRange, snapshotWindow])
 
-  function handleDateRangeChange(nextRange: DateRange) {
-    setDateRangeLocked(true)
-    setDateRange(nextRange)
-  }
+  const runUsageSlices = useMemo(
+    () => collectRunUsageSlices(
+      activeRuns,
+      activeBuckets,
+      effectiveRange.from.getTime(),
+      effectiveRange.to.getTime(),
+    ),
+    [activeBuckets, activeRuns, effectiveRange],
+  )
 
   const grouped = useMemo((): GroupedUsage[] => {
-    if (!data) return []
     const map: Record<ToolKind, GroupedUsage> = {
       claude: { tool: 'claude', totalTokens: 0, totalCost: 0, items: [] },
       codex: { tool: 'codex', totalTokens: 0, totalCost: 0, items: [] },
@@ -99,38 +134,40 @@ export function UsageView() {
         .map(([tag, val]) => ({ tag, tokens: val.tokens, cost: val.cost }))
         .sort((a, b) => b.tokens - a.tokens)
       map[tool].items = items
-      map[tool].totalTokens = items.reduce((s, i) => s + i.tokens, 0)
-      map[tool].totalCost = items.reduce((s, i) => s + i.cost, 0)
+      map[tool].totalTokens = items.reduce((sum, item) => sum + item.tokens, 0)
+      map[tool].totalCost = items.reduce((sum, item) => sum + item.cost, 0)
     }
 
     return sourceOrder.map((tool) => map[tool])
-  }, [data, agentDisplayFormat, runUsageSlices])
+  }, [agentDisplayFormat, runUsageSlices])
 
   const totals = useMemo(() => {
-    const summary = sumUsageSlices(
+    const meteredSummary = sumUsageSlices(
       runUsageSlices
         .filter(({ usage }) => hasUsage(usage))
         .map(({ usage }) => usage),
     )
-    const items = grouped.reduce((s, g) => s + g.items.length, 0)
+    const inputs = runUsageSlices.reduce((sum, { usage }) => sum + usage.messageCount, 0)
+    const items = grouped.reduce((sum, group) => sum + group.items.length, 0)
     return {
-      tokens: summary.totalTokens,
-      cost: summary.costUsd ?? 0,
+      tokens: meteredSummary.totalTokens,
+      cost: meteredSummary.costUsd ?? 0,
+      inputs,
       items,
     }
   }, [grouped, runUsageSlices])
 
   const allItems = useMemo(() => {
     const list: { tag: string; tool: ToolKind; tokens: number; cost: number }[] = []
-    for (const g of grouped) {
-      for (const item of g.items) {
-        list.push({ tag: item.tag, tool: g.tool, tokens: item.tokens, cost: item.cost })
+    for (const group of grouped) {
+      for (const item of group.items) {
+        list.push({ tag: item.tag, tool: group.tool, tokens: item.tokens, cost: item.cost })
       }
     }
     return list.sort((a, b) => b.tokens - a.tokens)
   }, [grouped])
 
-  if (!data) {
+  if (mode === 'snapshot' && !data) {
     if (connectionStatus === 'connecting') return <UsageSkeleton />
 
     return (
@@ -143,14 +180,57 @@ export function UsageView() {
     )
   }
 
+  const snapshotDays = data?.config.historyDays ?? 7
+  const snapshotClampHint = mode === 'snapshot' && isSnapshotWindowClamped(snapshotWindow, snapshotDays)
+    ? t('history.snapshotClampHint').replace('{days}', String(snapshotDays))
+    : null
+
   return (
     <div className="usage-view">
-      {connectionStatus === 'offline' && (
+      {mode === 'snapshot' && connectionStatus === 'offline' && (
         <div className="status-notice offline">
           <strong>{t('usage.offlineTitle')}</strong>
           <span>{t('usage.offlineHint')}</span>
         </div>
       )}
+
+      <div className="history-toolbar">
+        <div className="history-toolbar-main">
+          <DataModeSwitch mode={mode} onChange={setMode} />
+          {snapshotClampHint && (
+            <span className="history-toolbar-subhint">{snapshotClampHint}</span>
+          )}
+        </div>
+        {mode === 'snapshot' ? (
+          <SnapshotWindowSwitch
+            value={snapshotWindow}
+            onChange={(nextWindow) => updateSettings({ snapshotWindow: nextWindow })}
+          />
+        ) : (
+          <DateRangePicker
+            value={historyRange}
+            onChange={setHistoryRange}
+            presets={historyPresets}
+          />
+        )}
+      </div>
+
+      {mode === 'history' && historyLoading && (
+        <div className="status-notice">
+          <strong>{t('history.loading')}</strong>
+        </div>
+      )}
+      {mode === 'history' && historyError && (
+        <div className="status-notice offline">
+          <strong>{t('history.error')}</strong>
+        </div>
+      )}
+      {mode === 'history' && historyData?.truncated && (
+        <div className="status-notice warn">
+          <strong>{t('history.truncated')}</strong>
+        </div>
+      )}
+
       <div className="usage-top-strip">
         <div className="usage-totals">
           <div className="usage-total-item summary-stat">
@@ -162,18 +242,21 @@ export function UsageView() {
             <strong className="summary-value">{formatCost(totals.cost)}</strong>
           </div>
           <div className="usage-total-item summary-stat">
+            <span className="summary-label">{t('usage.totalInputs')}</span>
+            <strong className="summary-value">{Math.round(totals.inputs).toLocaleString()}</strong>
+          </div>
+          <div className="usage-total-item summary-stat">
             <span className="summary-label">{t('usage.items')}</span>
             <strong className="summary-value">{totals.items}</strong>
           </div>
         </div>
-        <DateRangePicker value={dateRange} onChange={handleDateRangeChange} allRange={allRange} />
       </div>
 
       <section className="page-section">
         <div className="usage-section-label">{t('usage.bySource')}</div>
         <div className="usage-source-columns">
           {grouped.map((group) => {
-            const maxTokens = Math.max(1, ...group.items.map((i) => i.tokens))
+            const maxTokens = Math.max(1, ...group.items.map((item) => item.tokens))
             return (
               <div key={group.tool} className={`usage-source-card accent-${group.tool === 'openClaw' ? 'openclaw' : group.tool}`}>
                 <div className="usage-source-header">
@@ -221,9 +304,16 @@ export function UsageView() {
             <span>{t('usage.sessionTotals')}</span>
           </div>
         ) : (
-          <div className="usage-all-items" tabIndex={0} aria-label={t('usage.allItems')}>
-            {allItems.map((item) => (
-              <div key={`${item.tool}-${item.tag}`} className={`usage-all-row accent-${item.tool === 'openClaw' ? 'openclaw' : item.tool}-left`}>
+          <FixedSizeVirtualList
+            items={allItems}
+            className="usage-all-items"
+            tabIndex={0}
+            ariaLabel={t('usage.allItems')}
+            itemHeight={84}
+            threshold={36}
+            getKey={(item) => `${item.tool}-${item.tag}`}
+            renderItem={(item) => (
+              <div className={`usage-all-row accent-${item.tool === 'openClaw' ? 'openclaw' : item.tool}-left`}>
                 <div className="usage-all-info">
                   <span className="usage-all-tag">{item.tag}</span>
                   <span className="usage-all-source">{sourceLabels[item.tool]}</span>
@@ -233,8 +323,8 @@ export function UsageView() {
                   <span className="usage-all-cost">{formatCost(item.cost)}</span>
                 </div>
               </div>
-            ))}
-          </div>
+            )}
+          />
         )}
       </section>
     </div>

@@ -5,9 +5,9 @@ use chrono::Utc;
 use octomonitor_claude_adapter as claude_adapter;
 use octomonitor_codex_adapter as codex_adapter;
 use octomonitor_core::{
-    AdapterHealth, AppConfig, AttentionItem, BootstrapPayload, Freshness, IdentityState,
-    MoneyValue, PendingCron, QuotaValue, RunRecord, RunState, SourceConfidence, SourceInfo,
-    TokenUsage, ToolKind, UsageBucket,
+    AdapterHealth, AppConfig, AttentionItem, BootstrapPayload, CommitHistoryPayload, Freshness,
+    HistoryRange, IdentityState, MoneyValue, PendingCron, QuotaValue, RunRecord, RunState,
+    SourceConfidence, SourceInfo, TokenUsage, ToolKind, UsageBucket, UsageHistoryPayload,
 };
 use octomonitor_openclaw_adapter as openclaw_adapter;
 
@@ -22,6 +22,19 @@ const PROBE_ACTIVE_INTERVAL: std::time::Duration = std::time::Duration::from_sec
 ///   1. An ingest event (via `probe_wake` Notify), or
 ///   2. A long safety-net timeout so the dashboard isn't permanently stale.
 const PROBE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+const MAX_BOOTSTRAP_RUNS: usize = 1_500;
+const MAX_BOOTSTRAP_COMMITS: usize = 2_000;
+const MAX_HISTORY_USAGE_RUNS: usize = 20_000;
+const MAX_HISTORY_COMMITS: usize = 5_000;
+const MAX_HISTORY_LINKED_RUNS: usize = 20_000;
+
+struct ProbeScanResult {
+    generated_at: String,
+    runs: Vec<RunRecord>,
+    identities: Vec<IdentityState>,
+    adapter_health: Vec<AdapterHealth>,
+    pending_crons: Vec<PendingCron>,
+}
 
 fn has_active_runs(payload: &BootstrapPayload) -> bool {
     payload.runs.iter().any(|r| {
@@ -32,8 +45,57 @@ fn has_active_runs(payload: &BootstrapPayload) -> bool {
     })
 }
 
+fn default_app_config() -> AppConfig {
+    AppConfig {
+        listen_host: "127.0.0.1".into(),
+        listen_port: 46321,
+        history_days: 30,
+        companion_enabled: false,
+        local_ip: None,
+    }
+}
+
+pub fn empty_bootstrap() -> BootstrapPayload {
+    let mut payload = BootstrapPayload {
+        generated_at: String::new(),
+        runs: Vec::new(),
+        attentions: Vec::new(),
+        usage_buckets: Vec::new(),
+        commits: Vec::new(),
+        identities: Vec::new(),
+        adapter_health: Vec::new(),
+        recent_completions: Vec::new(),
+        pending_crons: Vec::new(),
+        config: default_app_config(),
+    };
+    payload.config.local_ip = detect_local_ip();
+    payload
+}
+
+async fn refresh_bootstrap_once(state: &AppState) {
+    let preserved = state.bootstrap.read().await.clone();
+    let pricing = state.pricing.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let mut fresh = build_bootstrap(&pricing);
+        merge_runtime_state(&mut fresh, &preserved, &pricing);
+        fresh
+    })
+    .await;
+
+    match result {
+        Ok(refreshed) => {
+            *state.bootstrap.write().await = refreshed;
+            state.signal_change();
+        }
+        Err(e) => {
+            tracing::error!("Probe thread panicked: {e}; will retry next cycle");
+        }
+    }
+}
+
 pub fn spawn_probe_refresh(state: AppState) {
     tokio::spawn(async move {
+        refresh_bootstrap_once(&state).await;
         loop {
             // Decide sleep strategy based on whether any session is active.
             let active = has_active_runs(&*state.bootstrap.read().await);
@@ -49,23 +111,7 @@ pub fn spawn_probe_refresh(state: AppState) {
                 }
             }
 
-            let preserved = state.bootstrap.read().await.clone();
-            let pricing = state.pricing.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                let mut fresh = build_bootstrap(&pricing);
-                merge_runtime_state(&mut fresh, &preserved, &pricing);
-                fresh
-            })
-            .await;
-            match result {
-                Ok(refreshed) => {
-                    *state.bootstrap.write().await = refreshed;
-                    state.signal_change();
-                }
-                Err(e) => {
-                    tracing::error!("Probe thread panicked: {e}; will retry next cycle");
-                }
-            }
+            refresh_bootstrap_once(&state).await;
         }
     });
 }
@@ -158,28 +204,85 @@ fn same_underlying_run(a: &RunRecord, b: &RunRecord) -> bool {
     false
 }
 
-pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
-    let mut payload = BootstrapPayload {
-        generated_at: String::new(),
-        runs: Vec::new(),
-        attentions: Vec::new(),
-        usage_buckets: Vec::new(),
-        commits: Vec::new(),
-        identities: Vec::new(),
-        adapter_health: Vec::new(),
-        recent_completions: Vec::new(),
-        pending_crons: Vec::new(),
-        config: AppConfig {
-            listen_host: "127.0.0.1".into(),
-            listen_port: 46321,
-            history_days: 7,
-            companion_enabled: false,
-            local_ip: None,
-        },
-    };
-    let now = Utc::now().to_rfc3339();
+fn history_cutoff(config: &AppConfig) -> chrono::DateTime<Utc> {
+    Utc::now() - chrono::Duration::days(i64::from(config.history_days.max(1)))
+}
 
-    // Probe all three adapters in parallel (they do blocking I/O)
+fn parse_rfc3339_utc(value: &str) -> Option<chrono::DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
+fn is_pinned_run(run: &RunRecord) -> bool {
+    matches!(
+        run.state,
+        RunState::Active
+            | RunState::Idle
+            | RunState::WaitingApproval
+            | RunState::Error
+            | RunState::GatewayOffline
+            | RunState::LimitExceeded
+            | RunState::ContextExceeded
+            | RunState::Stale
+    )
+}
+
+fn apply_history_window(payload: &mut BootstrapPayload) {
+    let cutoff = history_cutoff(&payload.config);
+    let mut pinned = Vec::new();
+    let mut recent = Vec::new();
+
+    for run in std::mem::take(&mut payload.runs) {
+        let is_recent = parse_rfc3339_utc(&run.last_activity_at)
+            .map(|activity| activity >= cutoff)
+            .unwrap_or(false);
+
+        if is_pinned_run(&run) {
+            pinned.push(run);
+        } else if is_recent {
+            recent.push(run);
+        }
+    }
+
+    pinned.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    recent.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+
+    let mut retained = pinned;
+    let remaining = MAX_BOOTSTRAP_RUNS.saturating_sub(retained.len());
+    retained.extend(recent.into_iter().take(remaining));
+    retained.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    payload.runs = retained;
+
+    payload.recent_completions.retain(|completion| {
+        parse_rfc3339_utc(&completion.finished_at)
+            .map(|finished| finished >= cutoff)
+            .unwrap_or(false)
+    });
+    payload
+        .recent_completions
+        .sort_by(|a, b| b.finished_at.cmp(&a.finished_at));
+    payload.recent_completions.truncate(12);
+}
+
+pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
+    let mut payload = empty_bootstrap();
+    let scanned = collect_probe_scan(true);
+    payload.runs = scanned.runs;
+    payload.identities = scanned.identities;
+    payload.adapter_health = scanned.adapter_health;
+    payload.pending_crons = scanned.pending_crons;
+    rebuild_derived(&mut payload, pricing);
+    payload.config.local_ip = detect_local_ip();
+    payload.generated_at = scanned.generated_at;
+    payload
+}
+
+fn scan_adapters() -> (
+    claude_adapter::ClaudeSnapshot,
+    codex_adapter::CodexSnapshot,
+    openclaw_adapter::OpenClawSnapshot,
+) {
     let (claude_probe, codex_probe, openclaw_probe) = std::thread::scope(|s| {
         let h1 = s.spawn(claude_adapter::probe);
         let h2 = s.spawn(codex_adapter::probe);
@@ -199,41 +302,40 @@ pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
             }),
         )
     });
+    (claude_probe, codex_probe, openclaw_probe)
+}
 
-    // Build runs from real scanned sessions
+fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
+    let now = Utc::now().to_rfc3339();
+    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters();
     let mut runs: Vec<RunRecord> = Vec::new();
 
-    // --- Claude runs from scanned sessions ---
     if !claude_probe.sessions.is_empty() {
         for session in &claude_probe.sessions {
             runs.push(build_run_from_claude_session(session, &claude_probe));
         }
-    } else {
+    } else if include_placeholder_runs {
         runs.push(build_probe_run_from_claude(&claude_probe));
     }
 
-    // --- Codex runs from scanned sessions ---
     if !codex_probe.sessions.is_empty() {
         for session in &codex_probe.sessions {
             runs.push(build_run_from_codex_session(session, &codex_probe));
         }
-    } else {
+    } else if include_placeholder_runs {
         runs.push(build_probe_run_from_codex(&codex_probe));
     }
 
-    // --- OpenClaw runs from scanned sessions ---
     if !openclaw_probe.sessions.is_empty() {
         for session in &openclaw_probe.sessions {
             runs.push(build_run_from_openclaw_session(session, &openclaw_probe));
         }
-    } else {
+    } else if include_placeholder_runs {
         runs.push(build_probe_run_from_openclaw(&openclaw_probe));
     }
 
     dedupe_runs(&mut runs);
-    payload.runs = runs;
-
-    payload.identities = vec![
+    let identities = vec![
         IdentityState {
             tool: ToolKind::Claude,
             auth_mode: Some(if claude_probe.cli_available {
@@ -281,7 +383,7 @@ pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
         },
     ];
 
-    payload.adapter_health = vec![
+    let adapter_health = vec![
         AdapterHealth {
             tool: ToolKind::Claude,
             mode: "hook+statusline+probe".into(),
@@ -327,8 +429,7 @@ pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
         },
     ];
 
-    // Map enabled OpenClaw cron jobs to pending crons
-    payload.pending_crons = openclaw_probe
+    let pending_crons = openclaw_probe
         .cron_jobs
         .iter()
         .filter(|j| j.enabled)
@@ -342,11 +443,13 @@ pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
         })
         .collect();
 
-    rebuild_derived(&mut payload, pricing);
-
-    payload.config.local_ip = detect_local_ip();
-    payload.generated_at = Utc::now().to_rfc3339();
-    payload
+    ProbeScanResult {
+        generated_at: now,
+        runs,
+        identities,
+        adapter_health,
+        pending_crons,
+    }
 }
 
 /// Detect the primary LAN IP by opening a UDP socket to an external address.
@@ -1011,14 +1114,8 @@ fn dedupe_runs(runs: &mut Vec<RunRecord>) {
     runs.retain(|run| seen.insert(run.id.clone(), true).is_none());
 }
 
-pub fn rebuild_derived(payload: &mut BootstrapPayload, pricing: &PricingStore) {
-    for run in &mut payload.runs {
-        normalize_run_token_totals(run);
-    }
-    hydrate_run_vcs(&mut payload.runs);
-    payload.usage_buckets = payload
-        .runs
-        .iter()
+fn build_usage_buckets(runs: &[RunRecord], pricing: &PricingStore) -> Vec<UsageBucket> {
+    runs.iter()
         .map(|run| {
             let cost = pricing.estimate_run_cost(run);
             UsageBucket {
@@ -1043,8 +1140,109 @@ pub fn rebuild_derived(payload: &mut BootstrapPayload, pricing: &PricingStore) {
                 },
             }
         })
-        .collect();
-    payload.commits = build_commit_records(&payload.runs, pricing);
+        .collect()
+}
+
+fn run_overlaps_range(
+    run: &RunRecord,
+    from: chrono::DateTime<Utc>,
+    to: chrono::DateTime<Utc>,
+) -> bool {
+    let Some(started_at) = parse_rfc3339_utc(&run.started_at) else {
+        return false;
+    };
+    let Some(last_activity_at) = parse_rfc3339_utc(&run.last_activity_at) else {
+        return false;
+    };
+    let range_end = std::cmp::max(last_activity_at, started_at);
+    range_end >= from && started_at <= to
+}
+
+fn history_range(from: chrono::DateTime<Utc>, to: chrono::DateTime<Utc>) -> HistoryRange {
+    HistoryRange {
+        from: from.to_rfc3339(),
+        to: to.to_rfc3339(),
+    }
+}
+
+pub fn build_usage_history(
+    pricing: &PricingStore,
+    from: chrono::DateTime<Utc>,
+    to: chrono::DateTime<Utc>,
+) -> UsageHistoryPayload {
+    let mut runs = collect_probe_scan(false).runs;
+    for run in &mut runs {
+        normalize_run_token_totals(run);
+    }
+    runs.retain(|run| run_overlaps_range(run, from, to));
+    runs.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    let truncated = runs.len() > MAX_HISTORY_USAGE_RUNS;
+    runs.truncate(MAX_HISTORY_USAGE_RUNS);
+    let usage_buckets = build_usage_buckets(&runs, pricing);
+
+    UsageHistoryPayload {
+        generated_at: Utc::now().to_rfc3339(),
+        range: history_range(from, to),
+        truncated,
+        runs,
+        usage_buckets,
+    }
+}
+
+pub fn build_commit_history(
+    pricing: &PricingStore,
+    from: chrono::DateTime<Utc>,
+    to: chrono::DateTime<Utc>,
+) -> CommitHistoryPayload {
+    let mut runs = collect_probe_scan(false).runs;
+    for run in &mut runs {
+        normalize_run_token_totals(run);
+    }
+    hydrate_run_vcs(&mut runs);
+
+    let mut commits = build_commit_records(&runs, pricing, from);
+    commits.retain(|commit| {
+        parse_rfc3339_utc(&commit.committed_at)
+            .map(|committed_at| committed_at >= from && committed_at <= to)
+            .unwrap_or(false)
+    });
+    commits.sort_by(|a, b| b.committed_at.cmp(&a.committed_at));
+
+    let mut truncated = commits.len() > MAX_HISTORY_COMMITS;
+    commits.truncate(MAX_HISTORY_COMMITS);
+
+    let linked_run_ids = commits
+        .iter()
+        .flat_map(|commit| commit.links.iter().map(|link| link.run_id.clone()))
+        .collect::<std::collections::HashSet<_>>();
+    let mut linked_runs = runs
+        .into_iter()
+        .filter(|run| linked_run_ids.contains(&run.id))
+        .collect::<Vec<_>>();
+    linked_runs.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    if linked_runs.len() > MAX_HISTORY_LINKED_RUNS {
+        truncated = true;
+        linked_runs.truncate(MAX_HISTORY_LINKED_RUNS);
+    }
+
+    CommitHistoryPayload {
+        generated_at: Utc::now().to_rfc3339(),
+        range: history_range(from, to),
+        truncated,
+        runs: linked_runs,
+        commits,
+    }
+}
+
+pub fn rebuild_derived(payload: &mut BootstrapPayload, pricing: &PricingStore) {
+    apply_history_window(payload);
+    for run in &mut payload.runs {
+        normalize_run_token_totals(run);
+    }
+    hydrate_run_vcs(&mut payload.runs);
+    payload.usage_buckets = build_usage_buckets(&payload.runs, pricing);
+    payload.commits = build_commit_records(&payload.runs, pricing, history_cutoff(&payload.config));
+    payload.commits.truncate(MAX_BOOTSTRAP_COMMITS);
     payload.attentions = payload
         .runs
         .iter()
@@ -1084,6 +1282,7 @@ pub fn tool_key(tool: &ToolKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use octomonitor_core::CompletionRecord;
 
     fn pricing_store() -> PricingStore {
         PricingStore::new()
@@ -1151,6 +1350,27 @@ mod tests {
             vcs: None,
             origin_label: None,
             origin_provider: None,
+        }
+    }
+
+    fn payload_with_runs(runs: Vec<RunRecord>, history_days: u8) -> BootstrapPayload {
+        BootstrapPayload {
+            generated_at: String::new(),
+            runs,
+            attentions: Vec::new(),
+            usage_buckets: Vec::new(),
+            commits: Vec::new(),
+            identities: Vec::new(),
+            adapter_health: Vec::new(),
+            recent_completions: Vec::new(),
+            pending_crons: Vec::new(),
+            config: AppConfig {
+                listen_host: "127.0.0.1".into(),
+                listen_port: 46321,
+                history_days,
+                companion_enabled: false,
+                local_ip: None,
+            },
         }
     }
 
@@ -1276,6 +1496,112 @@ mod tests {
         assert_eq!(target.runs.len(), 1);
         assert_eq!(target.runs[0].id, "claude-session-session-1");
         assert_eq!(target.usage_buckets.len(), 1);
+    }
+
+    #[test]
+    fn rebuild_derived_respects_history_window_but_keeps_pinned_runs() {
+        let pricing = pricing_store();
+        let now = Utc::now();
+        let recent_completed = run(
+            "recent-completed",
+            ToolKind::Codex,
+            RunState::Completed,
+            &(now - chrono::Duration::days(2)).to_rfc3339(),
+            &(now - chrono::Duration::days(1)).to_rfc3339(),
+        );
+        let old_completed = run(
+            "old-completed",
+            ToolKind::Claude,
+            RunState::Completed,
+            &(now - chrono::Duration::days(30)).to_rfc3339(),
+            &(now - chrono::Duration::days(20)).to_rfc3339(),
+        );
+        let old_error = run(
+            "old-error",
+            ToolKind::Claude,
+            RunState::Error,
+            &(now - chrono::Duration::days(30)).to_rfc3339(),
+            &(now - chrono::Duration::days(20)).to_rfc3339(),
+        );
+
+        let mut payload = payload_with_runs(vec![old_completed, old_error, recent_completed], 7);
+
+        rebuild_derived(&mut payload, &pricing);
+
+        let retained_ids = payload
+            .runs
+            .iter()
+            .map(|run| run.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(retained_ids, vec!["recent-completed", "old-error"]);
+        assert_eq!(payload.usage_buckets.len(), 2);
+        assert_eq!(payload.attentions.len(), 1);
+        assert_eq!(payload.attentions[0].run_id.as_deref(), Some("old-error"));
+    }
+
+    #[test]
+    fn rebuild_derived_caps_history_and_recent_completions() {
+        let pricing = pricing_store();
+        let now = Utc::now();
+        let mut runs = Vec::with_capacity(MAX_BOOTSTRAP_RUNS + 32);
+        let pinned = run(
+            "pinned-error",
+            ToolKind::Claude,
+            RunState::Error,
+            &(now - chrono::Duration::days(90)).to_rfc3339(),
+            &(now - chrono::Duration::days(90)).to_rfc3339(),
+        );
+        runs.push(pinned);
+
+        for index in 0..(MAX_BOOTSTRAP_RUNS + 32) {
+            let activity_at = now - chrono::Duration::minutes(index as i64);
+            runs.push(run(
+                &format!("recent-{index:04}"),
+                ToolKind::Codex,
+                RunState::Completed,
+                &(activity_at - chrono::Duration::minutes(5)).to_rfc3339(),
+                &activity_at.to_rfc3339(),
+            ));
+        }
+
+        let mut payload = payload_with_runs(runs, 30);
+        payload.recent_completions = (0..20)
+            .map(|index| CompletionRecord {
+                id: format!("completion-{index:02}"),
+                tool: ToolKind::Codex,
+                project_name: "OctoMonitor".into(),
+                title: format!("Completion {index}"),
+                finished_at: (now - chrono::Duration::hours(index as i64)).to_rfc3339(),
+                duration_ms: 60_000,
+                total_tokens: Some(120),
+                cost_usd: Some(0.01),
+                state: "completed".into(),
+                summary: None,
+            })
+            .collect();
+        payload.recent_completions.push(CompletionRecord {
+            id: "completion-old".into(),
+            tool: ToolKind::Claude,
+            project_name: "OctoMonitor".into(),
+            title: "Old completion".into(),
+            finished_at: (now - chrono::Duration::days(60)).to_rfc3339(),
+            duration_ms: 60_000,
+            total_tokens: Some(120),
+            cost_usd: Some(0.01),
+            state: "completed".into(),
+            summary: None,
+        });
+
+        rebuild_derived(&mut payload, &pricing);
+
+        assert_eq!(payload.runs.len(), MAX_BOOTSTRAP_RUNS);
+        assert_eq!(payload.usage_buckets.len(), MAX_BOOTSTRAP_RUNS);
+        assert!(payload.runs.iter().any(|run| run.id == "pinned-error"));
+        assert_eq!(payload.recent_completions.len(), 12);
+        assert!(!payload
+            .recent_completions
+            .iter()
+            .any(|item| item.id == "completion-old"));
     }
 
     #[test]

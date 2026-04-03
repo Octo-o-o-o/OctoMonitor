@@ -15,6 +15,7 @@ use crate::pricing::PricingStore;
 
 const PRE_COMMIT_GRACE_MS: i64 = 20 * 60 * 1000;
 const POST_COMMIT_GRACE_MS: i64 = 60 * 60 * 1000;
+const MAX_COMMITS_PER_WORKTREE_SCAN: usize = 600;
 
 static COMMIT_CACHE: OnceLock<Mutex<HashMap<String, CachedCommitScan>>> = OnceLock::new();
 
@@ -164,7 +165,11 @@ pub fn hydrate_run_vcs(runs: &mut [RunRecord]) {
     }
 }
 
-pub fn build_commit_records(runs: &[RunRecord], pricing: &PricingStore) -> Vec<CommitRecord> {
+pub fn build_commit_records(
+    runs: &[RunRecord],
+    pricing: &PricingStore,
+    history_cutoff: DateTime<Utc>,
+) -> Vec<CommitRecord> {
     let mut repo_runs: HashMap<String, Vec<&RunRecord>> = HashMap::new();
     let mut repo_contexts: HashMap<String, VcsContext> = HashMap::new();
     let run_index = runs
@@ -186,7 +191,9 @@ pub fn build_commit_records(runs: &[RunRecord], pricing: &PricingStore) -> Vec<C
 
     for (repo_id, repo_vcs) in repo_contexts {
         let repo_run_list = repo_runs.remove(&repo_id).unwrap_or_default();
-        let scanned = scan_recent_commits(&repo_vcs);
+        let scan_cutoff =
+            history_cutoff - chrono::Duration::milliseconds(PRE_COMMIT_GRACE_MS.max(0));
+        let scanned = scan_recent_commits(&repo_vcs, Some(scan_cutoff));
         if scanned.is_empty() {
             continue;
         }
@@ -335,15 +342,16 @@ pub fn build_commit_records(runs: &[RunRecord], pricing: &PricingStore) -> Vec<C
     out
 }
 
-fn scan_recent_commits(vcs: &VcsContext) -> Vec<ScannedCommit> {
+fn scan_recent_commits(vcs: &VcsContext, since: Option<DateTime<Utc>>) -> Vec<ScannedCommit> {
     if vcs.repo_root.is_empty() {
         return Vec::new();
     }
 
     let fingerprint = scan_fingerprint(&vcs.repo_root);
+    let cache_key = commit_cache_key(&vcs.repo_root, since);
     let cache = COMMIT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(cache) = cache.lock() {
-        if let Some(cached) = cache.get(&vcs.repo_root) {
+        if let Some(cached) = cache.get(&cache_key) {
             if cached.refs_fingerprint == fingerprint {
                 return cached.commits.clone();
             }
@@ -352,7 +360,7 @@ fn scan_recent_commits(vcs: &VcsContext) -> Vec<ScannedCommit> {
 
     let mut commits_by_sha: HashMap<String, ScannedCommit> = HashMap::new();
     for target in list_worktree_targets(vcs) {
-        for commit in scan_worktree_commits(&target) {
+        for commit in scan_worktree_commits(&target, since) {
             let entry = commits_by_sha
                 .entry(commit.sha.clone())
                 .or_insert_with(|| commit.clone());
@@ -371,7 +379,7 @@ fn scan_recent_commits(vcs: &VcsContext) -> Vec<ScannedCommit> {
 
     if let Ok(mut cache) = cache.lock() {
         cache.insert(
-            vcs.repo_root.clone(),
+            cache_key,
             CachedCommitScan {
                 refs_fingerprint: fingerprint,
                 commits: commits.clone(),
@@ -713,13 +721,22 @@ fn fallback_worktree_targets(vcs: &VcsContext) -> Vec<WorktreeScanTarget> {
     }]
 }
 
-fn scan_worktree_commits(target: &WorktreeScanTarget) -> Vec<ScannedCommit> {
-    let output = Command::new("git")
+fn scan_worktree_commits(
+    target: &WorktreeScanTarget,
+    since: Option<DateTime<Utc>>,
+) -> Vec<ScannedCommit> {
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(&target.path)
         .arg("log")
         .arg("--date=iso-strict")
         .arg("--no-renames")
+        .arg(format!("--max-count={MAX_COMMITS_PER_WORKTREE_SCAN}"));
+    if let Some(since) = since {
+        command.arg(format!("--since=@{}", since.timestamp()));
+    }
+    let output = command
         .arg("--numstat")
         .arg("--pretty=format:\u{1e}%H\u{1f}%h\u{1f}%cI\u{1f}%an\u{1f}%s")
         .output();
@@ -736,6 +753,11 @@ fn scan_worktree_commits(target: &WorktreeScanTarget) -> Vec<ScannedCommit> {
     };
 
     parse_scanned_commits(&stdout, target)
+}
+
+fn commit_cache_key(repo_root: &str, since: Option<DateTime<Utc>>) -> String {
+    let since_key = since.map(|value| value.timestamp() / 60).unwrap_or(-1);
+    format!("{repo_root}|{since_key}|{MAX_COMMITS_PER_WORKTREE_SCAN}")
 }
 
 fn parse_scanned_commits(stdout: &str, target: &WorktreeScanTarget) -> Vec<ScannedCommit> {
@@ -997,10 +1019,69 @@ mod tests {
         );
 
         let vcs = discover_vcs_context(repo_root.to_str().unwrap()).expect("main vcs");
-        let commits = scan_recent_commits(&vcs);
+        let commits = scan_recent_commits(&vcs, None);
         assert!(commits
             .iter()
             .any(|commit| commit.summary == "feature worktree commit"));
+    }
+
+    #[test]
+    fn scan_recent_commits_respects_since_cutoff() {
+        let sandbox = GitSandbox::new();
+        let repo_root = sandbox.root.join("repo");
+
+        run_cmd(
+            None,
+            &[
+                "git",
+                "init",
+                "--initial-branch=main",
+                repo_root.to_str().unwrap(),
+            ],
+        );
+        run_cmd(
+            Some(&repo_root),
+            &["git", "config", "user.name", "OctoMonitor Test"],
+        );
+        run_cmd(
+            Some(&repo_root),
+            &["git", "config", "user.email", "octomonitor@example.com"],
+        );
+
+        fs::write(repo_root.join("history.txt"), "old\n").unwrap();
+        run_cmd(Some(&repo_root), &["git", "add", "history.txt"]);
+        run_cmd_with_env(
+            Some(&repo_root),
+            &[
+                ("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z"),
+                ("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z"),
+            ],
+            &["git", "commit", "-m", "old baseline commit"],
+        );
+
+        fs::write(repo_root.join("history.txt"), "new\n").unwrap();
+        run_cmd(Some(&repo_root), &["git", "add", "history.txt"]);
+        run_cmd_with_env(
+            Some(&repo_root),
+            &[
+                ("GIT_AUTHOR_DATE", "2026-04-02T00:00:00Z"),
+                ("GIT_COMMITTER_DATE", "2026-04-02T00:00:00Z"),
+            ],
+            &["git", "commit", "-m", "recent hot commit"],
+        );
+
+        let vcs = discover_vcs_context(repo_root.to_str().unwrap()).expect("repo vcs");
+        let commits = scan_recent_commits(
+            &vcs,
+            Some(
+                DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+        );
+
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].summary, "recent hot commit");
     }
 
     fn sample_run(vcs: Option<VcsContext>) -> RunRecord {
@@ -1063,10 +1144,17 @@ mod tests {
     }
 
     fn run_cmd(cwd: Option<&Path>, args: &[&str]) {
+        run_cmd_with_env(cwd, &[], args);
+    }
+
+    fn run_cmd_with_env(cwd: Option<&Path>, envs: &[(&str, &str)], args: &[&str]) {
         let mut command = Command::new(args[0]);
         command.args(&args[1..]);
         if let Some(dir) = cwd {
             command.current_dir(dir);
+        }
+        for (key, value) in envs {
+            command.env(key, value);
         }
         let output = command.output().expect("command should start");
         assert!(

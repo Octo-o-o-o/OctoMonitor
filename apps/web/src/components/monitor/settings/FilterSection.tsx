@@ -8,29 +8,29 @@ const panelLabels: Record<ToolKind, string> = {
 }
 
 export function FilterSection() {
-  const settings = useMonitorStore((s) => s.settings)
+  const filterRules = useMonitorStore((s) => s.settings.filterRules)
   const updateSettings = useMonitorStore((s) => s.updateSettings)
   const { t } = useI18n()
   const [filterInputs, setFilterInputs] = useState<Record<string, string>>({})
 
   function updateFilter(tool: ToolKind, patch: Partial<FilterRules[ToolKind]>) {
-    const current = settings.filterRules[tool]
+    const current = filterRules[tool]
     updateSettings({
-      filterRules: { ...settings.filterRules, [tool]: { ...current, ...patch } },
+      filterRules: { ...filterRules, [tool]: { ...current, ...patch } },
     })
   }
 
   function addFilterPattern(tool: ToolKind) {
     const val = (filterInputs[tool] ?? '').trim()
     if (!val) return
-    const current = settings.filterRules[tool]
+    const current = filterRules[tool]
     if (current.patterns.includes(val)) return
     updateFilter(tool, { patterns: [...current.patterns, val] })
     setFilterInputs((prev) => ({ ...prev, [tool]: '' }))
   }
 
   function removeFilterPattern(tool: ToolKind, pattern: string) {
-    const current = settings.filterRules[tool]
+    const current = filterRules[tool]
     updateFilter(tool, { patterns: current.patterns.filter((p) => p !== pattern) })
   }
 
@@ -41,7 +41,7 @@ export function FilterSection() {
         <p className="settings-hint">{t('settings.filterRulesHint')}</p>
         <div className="filter-rules-list">
           {(['claude', 'codex', 'openClaw'] as ToolKind[]).map((tool) => {
-            const filter = settings.filterRules[tool]
+            const filter = filterRules[tool]
             const isProject = tool !== 'openClaw'
             const placeholder = isProject
               ? t('settings.filterPlaceholder.project')

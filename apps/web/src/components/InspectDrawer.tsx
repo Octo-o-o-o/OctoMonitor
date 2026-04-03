@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMonitorStore, selectSelectedRun } from '../store/monitorStore'
 import { useI18n } from '../lib/i18n'
 import { formatTokens, formatCost, formatDuration, formatDateTime } from '../lib/format'
@@ -23,17 +23,21 @@ function formatQuota(pct: number | undefined): string {
 
 export function InspectDrawer() {
   const selectedRun = useMonitorStore(selectSelectedRun)
-  const selectedRunCost = useMonitorStore((s) => {
-    const data = s.data
-    if (!data || s.selectedRunId == null) return undefined
-    return buildUsageBucketIndex(data.usageBuckets).get(s.selectedRunId)?.costUsd
-  })
+  const selectedRunId = useMonitorStore((s) => s.selectedRunId)
+  const usageBuckets = useMonitorStore((s) => s.data?.usageBuckets)
   const selectRun = useMonitorStore((s) => s.selectRun)
   const { t } = useI18n()
   const panelRef = useRef<HTMLDivElement>(null)
   const [entries, setEntries] = useState<InspectEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const runtimeMode = getRuntimeMode()
+  const usageBucketIndex = useMemo(
+    () => buildUsageBucketIndex(usageBuckets ?? []),
+    [usageBuckets],
+  )
+  const selectedRunCost = selectedRunId == null
+    ? undefined
+    : usageBucketIndex.get(selectedRunId)?.costUsd
 
   useEffect(() => {
     if (!selectedRun) return

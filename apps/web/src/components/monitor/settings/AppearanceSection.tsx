@@ -8,7 +8,9 @@ const densityOptions: UiDensity[] = ['compact', 'comfortable', 'spacious']
 export function AppearanceSection() {
   const { locale, setLocale, t } = useI18n()
   const { themeId, setTheme, importVSCodeTheme } = useTheme()
-  const settings = useMonitorStore((s) => s.settings)
+  const uiDensity = useMonitorStore((s) => s.settings.uiDensity)
+  const fontSize = useMonitorStore((s) => s.settings.fontSize)
+  const notificationsEnabled = useMonitorStore((s) => s.settings.notificationsEnabled)
   const updateSettings = useMonitorStore((s) => s.updateSettings)
 
   function handleImportTheme() {
@@ -26,7 +28,7 @@ export function AppearanceSection() {
   }
 
   async function toggleNotifications() {
-    if (!settings.notificationsEnabled) {
+    if (!notificationsEnabled) {
       if (!('Notification' in window)) return
       let permission = Notification.permission
       if (permission === 'default') {
@@ -38,7 +40,7 @@ export function AppearanceSection() {
       }
     }
 
-    updateSettings({ notificationsEnabled: !settings.notificationsEnabled })
+    updateSettings({ notificationsEnabled: !notificationsEnabled })
   }
 
   return (
@@ -84,7 +86,7 @@ export function AppearanceSection() {
             {densityOptions.map((density) => (
               <button
                 key={density}
-                className={`settings-option ${settings.uiDensity === density ? 'active' : ''}`}
+                className={`settings-option ${uiDensity === density ? 'active' : ''}`}
                 onClick={() => updateSettings({ uiDensity: density })}
               >
                 {t(`settings.uiDensity.${density}` as never)}
@@ -96,7 +98,7 @@ export function AppearanceSection() {
             {fontSizeOptions.map((size) => (
               <button
                 key={size}
-                className={`settings-option settings-fontsize-${size} ${settings.fontSize === size ? 'active' : ''}`}
+                className={`settings-option settings-fontsize-${size} ${fontSize === size ? 'active' : ''}`}
                 onClick={() => updateSettings({ fontSize: size })}
               >
                 {t(`settings.fontSize.${size}` as any)}
@@ -110,10 +112,10 @@ export function AppearanceSection() {
               <div className="toggle-hint">{t('settings.notificationsHint')}</div>
             </div>
             <button
-              className={`toggle-switch ${settings.notificationsEnabled ? 'on' : ''}`}
+              className={`toggle-switch ${notificationsEnabled ? 'on' : ''}`}
               onClick={() => void toggleNotifications()}
               role="switch"
-              aria-checked={settings.notificationsEnabled}
+              aria-checked={notificationsEnabled}
               aria-label={t('settings.notifications')}
             >
               <span className="toggle-thumb" />

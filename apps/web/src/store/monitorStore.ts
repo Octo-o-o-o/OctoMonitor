@@ -17,7 +17,7 @@ function loadDismissedAttentionKeys(): string[] {
   }
 }
 
-export type ActiveTab = 'monitor' | 'usage' | 'commits' | 'settings'
+export type ActiveTab = 'monitor' | 'usage' | 'commits' | 'heatmap' | 'settings'
 export type {
   AgentDisplayFormat,
   ColumnLayout,
@@ -26,9 +26,9 @@ export type {
   FontSize,
   MonitorPeriod,
   PanelEntry,
+  SnapshotWindow,
   ToolFilter,
   UiDensity,
-  UsageWindow,
 } from '../lib/preferences'
 
 export type ConnectionStatus = 'connecting' | 'live' | 'offline'
@@ -94,4 +94,4 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
 
 /** Selector: derive the selected run from data + selectedRunId */
 export const selectSelectedRun = (s: MonitorState): RunRecord | undefined =>
-  s.data?.runs.find((r) => r.id === s.selectedRunId)
+  s.selectedRunId == null ? undefined : s.data?.runs.find((r) => r.id === s.selectedRunId)

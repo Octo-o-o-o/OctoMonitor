@@ -1,7 +1,7 @@
 import type { ToolKind } from './types'
 
 export type MonitorPeriod = '30m' | '1h' | '2h' | '4h' | '8h' | '24h'
-export type UsageWindow = 'live' | 'day' | 'week' | 'month' | 'all'
+export type SnapshotWindow = 'day' | 'week' | 'month' | 'all'
 export type UiDensity = 'compact' | 'comfortable' | 'spacious'
 export type ColumnLayout = 'fixed' | 'adaptive'
 export type AgentDisplayFormat = 'id' | 'name' | 'id:name'
@@ -22,11 +22,11 @@ export type FilterRules = Record<ToolKind, ToolFilter>
 
 export interface FrontendSettings {
   monitorPeriod: MonitorPeriod
+  snapshotWindow: SnapshotWindow
   uiDensity: UiDensity
   columnLayout: ColumnLayout
   showFingerprints: boolean
   panelConfig: PanelEntry[]
-  usageWindow: UsageWindow
   filterRules: FilterRules
   agentDisplayFormat: AgentDisplayFormat
   fontSize: FontSize
@@ -36,12 +36,13 @@ export interface FrontendSettings {
 interface StoredFrontendSettings extends Partial<FrontendSettings> {
   version?: number
   companionEnabled?: boolean
+  usageWindow?: 'live' | 'day' | 'week' | 'month' | 'all'
 }
 
 const STORAGE_KEY = 'octomonitor-settings'
 const SETTINGS_VERSION = 3
 const allTools: ToolKind[] = ['claude', 'codex', 'openClaw']
-const allUsageWindows: UsageWindow[] = ['live', 'day', 'week', 'month', 'all']
+const allSnapshotWindows: SnapshotWindow[] = ['day', 'week', 'month', 'all']
 
 export const defaultPanelConfig: PanelEntry[] = [
   { tool: 'claude', enabled: true },
@@ -57,11 +58,11 @@ export const defaultFilterRules: FilterRules = {
 
 export const defaultSettings: FrontendSettings = {
   monitorPeriod: '1h',
+  snapshotWindow: 'week',
   uiDensity: 'comfortable',
   columnLayout: 'fixed',
   showFingerprints: true,
   panelConfig: defaultPanelConfig,
-  usageWindow: 'all',
   filterRules: defaultFilterRules,
   agentDisplayFormat: 'id',
   fontSize: 'default',
@@ -105,19 +106,25 @@ function migrateFilterRules(filterRules: FilterRules | undefined): FilterRules {
   return merged
 }
 
-function migrateUsageWindow(
-  usageWindow: UsageWindow | undefined,
-  version: number | undefined,
-): UsageWindow {
-  if (version == null || version < 3) {
-    return 'all'
+function migrateSnapshotWindow(
+  snapshotWindow: SnapshotWindow | undefined,
+  legacyUsageWindow: StoredFrontendSettings['usageWindow'],
+): SnapshotWindow {
+  if (snapshotWindow && allSnapshotWindows.includes(snapshotWindow)) {
+    return snapshotWindow
   }
 
-  if (usageWindow && allUsageWindows.includes(usageWindow)) {
-    return usageWindow
+  switch (legacyUsageWindow) {
+    case 'day':
+    case 'week':
+    case 'month':
+    case 'all':
+      return legacyUsageWindow
+    case 'live':
+      return 'day'
+    default:
+      return defaultSettings.snapshotWindow
   }
-
-  return defaultSettings.usageWindow
 }
 
 export function loadFrontendSettings(): FrontendSettings {
@@ -128,11 +135,11 @@ export function loadFrontendSettings(): FrontendSettings {
     const parsed = JSON.parse(raw) as StoredFrontendSettings
     return {
       monitorPeriod: parsed.monitorPeriod ?? defaultSettings.monitorPeriod,
+      snapshotWindow: migrateSnapshotWindow(parsed.snapshotWindow, parsed.usageWindow),
       uiDensity: parsed.uiDensity ?? defaultSettings.uiDensity,
       columnLayout: parsed.columnLayout ?? defaultSettings.columnLayout,
       showFingerprints: parsed.showFingerprints ?? defaultSettings.showFingerprints,
       panelConfig: migratePanelConfig(parsed.panelConfig),
-      usageWindow: migrateUsageWindow(parsed.usageWindow, parsed.version),
       filterRules: migrateFilterRules(parsed.filterRules),
       agentDisplayFormat: parsed.agentDisplayFormat ?? defaultSettings.agentDisplayFormat,
       fontSize: parsed.fontSize ?? defaultSettings.fontSize,

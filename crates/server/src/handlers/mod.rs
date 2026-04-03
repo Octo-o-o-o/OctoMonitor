@@ -1,5 +1,6 @@
 pub mod bootstrap;
 pub mod config;
+pub mod history;
 pub mod ingest;
 pub mod inspect;
 pub mod installer;

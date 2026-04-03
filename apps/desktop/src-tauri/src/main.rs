@@ -33,6 +33,13 @@ struct SpawnResult {
     launch_error: Option<String>,
 }
 
+enum ChildStatus {
+    Running,
+    Missing,
+    Exited(String),
+    Unknown(String),
+}
+
 fn find_server_binary() -> Option<PathBuf> {
     let exe = env::current_exe().ok()?;
     let dir = exe.parent()?;
@@ -158,72 +165,122 @@ fn check_server_health() -> bool {
     response.contains("\"status\":\"ok\"") || response.contains("\"status\": \"ok\"")
 }
 
-fn wait_for_server_ready(
-    child: &mut Option<Child>,
-    launch_error: Option<&str>,
-) -> Option<DesktopBootIssue> {
-    if child.is_none() {
-        return (!check_server_health()).then(|| DesktopBootIssue {
-            title: "Desktop server unavailable".into(),
-            message: launch_error.unwrap_or("Desktop shell could not launch the local OctoMonitor server. Start `cargo run -p octomonitor-server` and retry.").into(),
-        });
+fn inspect_server_process(app: &AppHandle) -> ChildStatus {
+    let Some(state) = app.try_state::<ServerState>() else {
+        return ChildStatus::Missing;
+    };
+    let Ok(mut guard) = state.0.lock() else {
+        return ChildStatus::Unknown(
+            "Desktop shell could not lock the server process state.".into(),
+        );
+    };
+    let Some(process) = guard.as_mut() else {
+        return ChildStatus::Missing;
+    };
+
+    match process.try_wait() {
+        Ok(Some(status)) => {
+            guard.take();
+            ChildStatus::Exited(match status.code() {
+                Some(code) => format!("exit code {code}"),
+                None => "terminated by signal".into(),
+            })
+        }
+        Ok(None) => ChildStatus::Running,
+        Err(error) => ChildStatus::Unknown(format!(
+            "Desktop shell could not inspect the server process state: {error}"
+        )),
+    }
+}
+
+fn push_boot_issue(app: &AppHandle, issue: Option<DesktopBootIssue>) {
+    if let Some(state) = app.try_state::<DesktopBootState>() {
+        if let Ok(mut guard) = state.0.lock() {
+            *guard = issue.clone();
+        }
     }
 
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
-    loop {
-        if check_server_health() {
-            return None;
-        }
+    let payload = serde_json::to_string(&issue).unwrap_or_else(|_| "null".into());
+    let script = format!(
+        "window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload}; window.dispatchEvent(new CustomEvent('octomonitor:desktop-boot-status', {{ detail: {payload} }}));"
+    );
+    for window in app.webview_windows().values() {
+        let _ = window.eval(script.as_str());
+    }
+}
 
-        if let Some(process) = child.as_mut() {
-            match process.try_wait() {
-                Ok(Some(status)) => {
-                    *child = None;
-                    if check_server_health() {
-                        return None;
+fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
+    thread::spawn(move || {
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        let mut timeout_reported = false;
+
+        loop {
+            if check_server_health() {
+                if timeout_reported {
+                    push_boot_issue(&app, None);
+                }
+                break;
+            }
+
+            match inspect_server_process(&app) {
+                ChildStatus::Running => {}
+                ChildStatus::Missing => {
+                    if timeout_reported {
+                        break;
                     }
-                    let detail = match status.code() {
-                        Some(code) => format!("exit code {code}"),
-                        None => "terminated by signal".into(),
-                    };
-                    let launch_hint = launch_error.unwrap_or(
+                }
+                ChildStatus::Exited(detail) => {
+                    if check_server_health() {
+                        break;
+                    }
+                    let launch_hint = launch_error.as_deref().unwrap_or(
                         "Another process may already be using port 46321, or the bundled server exited before becoming healthy.",
                     );
-                    return Some(DesktopBootIssue {
-                        title: "Local server failed to start".into(),
-                        message: format!(
-                            "The bundled OctoMonitor server exited before becoming ready ({detail}). {launch_hint}"
-                        ),
-                    });
+                    push_boot_issue(
+                        &app,
+                        Some(DesktopBootIssue {
+                            title: "Local server failed to start".into(),
+                            message: format!(
+                                "The bundled OctoMonitor server exited before becoming ready ({detail}). {launch_hint}"
+                            ),
+                        }),
+                    );
+                    break;
                 }
-                Ok(None) => {}
-                Err(error) => {
-                    return Some(DesktopBootIssue {
-                        title: "Local server status is unknown".into(),
-                        message: format!(
-                            "Desktop shell could not inspect the server process state: {error}"
-                        ),
-                    });
+                ChildStatus::Unknown(message) => {
+                    push_boot_issue(
+                        &app,
+                        Some(DesktopBootIssue {
+                            title: "Local server status is unknown".into(),
+                            message,
+                        }),
+                    );
+                    break;
                 }
             }
-        }
 
-        if Instant::now() >= deadline {
-            break;
-        }
-        thread::sleep(STARTUP_POLL_INTERVAL);
-    }
+            if !timeout_reported && Instant::now() >= deadline {
+                let issue = DesktopBootIssue {
+                    title: if launch_error.is_some() {
+                        "Desktop server unavailable".into()
+                    } else {
+                        "Local server did not become ready".into()
+                    },
+                    message: launch_error.as_deref().unwrap_or(
+                        "Desktop shell could not confirm that http://127.0.0.1:46321/api/health became ready within 8 seconds. OctoMonitor is still warming up in the background; if this banner persists, retry or start `cargo run -p octomonitor-server` manually.",
+                    ).into(),
+                };
+                push_boot_issue(&app, Some(issue));
+                timeout_reported = true;
 
-    if check_server_health() {
-        None
-    } else {
-        Some(DesktopBootIssue {
-            title: "Local server did not become ready".into(),
-            message: launch_error.unwrap_or(
-                "Desktop shell could not confirm that http://127.0.0.1:46321/api/health became ready within 8 seconds. If another OctoMonitor instance is already running, you can ignore this. Otherwise start `cargo run -p octomonitor-server` and retry.",
-            ).into(),
-        })
-    }
+                if matches!(inspect_server_process(&app), ChildStatus::Missing) {
+                    break;
+                }
+            }
+
+            thread::sleep(STARTUP_POLL_INTERVAL);
+        }
+    });
 }
 
 fn stop_server(app: &AppHandle) {
@@ -239,11 +296,10 @@ fn stop_server(app: &AppHandle) {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let mut spawn_result = spawn_server();
-            let boot_issue =
-                wait_for_server_ready(&mut spawn_result.child, spawn_result.launch_error.as_deref());
+            let spawn_result = spawn_server();
             app.manage(ServerState(Mutex::new(spawn_result.child)));
-            app.manage(DesktopBootState(Mutex::new(boot_issue)));
+            app.manage(DesktopBootState(Mutex::new(None)));
+            monitor_server_readiness(app.handle().clone(), spawn_result.launch_error);
             Ok(())
         })
         .on_page_load(|window, _| {

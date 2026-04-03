@@ -9,5 +9,6 @@ describe('App', () => {
     expect(await screen.findByText('MONITOR')).toBeInTheDocument()
     expect(await screen.findByText('USAGE')).toBeInTheDocument()
     expect(await screen.findByText('COMMITS')).toBeInTheDocument()
+    expect(await screen.findByText('HEATMAP')).toBeInTheDocument()
   })
 })

@@ -22,11 +22,15 @@ const agentDisplayExamples: Record<AgentDisplayFormat, string> = {
 }
 
 export function MonitorSection() {
-  const settings = useMonitorStore((s) => s.settings)
+  const monitorPeriod = useMonitorStore((s) => s.settings.monitorPeriod)
+  const columnLayout = useMonitorStore((s) => s.settings.columnLayout)
+  const panelConfig = useMonitorStore((s) => s.settings.panelConfig)
+  const showFingerprints = useMonitorStore((s) => s.settings.showFingerprints)
+  const agentDisplayFormat = useMonitorStore((s) => s.settings.agentDisplayFormat)
   const updateSettings = useMonitorStore((s) => s.updateSettings)
   const { t } = useI18n()
 
-  const enabledCount = settings.panelConfig.filter((p) => p.enabled).length
+  const enabledCount = panelConfig.filter((p) => p.enabled).length
 
   return (
     <section className="settings-section">
@@ -39,7 +43,7 @@ export function MonitorSection() {
             {periods.map((p) => (
               <button
                 key={p}
-                className={`settings-option ${settings.monitorPeriod === p ? 'active' : ''}`}
+                className={`settings-option ${monitorPeriod === p ? 'active' : ''}`}
                 onClick={() => updateSettings({ monitorPeriod: p })}
               >
                 {periodLabels[p]}
@@ -52,7 +56,7 @@ export function MonitorSection() {
             {columnLayouts.map((l) => (
               <button
                 key={l}
-                className={`settings-option ${settings.columnLayout === l ? 'active' : ''}`}
+                className={`settings-option ${columnLayout === l ? 'active' : ''}`}
                 onClick={() => updateSettings({ columnLayout: l })}
               >
                 {columnLayoutLabels[l]}
@@ -65,14 +69,14 @@ export function MonitorSection() {
           <h3>{t('settings.panelConfig')}</h3>
           <p className="settings-hint">{t('settings.panelConfigHint')}</p>
           <div className="panel-config-list">
-            {settings.panelConfig.map((entry, idx) => (
+            {panelConfig.map((entry, idx) => (
               <div key={entry.tool} className="panel-config-row">
                 <div className="panel-config-reorder">
                   <button
                     className="panel-move-btn"
                     disabled={idx === 0}
                     onClick={() => {
-                      const next = [...settings.panelConfig]
+                      const next = [...panelConfig]
                       ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
                       updateSettings({ panelConfig: next })
                     }}
@@ -80,9 +84,9 @@ export function MonitorSection() {
                   >{'\u25B2'}</button>
                   <button
                     className="panel-move-btn"
-                    disabled={idx === settings.panelConfig.length - 1}
+                    disabled={idx === panelConfig.length - 1}
                     onClick={() => {
-                      const next = [...settings.panelConfig]
+                      const next = [...panelConfig]
                       ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
                       updateSettings({ panelConfig: next })
                     }}
@@ -94,7 +98,7 @@ export function MonitorSection() {
                   className={`toggle-switch ${entry.enabled ? 'on' : ''}`}
                   disabled={entry.enabled && enabledCount <= 1}
                   onClick={() => {
-                    const next = settings.panelConfig.map((p, i) =>
+                    const next = panelConfig.map((p, i) =>
                       i === idx ? { ...p, enabled: !p.enabled } : p,
                     )
                     updateSettings({ panelConfig: next })
@@ -117,10 +121,10 @@ export function MonitorSection() {
                 <div className="toggle-hint">{t('settings.fingerprintsHint')}</div>
               </div>
               <button
-                className={`toggle-switch ${settings.showFingerprints ? 'on' : ''}`}
-                onClick={() => updateSettings({ showFingerprints: !settings.showFingerprints })}
+                className={`toggle-switch ${showFingerprints ? 'on' : ''}`}
+                onClick={() => updateSettings({ showFingerprints: !showFingerprints })}
                 role="switch"
-                aria-checked={settings.showFingerprints}
+                aria-checked={showFingerprints}
                 aria-label={t('settings.showFingerprints')}
               >
                 <span className="toggle-thumb" />
@@ -134,7 +138,7 @@ export function MonitorSection() {
             {agentDisplayFormats.map((fmt) => (
               <button
                 key={fmt}
-                className={`agent-display-option ${settings.agentDisplayFormat === fmt ? 'active' : ''}`}
+                className={`agent-display-option ${agentDisplayFormat === fmt ? 'active' : ''}`}
                 onClick={() => updateSettings({ agentDisplayFormat: fmt })}
               >
                 <span className="agent-display-format-label">{t(`settings.agentDisplay.${fmt}` as any)}</span>

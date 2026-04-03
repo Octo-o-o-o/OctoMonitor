@@ -3,6 +3,7 @@ import { useMonitorStore, type AgentDisplayFormat } from '../../store/monitorSto
 import { useI18n } from '../../lib/i18n'
 import { formatTokens, formatDuration, formatLastUpdated, formatAgentTag, getGroupKey } from '../../lib/format'
 import { buildVisiblePanels, buildVisibleRunsBySource, summarizeRunsByState } from '../../lib/monitor'
+import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
 import { AttentionBanner } from './AttentionBanner'
 import { MonitorSkeleton } from './Skeleton'
 import type { PendingCron, RunRecord, ToolKind } from '../../lib/types'
@@ -535,6 +536,7 @@ export function MonitorView() {
   const filterRules = useMonitorStore((s) => s.settings.filterRules)
   const [mobileSource, setMobileSource] = useState<ToolKind>('claude')
   const { t } = useI18n()
+  const isNarrowLayout = useMediaQuery(NARROW_LAYOUT_QUERY)
 
   const visiblePanels = useMemo(
     () => buildVisiblePanels(panelConfig),
@@ -598,34 +600,39 @@ export function MonitorView() {
         </div>
       )}
       <section className="monitor-board-panel">
-        <MobileSourceTabs
-          selected={effectiveMobileSource}
-          onSelect={setMobileSource}
-          counts={sourceCounts}
-          visibleTools={visiblePanels}
-        />
-        <div
-          className={`source-columns source-columns-desktop ${columnLayout === 'adaptive' ? 'adaptive' : ''}`}
-          style={adaptiveStyle}
-        >
-          {visiblePanels.map((tool) => (
-            <SourceColumn
-              key={tool}
-              tool={tool}
-              runs={sessionsBySource[tool]}
-              crons={tool === 'openClaw' ? data.pendingCrons : undefined}
-              showEmptyState={hasVisibleRuns}
+        {isNarrowLayout ? (
+          <>
+            <MobileSourceTabs
+              selected={effectiveMobileSource}
+              onSelect={setMobileSource}
+              counts={sourceCounts}
+              visibleTools={visiblePanels}
             />
-          ))}
-        </div>
-        <div className="source-columns-mobile">
-          <SourceColumn
-            tool={effectiveMobileSource}
-            runs={sessionsBySource[effectiveMobileSource]}
-            crons={effectiveMobileSource === 'openClaw' ? data.pendingCrons : undefined}
-            showEmptyState={hasVisibleRuns}
-          />
-        </div>
+            <div className="source-columns-mobile">
+              <SourceColumn
+                tool={effectiveMobileSource}
+                runs={sessionsBySource[effectiveMobileSource]}
+                crons={effectiveMobileSource === 'openClaw' ? data.pendingCrons : undefined}
+                showEmptyState={hasVisibleRuns}
+              />
+            </div>
+          </>
+        ) : (
+          <div
+            className={`source-columns source-columns-desktop ${columnLayout === 'adaptive' ? 'adaptive' : ''}`}
+            style={adaptiveStyle}
+          >
+            {visiblePanels.map((tool) => (
+              <SourceColumn
+                key={tool}
+                tool={tool}
+                runs={sessionsBySource[tool]}
+                crons={tool === 'openClaw' ? data.pendingCrons : undefined}
+                showEmptyState={hasVisibleRuns}
+              />
+            ))}
+          </div>
+        )}
       </section>
     </div>
   )

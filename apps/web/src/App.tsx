@@ -5,6 +5,7 @@ import { StatusBar } from './components/monitor/StatusBar'
 import { MonitorView } from './components/monitor/MonitorView'
 import { UsageView } from './components/monitor/UsageView'
 import { CommitsView } from './components/monitor/CommitsView'
+import { HeatmapView } from './components/monitor/HeatmapView'
 import { SettingsView } from './components/monitor/SettingsView'
 import { InspectDrawer } from './components/InspectDrawer'
 import { ShortcutOverlay } from './components/ShortcutOverlay'
@@ -96,12 +97,13 @@ function TabContent({ runtimeMode, tab }: { runtimeMode: ReturnType<typeof getRu
     case 'monitor': return <MonitorView />
     case 'usage': return <UsageView />
     case 'commits': return <CommitsView />
+    case 'heatmap': return <HeatmapView />
     case 'settings': return runtimeMode === 'local' ? <SettingsView /> : <MonitorView />
     default: return <MonitorView />
   }
 }
 
-function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>) {
+function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>, activeTab: string) {
   const setActiveTab = useMonitorStore((s) => s.setActiveTab)
   const data = useMonitorStore((s) => s.data)
   const monitorPeriod = useMonitorStore((s) => s.settings.monitorPeriod)
@@ -114,11 +116,11 @@ function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>) {
   const toggleShortcutHelp = useMonitorStore((s) => s.toggleShortcutHelp)
 
   const runIds = useMemo(() => {
-    if (!data) return []
+    if (!data || activeTab !== 'monitor') return []
     const visiblePanels = buildVisiblePanels(panelConfig)
     const sessionsBySource = buildVisibleRunsBySource(data.runs, filterRules, monitorPeriod)
     return buildVisibleRunIds(sessionsBySource, visiblePanels, agentDisplayFormat)
-  }, [agentDisplayFormat, data, filterRules, monitorPeriod, panelConfig])
+  }, [activeTab, agentDisplayFormat, data, filterRules, monitorPeriod, panelConfig])
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -130,7 +132,8 @@ function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>) {
           case '1': setActiveTab('monitor'); break
           case '2': setActiveTab('usage'); break
           case '3': setActiveTab('commits'); break
-          case '4':
+          case '4': setActiveTab('heatmap'); break
+          case '5':
             if (runtimeMode === 'local') setActiveTab('settings')
             break
           case 'j':
@@ -159,7 +162,7 @@ function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>) {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [runtimeMode, setActiveTab, runIds, focusedRunId, setFocusedRunId, selectRun, toggleShortcutHelp])
+  }, [runtimeMode, activeTab, setActiveTab, runIds, focusedRunId, setFocusedRunId, selectRun, toggleShortcutHelp])
 }
 
 function useWaitingNotifications(enabled: boolean, t: (key: I18nKey) => string) {
@@ -195,7 +198,9 @@ export default function App() {
   const setActiveTab = useMonitorStore((s) => s.setActiveTab)
   const activeTab = useMonitorStore((s) => s.activeTab)
   const connectionStatus = useMonitorStore((s) => s.connectionStatus)
-  const settings = useMonitorStore((s) => s.settings)
+  const notificationsEnabled = useMonitorStore((s) => s.settings.notificationsEnabled)
+  const fontSize = useMonitorStore((s) => s.settings.fontSize)
+  const uiDensity = useMonitorStore((s) => s.settings.uiDensity)
   const { t } = useI18n()
   const [remoteAuthState, setRemoteAuthState] = useState<'checking' | 'required' | 'ready'>(
     runtimeMode === 'remoteViewer' ? 'checking' : 'ready',
@@ -205,21 +210,22 @@ export default function App() {
     if (typeof window === 'undefined' || runtimeMode !== 'local') return null
     return readDesktopBootIssue()
   })
-  const checkWaitingNotifications = useWaitingNotifications(settings.notificationsEnabled, t)
+  const checkWaitingNotifications = useWaitingNotifications(notificationsEnabled, t)
   const handleWsMessage = useCallback((payload: unknown) => {
     const data = normalizeBootstrapPayload(payload)
     setData(data)
+    setConnectionStatus(data.generatedAt ? 'live' : 'connecting')
     checkWaitingNotifications(data)
-  }, [setData, checkWaitingNotifications])
+  }, [setConnectionStatus, setData, checkWaitingNotifications])
   const handleConnectionChange = useCallback((connected: boolean) => {
-    setConnectionStatus(connected ? 'live' : 'offline')
+    setConnectionStatus(connected ? 'connecting' : 'offline')
   }, [setConnectionStatus])
   const wsConnected = useWebSocket(
     runtimeMode === 'local' || remoteAuthState === 'ready',
     handleWsMessage,
     handleConnectionChange,
   )
-  useKeyboardShortcuts(runtimeMode)
+  useKeyboardShortcuts(runtimeMode, activeTab)
 
   useEffect(() => {
     if (runtimeMode !== 'remoteViewer') return
@@ -292,20 +298,20 @@ export default function App() {
   }, [activeTab, runtimeMode, setActiveTab])
 
   useEffect(() => {
-    if (settings.fontSize === 'default') {
+    if (fontSize === 'default') {
       document.documentElement.removeAttribute('data-fontsize')
     } else {
-      document.documentElement.setAttribute('data-fontsize', settings.fontSize)
+      document.documentElement.setAttribute('data-fontsize', fontSize)
     }
-  }, [settings.fontSize])
+  }, [fontSize])
 
   useEffect(() => {
-    if (settings.uiDensity === 'comfortable') {
+    if (uiDensity === 'comfortable') {
       document.documentElement.removeAttribute('data-density')
     } else {
-      document.documentElement.setAttribute('data-density', settings.uiDensity)
+      document.documentElement.setAttribute('data-density', uiDensity)
     }
-  }, [settings.uiDensity])
+  }, [uiDensity])
 
   useEffect(() => {
     if (runtimeMode !== 'local') return

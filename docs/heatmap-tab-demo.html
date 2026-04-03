@@ -1,0 +1,1616 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OctoMonitor Heatmap Tab Demo</title>
+    <style>
+      :root {
+        --font-sans: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+        --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Fira Code", monospace;
+        --bg: #08101f;
+        --surface: rgba(19, 29, 52, 0.84);
+        --surface-strong: rgba(23, 35, 63, 0.94);
+        --surface-soft: rgba(15, 23, 41, 0.72);
+        --border: rgba(157, 178, 214, 0.18);
+        --border-strong: rgba(196, 214, 240, 0.24);
+        --text: #eff5ff;
+        --muted: #9fb0cf;
+        --muted-strong: #c7d3ea;
+        --shell-highlight: rgba(255, 255, 255, 0.06);
+        --shadow: 0 18px 50px rgba(3, 7, 18, 0.38);
+        --shadow-soft: 0 12px 30px rgba(3, 7, 18, 0.22);
+        --accent-rgb: 64, 211, 157;
+        --accent: rgb(var(--accent-rgb));
+        --accent-soft: rgba(var(--accent-rgb), 0.18);
+        --cell-empty: rgba(255, 255, 255, 0.05);
+        --cell-border: rgba(255, 255, 255, 0.02);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(98, 169, 255, 0.18), transparent 26%),
+          radial-gradient(circle at top right, rgba(64, 211, 157, 0.12), transparent 30%),
+          linear-gradient(180deg, #091223 0%, #08101f 40%, #070d18 100%);
+        color: var(--text);
+        font-family: var(--font-sans);
+      }
+
+      body[data-metric="input"] {
+        --accent-rgb: 242, 187, 74;
+      }
+
+      body[data-metric="token"] {
+        --accent-rgb: 64, 211, 157;
+      }
+
+      body[data-metric="commit"] {
+        --accent-rgb: 98, 169, 255;
+      }
+
+      body::before,
+      body::after {
+        content: "";
+        position: fixed;
+        inset: auto auto 8% -8%;
+        width: 32rem;
+        height: 32rem;
+        background: radial-gradient(circle, rgba(var(--accent-rgb), 0.08), transparent 72%);
+        filter: blur(24px);
+        pointer-events: none;
+      }
+
+      body::after {
+        inset: 6% -10% auto auto;
+        width: 26rem;
+        height: 26rem;
+      }
+
+      button {
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: 0;
+        cursor: pointer;
+      }
+
+      .shell {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 22px 20px 30px;
+      }
+
+      .status-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 18px;
+        min-height: 72px;
+        border-radius: 24px;
+        border: 1px solid var(--border);
+        background: rgba(12, 20, 38, 0.82);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .status-bar-left,
+      .status-bar-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .status-bar-right {
+        margin-left: auto;
+        justify-content: flex-end;
+      }
+
+      .live-indicator,
+      .pill,
+      .toolbar-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--shell-highlight);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .live-indicator {
+        color: var(--accent);
+      }
+
+      .live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: currentColor;
+        box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.4);
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% {
+          box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.4);
+          opacity: 1;
+        }
+
+        60% {
+          box-shadow: 0 0 0 8px rgba(var(--accent-rgb), 0);
+          opacity: 0.6;
+        }
+      }
+
+      .view-tabs,
+      .segmented {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(23, 35, 63, 0.78);
+      }
+
+      .view-tab,
+      .seg-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 34px;
+        min-width: 94px;
+        padding: 0 14px;
+        border-radius: 999px;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .view-tab.active,
+      .seg-button.active {
+        color: var(--text);
+        background: linear-gradient(
+          180deg,
+          rgba(var(--accent-rgb), 0.2),
+          rgba(var(--accent-rgb), 0.1)
+        );
+        box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+      }
+
+      .view-tab:not(.active):hover,
+      .seg-button:not(.active):hover,
+      .toolbar-btn:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .toolbar-btn {
+        min-width: 38px;
+        justify-content: center;
+      }
+
+      .page {
+        display: grid;
+        gap: 20px;
+        padding-top: 18px;
+      }
+
+      .hero,
+      .card {
+        position: relative;
+        overflow: hidden;
+        border-radius: 24px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, var(--surface) 0%, var(--surface-soft) 100%);
+        box-shadow: var(--shadow-soft);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.8fr);
+        gap: 20px;
+        padding: 24px;
+      }
+
+      .hero::before,
+      .card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 42%),
+          radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.09), transparent 36%);
+        pointer-events: none;
+      }
+
+      .hero-copy,
+      .hero-side,
+      .card-inner {
+        position: relative;
+        z-index: 1;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 26px;
+        height: 1px;
+        background: rgba(var(--accent-rgb), 0.55);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      .hero h1 {
+        font-size: clamp(2rem, 3.5vw, 3.2rem);
+        line-height: 1.04;
+        max-width: 14ch;
+      }
+
+      .hero p {
+        margin-top: 14px;
+        max-width: 62ch;
+        color: var(--muted-strong);
+        line-height: 1.6;
+        font-size: 0.98rem;
+      }
+
+      .hero-notes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .hero-note {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 38px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(var(--accent-rgb), 0.16);
+        background: rgba(var(--accent-rgb), 0.1);
+        color: var(--muted-strong);
+        font-size: 0.82rem;
+      }
+
+      .hero-side {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .mini-panel {
+        padding: 16px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: rgba(10, 17, 31, 0.42);
+      }
+
+      .mini-panel strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 1rem;
+      }
+
+      .mini-panel p {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.5;
+      }
+
+      .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .stat-card {
+        padding: 18px 18px 16px;
+      }
+
+      .stat-label {
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .stat-value {
+        margin-top: 10px;
+        font-size: clamp(1.6rem, 2.2vw, 2.5rem);
+        line-height: 1.1;
+        font-weight: 600;
+      }
+
+      .stat-subvalue {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.7fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .card-inner {
+        padding: 22px;
+      }
+
+      .card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .card-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+      }
+
+      .card-subtitle {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.55;
+        max-width: 58ch;
+      }
+
+      .control-group {
+        display: grid;
+        gap: 10px;
+        justify-items: end;
+      }
+
+      .control-label {
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .chart-surface {
+        display: grid;
+        gap: 18px;
+      }
+
+      .axis-hint,
+      .legend-copy {
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.5;
+      }
+
+      .legend-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        flex-wrap: wrap;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .legend {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .legend-swatches {
+        display: flex;
+        gap: 6px;
+      }
+
+      .legend-cell,
+      .heat-cell {
+        border-radius: 5px;
+        border: 1px solid var(--cell-border);
+        background: var(--cell-empty);
+        transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .legend-cell {
+        width: 14px;
+        height: 14px;
+      }
+
+      .heat-cell {
+        width: var(--cell-size, 16px);
+        height: var(--cell-size, 16px);
+      }
+
+      .heat-cell[data-level="1"],
+      .legend-cell[data-level="1"] {
+        background: rgba(var(--accent-rgb), 0.2);
+        border-color: rgba(var(--accent-rgb), 0.14);
+      }
+
+      .heat-cell[data-level="2"],
+      .legend-cell[data-level="2"] {
+        background: rgba(var(--accent-rgb), 0.38);
+        border-color: rgba(var(--accent-rgb), 0.18);
+      }
+
+      .heat-cell[data-level="3"],
+      .legend-cell[data-level="3"] {
+        background: rgba(var(--accent-rgb), 0.58);
+        border-color: rgba(var(--accent-rgb), 0.28);
+      }
+
+      .heat-cell[data-level="4"],
+      .legend-cell[data-level="4"] {
+        background: rgba(var(--accent-rgb), 0.84);
+        border-color: rgba(var(--accent-rgb), 0.42);
+      }
+
+      .heat-cell.interactive:hover,
+      .heat-cell.interactive:focus-visible,
+      .heat-cell.selected {
+        transform: translateY(-1px);
+        border-color: rgba(255, 255, 255, 0.3);
+        box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
+        outline: none;
+      }
+
+      .heatmap-frame {
+        overflow: auto hidden;
+        padding-bottom: 2px;
+      }
+
+      .hour-board {
+        min-width: 100%;
+      }
+
+      .hour-axis {
+        display: grid;
+        grid-template-columns: 112px repeat(24, minmax(12px, 1fr));
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+
+      .hour-axis-label,
+      .hour-label,
+      .day-label,
+      .calendar-label,
+      .month-marker {
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      .day-row {
+        display: grid;
+        grid-template-columns: 112px repeat(24, minmax(12px, 1fr));
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+
+      .day-label {
+        display: grid;
+        gap: 2px;
+        align-content: center;
+      }
+
+      .day-label strong {
+        color: var(--text);
+        font-size: 0.8rem;
+        font-family: var(--font-sans);
+        font-weight: 600;
+        letter-spacing: normal;
+      }
+
+      .day-label span {
+        color: var(--muted);
+        font-size: 0.7rem;
+      }
+
+      .hour-cells {
+        display: grid;
+        grid-template-columns: repeat(24, minmax(12px, 1fr));
+        gap: 6px;
+      }
+
+      .calendar-board {
+        display: grid;
+        gap: 8px;
+        min-width: fit-content;
+      }
+
+      .calendar-months {
+        position: relative;
+        display: grid;
+        grid-template-columns: 54px repeat(var(--calendar-weeks), var(--cell-size, 13px));
+        gap: 4px;
+        min-height: 18px;
+      }
+
+      .month-marker {
+        position: absolute;
+        top: 0;
+        left: 0;
+        white-space: nowrap;
+      }
+
+      .calendar-grid {
+        display: grid;
+        grid-template-columns: 54px auto;
+        gap: 10px;
+        align-items: start;
+      }
+
+      .calendar-y {
+        display: grid;
+        gap: 4px;
+        padding-top: 2px;
+      }
+
+      .calendar-label {
+        display: flex;
+        align-items: center;
+        height: var(--cell-size, 13px);
+      }
+
+      .calendar-columns {
+        display: grid;
+        grid-template-columns: repeat(var(--calendar-weeks), var(--cell-size, 13px));
+        gap: 4px;
+      }
+
+      .calendar-column {
+        display: grid;
+        gap: 4px;
+      }
+
+      .detail-stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .detail-block {
+        padding: 16px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: rgba(10, 17, 31, 0.46);
+      }
+
+      .detail-block .eyebrow {
+        margin-bottom: 12px;
+      }
+
+      .selection-title {
+        font-size: 1.08rem;
+        font-weight: 700;
+      }
+
+      .selection-value {
+        margin-top: 8px;
+        font-size: 2rem;
+        line-height: 1.05;
+        font-weight: 700;
+        color: var(--accent);
+      }
+
+      .selection-meta {
+        margin-top: 8px;
+        color: var(--muted);
+        line-height: 1.6;
+        font-size: 0.92rem;
+      }
+
+      .insight-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .insight-item {
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .insight-item strong {
+        display: block;
+        color: var(--text);
+        font-size: 0.94rem;
+      }
+
+      .insight-item span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 0.84rem;
+        line-height: 1.5;
+      }
+
+      .detail-copy {
+        color: var(--muted-strong);
+        font-size: 0.92rem;
+        line-height: 1.65;
+      }
+
+      .detail-copy strong {
+        color: var(--text);
+      }
+
+      .footer-note {
+        color: var(--muted);
+        font-size: 0.84rem;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 1180px) {
+        .hero,
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .stat-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .control-group {
+          justify-items: start;
+        }
+
+        .card-head {
+          flex-direction: column;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .shell {
+          padding: 16px 14px 22px;
+        }
+
+        .hero,
+        .card-inner {
+          padding: 18px;
+        }
+
+        .status-bar {
+          padding: 12px;
+          border-radius: 20px;
+        }
+
+        .stat-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hour-axis,
+        .day-row {
+          grid-template-columns: 86px repeat(24, minmax(10px, 1fr));
+          gap: 4px;
+        }
+
+        .view-tab,
+        .seg-button {
+          min-width: 78px;
+          padding: 0 12px;
+        }
+      }
+    </style>
+  </head>
+  <body data-metric="token" data-scope="total">
+    <div class="shell">
+      <header class="status-bar">
+        <div class="status-bar-left">
+          <span class="live-indicator"><span class="live-dot"></span> Live Demo</span>
+          <nav class="view-tabs" aria-label="Primary tabs">
+            <button class="view-tab" type="button">Monitor</button>
+            <button class="view-tab" type="button">Usage</button>
+            <button class="view-tab" type="button">Commits</button>
+            <button class="view-tab active" type="button" aria-current="page">Heatmap</button>
+            <button class="view-tab" type="button">Settings</button>
+          </nav>
+        </div>
+        <div class="status-bar-right">
+          <span class="pill">Standalone HTML</span>
+          <button class="toolbar-btn" type="button">EN</button>
+          <button class="toolbar-btn" type="button">Theme</button>
+        </div>
+      </header>
+
+      <main class="page">
+        <section class="hero">
+          <div class="hero-copy">
+            <div class="eyebrow">Heatmap Tab Proposal</div>
+            <h1>把活跃节奏拆成 小时视图 和 日期视图。</h1>
+            <p>
+              这个原型把新增的 <strong>Heatmap</strong> tab 定成一个分析面板：周/月视图保持
+              <strong>按小时</strong> 看 burst，全年总览切到 GitHub 风格的
+              <strong>按日期</strong> 贡献日历。上方再提供 <strong>Input / Token / Commit</strong>
+              三种生成口径切换，确保同一套布局既能看交互频率，也能看成本和产出。
+            </p>
+            <div class="hero-notes">
+              <span class="hero-note">周 x 小时: 找高峰工时</span>
+              <span class="hero-note">月 x 小时: 看阶段性波动</span>
+              <span class="hero-note">总览 x 日期: 看 streak 和周期</span>
+              <span class="hero-note">颜色按当前视图分位数映射</span>
+            </div>
+          </div>
+          <div class="hero-side">
+            <div class="mini-panel">
+              <div class="eyebrow">Interaction Model</div>
+              <strong>1 个新 tab，2 组切换，3 种图。</strong>
+              <p>避免把热力图塞进 Usage 或 Commits 里，独立成页后可以承载 hover 详情、峰值分析和后续 drill-down。</p>
+            </div>
+            <div class="mini-panel">
+              <div class="eyebrow">Why Not One Chart</div>
+              <strong>小时和日期是两种阅读任务。</strong>
+              <p>周/月需要定位具体时段，总览需要看长期节奏。强行统一成一种矩阵会牺牲其中一边的可读性。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="stat-grid" aria-label="Heatmap summary">
+          <article class="card stat-card">
+            <div class="stat-label" id="stat-total-label">Total</div>
+            <div class="stat-value" id="stat-total-value">0</div>
+            <div class="stat-subvalue" id="stat-total-subvalue">Loading…</div>
+          </article>
+          <article class="card stat-card">
+            <div class="stat-label">Peak Cell</div>
+            <div class="stat-value" id="stat-peak-value">0</div>
+            <div class="stat-subvalue" id="stat-peak-subvalue">Loading…</div>
+          </article>
+          <article class="card stat-card">
+            <div class="stat-label">Top Day</div>
+            <div class="stat-value" id="stat-day-value">0</div>
+            <div class="stat-subvalue" id="stat-day-subvalue">Loading…</div>
+          </article>
+          <article class="card stat-card">
+            <div class="stat-label">Active Streak</div>
+            <div class="stat-value" id="stat-streak-value">0d</div>
+            <div class="stat-subvalue" id="stat-streak-subvalue">Loading…</div>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <article class="card">
+            <div class="card-inner">
+              <div class="card-head">
+                <div>
+                  <div class="card-title">Heatmap Surface</div>
+                  <div class="card-subtitle" id="chart-subtitle">
+                    切换不同口径和范围，确认新增 tab 的信息层级是否成立。
+                  </div>
+                </div>
+                <div class="control-group">
+                  <div>
+                    <div class="control-label">Metric</div>
+                    <div class="segmented" id="metric-switch">
+                      <button class="seg-button" type="button" data-metric="input">Input</button>
+                      <button class="seg-button active" type="button" data-metric="token">Token</button>
+                      <button class="seg-button" type="button" data-metric="commit">Commit</button>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="control-label">Scope</div>
+                    <div class="segmented" id="scope-switch">
+                      <button class="seg-button" type="button" data-scope="week">Week x Hour</button>
+                      <button class="seg-button" type="button" data-scope="month">Month x Hour</button>
+                      <button class="seg-button active" type="button" data-scope="total">Total x Date</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="chart-surface">
+                <div class="axis-hint" id="axis-hint">
+                  最近 53 周，每个单元代表 1 天，适合看长期 streak、波峰和 release 周期。
+                </div>
+                <div class="heatmap-frame" id="heatmap-region" aria-live="polite"></div>
+                <div class="legend-row">
+                  <div class="legend">
+                    <span class="legend-copy">Less</span>
+                    <div class="legend-swatches" aria-hidden="true">
+                      <span class="legend-cell" data-level="0"></span>
+                      <span class="legend-cell" data-level="1"></span>
+                      <span class="legend-cell" data-level="2"></span>
+                      <span class="legend-cell" data-level="3"></span>
+                      <span class="legend-cell" data-level="4"></span>
+                    </div>
+                    <span class="legend-copy">More</span>
+                  </div>
+                  <div class="legend-copy" id="legend-copy">
+                    颜色基于当前视图的非零数据做分位数映射，避免少数尖峰把整张图压平。
+                  </div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <aside class="card">
+            <div class="card-inner detail-stack">
+              <section class="detail-block">
+                <div class="eyebrow">Selection</div>
+                <div class="selection-title" id="selection-title">Loading…</div>
+                <div class="selection-value" id="selection-value">0</div>
+                <div class="selection-meta" id="selection-meta">-</div>
+              </section>
+
+              <section class="detail-block">
+                <div class="eyebrow">View Reading</div>
+                <div class="insight-list" id="insight-list"></div>
+              </section>
+
+              <section class="detail-block">
+                <div class="eyebrow">Design Tradeoff</div>
+                <div class="detail-copy" id="design-copy">
+                  <strong>周/月保留小时粒度</strong>，是为了快速回答“什么时候最忙”。
+                  <strong>总览改成按日期</strong>，是为了快速回答“整体是否稳定、是否有 streak、哪些周异常”。
+                </div>
+              </section>
+
+              <div class="footer-note">
+                Demo data is generated locally in this HTML. It only validates layout, interaction, and reading order.
+              </div>
+            </div>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const METRICS = {
+        input: {
+          label: "Input",
+          noun: "inputs",
+          statLabel: "Input Volume",
+          unitHint: "每格代表该时段内的输入次数",
+        },
+        token: {
+          label: "Token",
+          noun: "tokens",
+          statLabel: "Token Volume",
+          unitHint: "每格代表该时段内累计 token",
+        },
+        commit: {
+          label: "Commit",
+          noun: "commits",
+          statLabel: "Commit Volume",
+          unitHint: "每格代表该时段内生成的 commit 数",
+        },
+      };
+
+      const SCOPES = {
+        week: {
+          label: "Week x Hour",
+          subtitle: "最近 7 天，每个单元代表 1 小时，适合看全天工时分布和 burst。",
+          axisHint: "横轴是 00-23 点，纵轴是最近 7 天，适合确认每天的高峰时段是否稳定。",
+          designCopy:
+            "<strong>周视图</strong> 优先回答“这周什么时候最忙”。如果后续要做 drill-down，点击单元可以直接落到对应日期和小时段。",
+        },
+        month: {
+          label: "Month x Hour",
+          subtitle: "最近 31 天，每个单元代表 1 小时，适合看一个阶段内的活跃节奏和版本前后的波峰。",
+          axisHint: "横轴保持小时，纵轴扩展到最近 31 天，能看出上线前后是否出现长尾加班或周末突增。",
+          designCopy:
+            "<strong>月视图</strong> 不改成周历，而是坚持小时矩阵，是为了保留一天内部的节奏细节。",
+        },
+        total: {
+          label: "Total x Date",
+          subtitle: "最近 53 周，每个单元代表 1 天，阅读方式接近 GitHub contribution calendar。",
+          axisHint: "横轴按周推进，纵轴是星期，适合看 streak、冷启动阶段和长期周期性起伏。",
+          designCopy:
+            "<strong>总览视图</strong> 切到按日期，是因为全年维度里小时粒度会过密，日历形态更适合看连续性和周期。",
+        },
+      };
+
+      const weekdayShort = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+      const hourLabelFormatter = new Intl.DateTimeFormat("zh-CN", {
+        month: "numeric",
+        day: "numeric",
+        weekday: "short",
+      });
+      const dayLabelFormatter = new Intl.DateTimeFormat("zh-CN", {
+        month: "numeric",
+        day: "numeric",
+      });
+      const monthFormatter = new Intl.DateTimeFormat("en-US", {
+        month: "short",
+      });
+      const compactFormatter = new Intl.NumberFormat("en-US", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      });
+      const fullFormatter = new Intl.NumberFormat("en-US", {
+        maximumFractionDigits: 0,
+      });
+
+      const params = new URLSearchParams(window.location.search);
+      const initialMetric = METRICS[params.get("metric")] ? params.get("metric") : "token";
+      const initialScope = SCOPES[params.get("scope")] ? params.get("scope") : "total";
+
+      const state = {
+        metric: initialMetric,
+        scope: initialScope,
+        selectedKey: null,
+      };
+
+      const hourlyRecords = buildDataset();
+      const dailyRecords = buildDailyRecords(hourlyRecords);
+
+      const metricSwitch = document.getElementById("metric-switch");
+      const scopeSwitch = document.getElementById("scope-switch");
+      const heatmapRegion = document.getElementById("heatmap-region");
+
+      metricSwitch.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-metric]");
+        if (!button) return;
+        state.metric = button.dataset.metric;
+        state.selectedKey = null;
+        render();
+      });
+
+      scopeSwitch.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-scope]");
+        if (!button) return;
+        state.scope = button.dataset.scope;
+        state.selectedKey = null;
+        render();
+      });
+
+      render();
+
+      function render() {
+        document.body.dataset.metric = state.metric;
+        document.body.dataset.scope = state.scope;
+        syncButtons();
+
+        const view = buildView(state.scope, state.metric);
+        renderHeatmap(view);
+        updateSummary(view);
+        updateSelection(view);
+        applySelectedCell(state.selectedKey);
+        updateInsights(view);
+        document.getElementById("chart-subtitle").textContent = SCOPES[state.scope].subtitle;
+        document.getElementById("axis-hint").textContent = SCOPES[state.scope].axisHint;
+        document.getElementById("legend-copy").textContent =
+          METRICS[state.metric].unitHint + "。颜色按当前视图的非零分布做分位数映射。";
+        document.getElementById("design-copy").innerHTML = SCOPES[state.scope].designCopy;
+      }
+
+      function syncButtons() {
+        document.querySelectorAll("[data-metric]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.metric === state.metric);
+          button.setAttribute("aria-pressed", String(button.dataset.metric === state.metric));
+        });
+        document.querySelectorAll("[data-scope]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.scope === state.scope);
+          button.setAttribute("aria-pressed", String(button.dataset.scope === state.scope));
+        });
+      }
+
+      function buildView(scope, metric) {
+        if (scope === "week") return buildHourlyView(metric, 7);
+        if (scope === "month") return buildHourlyView(metric, 31);
+        return buildCalendarView(metric);
+      }
+
+      function buildHourlyView(metric, days) {
+        const slice = dailyRecords.slice(-days);
+        const rows = slice.map((day) => {
+          const cells = hourlyRecords
+            .filter((record) => record.isoDate === day.isoDate)
+            .map((record) => ({
+              key: `${metric}-${record.isoDate}-${record.hour}`,
+              metric,
+              type: "hour",
+              date: day.date,
+              isoDate: record.isoDate,
+              hour: record.hour,
+              value: record[metric],
+              title: `${formatDayHeader(day.date)} ${pad(record.hour)}:00 - ${pad(record.hour + 1)}:00`,
+              shortLabel: `${pad(record.hour)}:00`,
+            }));
+          return {
+            key: day.isoDate,
+            isoDate: day.isoDate,
+            date: day.date,
+            label: formatDayHeader(day.date),
+            secondaryLabel: weekdayShort[getMondayIndex(day.date)],
+            total: day[metric],
+            cells,
+          };
+        });
+
+        const items = rows.flatMap((row) => row.cells);
+        const scale = buildScale(items.map((item) => item.value));
+
+        items.forEach((item) => {
+          item.level = toLevel(item.value, scale);
+          item.normalized = scale.max === 0 ? 0 : item.value / scale.max;
+        });
+
+        const aggregateByHour = Array.from({ length: 24 }, (_, hour) => ({
+          hour,
+          value: items.filter((item) => item.hour === hour).reduce((sum, item) => sum + item.value, 0),
+        }));
+
+        return {
+          scope: days === 7 ? "week" : "month",
+          metric,
+          type: "hourly",
+          rows,
+          items,
+          scale,
+          aggregateByHour,
+          days: slice,
+        };
+      }
+
+      function buildCalendarView(metric) {
+        const dataStart = dailyRecords[0].date;
+        const dataEnd = dailyRecords[dailyRecords.length - 1].date;
+        const gridStart = startOfWeek(addDays(dataEnd, -(53 * 7) + 1));
+        const dailyMap = new Map(dailyRecords.map((item) => [item.isoDate, item]));
+        const visibleDays = dailyRecords.filter((item) => item.date >= gridStart && item.date <= dataEnd);
+        const weeks = [];
+        const items = [];
+
+        for (let week = 0; week < 53; week += 1) {
+          const column = [];
+          for (let day = 0; day < 7; day += 1) {
+            const date = addDays(gridStart, week * 7 + day);
+            const isoDate = formatIsoDate(date);
+            const source = dailyMap.get(isoDate);
+            const inRange = date >= dataStart && date <= dataEnd;
+            const value = inRange && source ? source[metric] : 0;
+            const item = {
+              key: `${metric}-${isoDate}`,
+              metric,
+              type: "day",
+              date,
+              isoDate,
+              weekday: day,
+              week,
+              value,
+              hidden: !inRange,
+              title: `${formatDayHeader(date)}`,
+            };
+            column.push(item);
+            if (inRange) items.push(item);
+          }
+          weeks.push(column);
+        }
+
+        const scale = buildScale(items.map((item) => item.value));
+        items.forEach((item) => {
+          item.level = toLevel(item.value, scale);
+          item.normalized = scale.max === 0 ? 0 : item.value / scale.max;
+        });
+
+        const monthMarkers = [];
+        let lastMonth = null;
+        for (let week = 0; week < weeks.length; week += 1) {
+          const firstRealDay = weeks[week].find((item) => !item.hidden);
+          if (!firstRealDay) continue;
+          const monthKey = `${firstRealDay.date.getFullYear()}-${firstRealDay.date.getMonth()}`;
+          if (monthKey === lastMonth) continue;
+          monthMarkers.push({
+            label: monthFormatter.format(firstRealDay.date),
+            week,
+          });
+          lastMonth = monthKey;
+        }
+
+        return {
+          scope: "total",
+          metric,
+          type: "calendar",
+          weeks,
+          items,
+          scale,
+          monthMarkers,
+          days: visibleDays,
+        };
+      }
+
+      function renderHeatmap(view) {
+        heatmapRegion.innerHTML = "";
+
+        if (view.type === "hourly") {
+          const board = document.createElement("div");
+          board.className = "hour-board";
+          board.style.setProperty("--cell-size", view.scope === "week" ? "18px" : "12px");
+
+          const axis = document.createElement("div");
+          axis.className = "hour-axis";
+          const axisSpacer = document.createElement("div");
+          axisSpacer.className = "hour-axis-label";
+          axisSpacer.textContent = view.scope === "week" ? "Day" : "Date";
+          axis.append(axisSpacer);
+
+          for (let hour = 0; hour < 24; hour += 1) {
+            const cell = document.createElement("div");
+            cell.className = "hour-label";
+            cell.textContent = pad(hour);
+            axis.append(cell);
+          }
+
+          board.append(axis);
+
+          view.rows.forEach((row) => {
+            const rowNode = document.createElement("div");
+            rowNode.className = "day-row";
+
+            const label = document.createElement("div");
+            label.className = "day-label";
+            label.innerHTML = `<strong>${dayLabelFormatter.format(row.date)}</strong><span>${row.secondaryLabel}</span>`;
+            rowNode.append(label);
+
+            const cells = document.createElement("div");
+            cells.className = "hour-cells";
+
+            row.cells.forEach((item) => {
+              const cell = createCell(item, view);
+              cells.append(cell);
+            });
+
+            rowNode.append(cells);
+            board.append(rowNode);
+          });
+
+          heatmapRegion.append(board);
+          return;
+        }
+
+        const board = document.createElement("div");
+        board.className = "calendar-board";
+        board.style.setProperty("--cell-size", "13px");
+        board.style.setProperty("--calendar-weeks", String(view.weeks.length));
+
+        const months = document.createElement("div");
+        months.className = "calendar-months";
+        view.monthMarkers.forEach((marker) => {
+          const node = document.createElement("span");
+          node.className = "month-marker";
+          node.style.left = `${54 + marker.week * 17}px`;
+          node.textContent = marker.label;
+          months.append(node);
+        });
+        board.append(months);
+
+        const grid = document.createElement("div");
+        grid.className = "calendar-grid";
+
+        const yAxis = document.createElement("div");
+        yAxis.className = "calendar-y";
+        weekdayShort.forEach((label) => {
+          const node = document.createElement("span");
+          node.className = "calendar-label";
+          node.textContent = label;
+          yAxis.append(node);
+        });
+
+        const columns = document.createElement("div");
+        columns.className = "calendar-columns";
+
+        view.weeks.forEach((week) => {
+          const column = document.createElement("div");
+          column.className = "calendar-column";
+          week.forEach((item) => {
+            const cell = item.hidden
+              ? document.createElement("span")
+              : createCell(item, view);
+            if (item.hidden) {
+              cell.className = "heat-cell";
+              cell.style.opacity = "0.18";
+            }
+            column.append(cell);
+          });
+          columns.append(column);
+        });
+
+        grid.append(yAxis, columns);
+        board.append(grid);
+        heatmapRegion.append(board);
+      }
+
+      function createCell(item, view) {
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "heat-cell interactive";
+        cell.dataset.key = item.key;
+        cell.dataset.level = String(item.level ?? 0);
+        cell.title = `${item.title}: ${formatMetricValue(item.metric, item.value)}`;
+        cell.setAttribute("aria-label", cell.title);
+        if (state.selectedKey === item.key) cell.classList.add("selected");
+
+        cell.addEventListener("mouseenter", () => {
+          state.selectedKey = item.key;
+          updateSelection(view);
+          applySelectedCell(item.key);
+        });
+
+        cell.addEventListener("focus", () => {
+          state.selectedKey = item.key;
+          updateSelection(view);
+          applySelectedCell(item.key);
+        });
+
+        cell.addEventListener("click", () => {
+          state.selectedKey = item.key;
+          updateSelection(view);
+          applySelectedCell(item.key);
+        });
+
+        return cell;
+      }
+
+      function applySelectedCell(key) {
+        document.querySelectorAll(".heat-cell.interactive").forEach((cell) => {
+          cell.classList.toggle("selected", cell.dataset.key === key);
+        });
+      }
+
+      function updateSummary(view) {
+        const totalValue = view.items.reduce((sum, item) => sum + item.value, 0);
+        const peakItem = getPeakItem(view.items);
+        const topDay = getTopDay(view);
+        const streak = computeLongestActiveStreak(view.days.map((day) => day[view.metric]));
+
+        document.getElementById("stat-total-label").textContent = METRICS[view.metric].statLabel;
+        document.getElementById("stat-total-value").textContent = formatMetricValue(view.metric, totalValue);
+        document.getElementById("stat-total-subvalue").textContent =
+          view.scope === "total"
+            ? `53 周范围内共 ${view.items.length} 个日期单元`
+            : `${view.days.length} 天范围内共 ${view.items.length} 个小时单元`;
+
+        document.getElementById("stat-peak-value").textContent = formatMetricValue(view.metric, peakItem.value);
+        document.getElementById("stat-peak-subvalue").textContent =
+          view.type === "calendar"
+            ? `${formatDayHeader(peakItem.date)} 为峰值日期`
+            : `${formatDayHeader(peakItem.date)} ${pad(peakItem.hour)}:00 为峰值时段`;
+
+        document.getElementById("stat-day-value").textContent = formatMetricValue(view.metric, topDay.total);
+        document.getElementById("stat-day-subvalue").textContent = `${formatDayHeader(topDay.date)} 是当前范围内最忙的一天`;
+
+        document.getElementById("stat-streak-value").textContent = `${streak}d`;
+        document.getElementById("stat-streak-subvalue").textContent =
+          streak > 0 ? "连续活跃天数，以非零日期累计" : "当前范围内暂无活跃日期";
+      }
+
+      function updateSelection(view) {
+        const target = view.items.find((item) => item.key === state.selectedKey) || getPeakItem(view.items);
+        if (!target) return;
+        state.selectedKey = target.key;
+
+        const label =
+          target.type === "day"
+            ? formatDayHeader(target.date)
+            : `${formatDayHeader(target.date)} ${pad(target.hour)}:00 - ${pad(target.hour + 1)}:00`;
+
+        document.getElementById("selection-title").textContent = label;
+        document.getElementById("selection-value").textContent = formatMetricValue(target.metric, target.value);
+        document.getElementById("selection-meta").textContent =
+          target.type === "day"
+            ? `日期粒度，强度等级 ${target.level ?? 0}/4。适合用来判断 streak、冷启动和异常周。`
+            : `小时粒度，强度等级 ${target.level ?? 0}/4。适合用来判断日内 burst、review 时段和部署窗口。`;
+      }
+
+      function updateInsights(view) {
+        const insightList = document.getElementById("insight-list");
+        insightList.innerHTML = "";
+
+        const insights = view.type === "calendar" ? buildCalendarInsights(view) : buildHourlyInsights(view);
+
+        insights.forEach((item) => {
+          const node = document.createElement("div");
+          node.className = "insight-item";
+          node.innerHTML = `<strong>${item.title}</strong><span>${item.body}</span>`;
+          insightList.append(node);
+        });
+      }
+
+      function buildHourlyInsights(view) {
+        const peakHour = [...view.aggregateByHour].sort((a, b) => b.value - a.value)[0];
+        const officeHours = view.items
+          .filter((item) => item.hour >= 9 && item.hour <= 18)
+          .reduce((sum, item) => sum + item.value, 0);
+        const total = Math.max(1, view.items.reduce((sum, item) => sum + item.value, 0));
+        const weekend = view.rows
+          .filter((row) => {
+            const idx = getMondayIndex(row.date);
+            return idx >= 5;
+          })
+          .reduce((sum, row) => sum + row.total, 0);
+        const topDay = getTopDay(view);
+
+        return [
+          {
+            title: `峰值小时带是 ${pad(peakHour.hour)}:00`,
+            body: `当前 ${SCOPES[view.scope].label} 里，${pad(peakHour.hour)}:00 的累计 ${METRICS[view.metric].noun} 最高，适合在正式版里做 hover drill-down。`,
+          },
+          {
+            title: `最忙日期是 ${formatDayHeader(topDay.date)}`,
+            body: `这一天总量达到 ${formatMetricValue(view.metric, topDay.total)}，说明单日波峰可以和现有 Commits/Usage 明细联动。`,
+          },
+          {
+            title: `09:00-18:00 占比 ${Math.round((officeHours / total) * 100)}%`,
+            body: `办公时段占比能快速看出使用是不是集中在主工作窗，后续可以作为可选参考线或统计卡片。`,
+          },
+          {
+            title: `周末占比 ${Math.round((weekend / total) * 100)}%`,
+            body: `这个指标能帮助判断是否存在上线前冲刺或异常周末活跃。`,
+          },
+        ];
+      }
+
+      function buildCalendarInsights(view) {
+        const weekdayTotals = Array.from({ length: 7 }, (_, weekday) => ({
+          weekday,
+          value: view.items
+            .filter((item) => getMondayIndex(item.date) === weekday)
+            .reduce((sum, item) => sum + item.value, 0),
+        }));
+        const topWeekday = weekdayTotals.sort((a, b) => b.value - a.value)[0];
+        const monthTotals = new Map();
+        view.items.forEach((item) => {
+          const key = `${item.date.getFullYear()}-${item.date.getMonth()}`;
+          const current = monthTotals.get(key) ?? { label: monthFormatter.format(item.date), value: 0 };
+          current.value += item.value;
+          monthTotals.set(key, current);
+        });
+        const peakMonth = [...monthTotals.values()].sort((a, b) => b.value - a.value)[0];
+        const activeDays = view.items.filter((item) => item.value > 0).length;
+        const topDay = getTopDay(view);
+
+        return [
+          {
+            title: `${peakMonth.label} 是峰值月份`,
+            body: `整段总览里，${peakMonth.label} 的 ${METRICS[view.metric].noun} 累积最高，日历视图更容易暴露这样的阶段性波峰。`,
+          },
+          {
+            title: `${weekdayShort[topWeekday.weekday]} 是最强工作日`,
+            body: `按星期聚合后，${weekdayShort[topWeekday.weekday]} 的总量最高，适合在正式版里加 weekday 对比小卡。`,
+          },
+          {
+            title: `活跃日期 ${activeDays} 天`,
+            body: `总览日期热力图比小时矩阵更适合直接回答“过去一年到底活跃了多少天”。`,
+          },
+          {
+            title: `峰值日期是 ${formatDayHeader(topDay.date)}`,
+            body: `当天总量达到 ${formatMetricValue(view.metric, topDay.total)}，可以作为后续和 release、commit、pairing 事件做联动的锚点。`,
+          },
+        ];
+      }
+
+      function getTopDay(view) {
+        const rows = view.days.map((day) => ({
+          date: day.date,
+          total: day[view.metric],
+        }));
+        return rows.sort((a, b) => b.total - a.total)[0];
+      }
+
+      function getPeakItem(items) {
+        return [...items].sort((a, b) => b.value - a.value)[0];
+      }
+
+      function buildScale(values) {
+        const nonZero = values.filter((value) => value > 0).sort((a, b) => a - b);
+        if (nonZero.length === 0) {
+          return { max: 0, cuts: [0, 0, 0, 0] };
+        }
+        const pick = (percent) => {
+          const index = Math.min(
+            nonZero.length - 1,
+            Math.floor((nonZero.length - 1) * percent),
+          );
+          return nonZero[index];
+        };
+        return {
+          max: nonZero[nonZero.length - 1],
+          cuts: [pick(0.2), pick(0.45), pick(0.7), pick(0.9)],
+        };
+      }
+
+      function toLevel(value, scale) {
+        if (!value || scale.max === 0) return 0;
+        if (value <= scale.cuts[0]) return 1;
+        if (value <= scale.cuts[1]) return 2;
+        if (value <= scale.cuts[2]) return 3;
+        return 4;
+      }
+
+      function buildDataset() {
+        const hours = [];
+        const today = startOfDay(new Date());
+        const start = addDays(today, -399);
+
+        for (let dayIndex = 0; dayIndex < 400; dayIndex += 1) {
+          const date = addDays(start, dayIndex);
+          const isoDate = formatIsoDate(date);
+          const weekday = getMondayIndex(date);
+
+          for (let hour = 0; hour < 24; hour += 1) {
+            const seed = dayIndex * 97 + hour * 31;
+            const workdayWeight = weekday < 5 ? 1 : 0.46;
+            const morningPeak = bell(hour, 10.3, 2.4);
+            const afternoonPeak = bell(hour, 15.5, 2.7) * 1.08;
+            const nightTail = bell(hour, 21.2, 1.6) * 0.32;
+            const baseHour =
+              morningPeak +
+              afternoonPeak +
+              nightTail +
+              (hour >= 7 && hour <= 22 ? 0.14 : 0.02);
+            const releasePulse =
+              0.66 +
+              Math.max(0, Math.sin((dayIndex + 3) / 6.4)) * 0.56 +
+              Math.max(0, Math.sin((dayIndex + 9) / 18.5)) * 0.24;
+            const noise = 0.6 + pseudo(seed) * 0.8;
+            const spike = pseudo(seed + 11) > 0.972 ? 1.8 + pseudo(seed + 17) * 1.1 : 1;
+            const base = workdayWeight * baseHour * releasePulse * noise * spike;
+
+            const input = Math.max(
+              0,
+              Math.round(base * 15 + (pseudo(seed + 29) > 0.94 ? 8 + pseudo(seed + 37) * 16 : 0)),
+            );
+            const token =
+              input === 0
+                ? 0
+                : Math.round(input * (260 + pseudo(seed + 43) * 860) + base * 380);
+
+            const commitChance = Math.min(
+              0.78,
+              0.03 + baseHour * 0.17 * workdayWeight + (hour >= 13 && hour <= 18 ? 0.08 : 0),
+            );
+            let commit = 0;
+            if (pseudo(seed + 51) < commitChance) commit += 1;
+            if (pseudo(seed + 59) < commitChance * 0.28) commit += 1;
+            if (pseudo(seed + 67) < commitChance * 0.1) commit += 1;
+
+            hours.push({
+              date,
+              isoDate,
+              hour,
+              input,
+              token,
+              commit,
+            });
+          }
+        }
+
+        return hours;
+      }
+
+      function buildDailyRecords(records) {
+        const grouped = new Map();
+        records.forEach((record) => {
+          if (!grouped.has(record.isoDate)) {
+            grouped.set(record.isoDate, {
+              date: record.date,
+              isoDate: record.isoDate,
+              input: 0,
+              token: 0,
+              commit: 0,
+            });
+          }
+          const day = grouped.get(record.isoDate);
+          day.input += record.input;
+          day.token += record.token;
+          day.commit += record.commit;
+        });
+        return [...grouped.values()].sort((a, b) => a.date - b.date);
+      }
+
+      function formatMetricValue(metric, value) {
+        const rounded = Math.round(value);
+        if (metric === "token") return compactFormatter.format(rounded);
+        if (rounded >= 1000) return compactFormatter.format(rounded);
+        return fullFormatter.format(rounded);
+      }
+
+      function computeLongestActiveStreak(values) {
+        let longest = 0;
+        let current = 0;
+        values.forEach((value) => {
+          if (value > 0) {
+            current += 1;
+            longest = Math.max(longest, current);
+          } else {
+            current = 0;
+          }
+        });
+        return longest;
+      }
+
+      function formatDayHeader(date) {
+        return hourLabelFormatter.format(date).replace("周", "周");
+      }
+
+      function getMondayIndex(date) {
+        return (date.getDay() + 6) % 7;
+      }
+
+      function startOfDay(date) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      }
+
+      function startOfWeek(date) {
+        return addDays(startOfDay(date), -getMondayIndex(date));
+      }
+
+      function addDays(date, days) {
+        const next = new Date(date);
+        next.setDate(next.getDate() + days);
+        return startOfDay(next);
+      }
+
+      function formatIsoDate(date) {
+        const year = date.getFullYear();
+        const month = pad(date.getMonth() + 1);
+        const day = pad(date.getDate());
+        return `${year}-${month}-${day}`;
+      }
+
+      function pad(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function pseudo(seed) {
+        const raw = Math.sin(seed * 12.9898) * 43758.5453123;
+        return raw - Math.floor(raw);
+      }
+
+      function bell(x, center, spread) {
+        return Math.exp(-((x - center) ** 2) / (2 * spread ** 2));
+      }
+    </script>
+  </body>
+</html>

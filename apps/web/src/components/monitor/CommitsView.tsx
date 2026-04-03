@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { useMonitorStore } from '../../store/monitorStore'
 import { useI18n } from '../../lib/i18n'
-import { buildCommitDateRange, endOfDay, startOfDay } from '../../lib/dateRange'
-import { formatCost, formatDateTime, formatDuration, formatTokens } from '../../lib/format'
-import type { CommitAttributionLink, CommitRecord, RunRecord, SourceConfidence, ToolKind } from '../../lib/types'
-import { DateRangePicker, type DateRange } from './DateRangePicker'
+import { buildCommitDateRange } from '../../lib/dateRange'
+import { formatCost, formatDateTime, formatTokens } from '../../lib/format'
+import { createHistorySelection, fetchCommitHistory, type DataMode } from '../../lib/history'
+import { buildSnapshotRange, isSnapshotWindowClamped } from '../../lib/snapshotWindow'
+import type { CommitAttributionLink, CommitHistoryPayload, CommitRecord, RunRecord, SourceConfidence, ToolKind } from '../../lib/types'
+import { DateRangePicker } from './DateRangePicker'
+import { DataModeSwitch } from './DataModeSwitch'
+import { SnapshotWindowSwitch } from './SnapshotWindowSwitch'
 import { CommitsSkeleton } from './Skeleton'
 
 const sourceLabels: Record<ToolKind, string> = {
@@ -12,6 +16,7 @@ const sourceLabels: Record<ToolKind, string> = {
   codex: 'CODEX',
   openClaw: 'OPENCLAW',
 }
+const historyPresets = ['7d', '30d', '90d', '180d'] as const
 
 type ProjectOption = {
   repoId: string
@@ -60,40 +65,64 @@ function safeSources(commit: CommitRecord) {
   return Array.isArray(commit.sources) ? commit.sources : []
 }
 
-export function CommitsView() {
+export const CommitsView = memo(function CommitsView() {
   const data = useMonitorStore((s) => s.data)
   const connectionStatus = useMonitorStore((s) => s.connectionStatus)
+  const snapshotWindow = useMonitorStore((s) => s.settings.snapshotWindow)
+  const updateSettings = useMonitorStore((s) => s.updateSettings)
   const { t } = useI18n()
-  const commits = Array.isArray(data?.commits) ? data.commits : []
-  const runs = Array.isArray(data?.runs) ? data.runs : []
+  const [mode, setMode] = useState<DataMode>('snapshot')
+  const [historyRange, setHistoryRange] = useState(() => createHistorySelection(30))
+  const [historyData, setHistoryData] = useState<CommitHistoryPayload | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState(false)
   const [selectedRepoId, setSelectedRepoId] = useState('all')
   const [expandedCommitIds, setExpandedCommitIds] = useState<string[]>([])
-  const [dateRange, setDateRange] = useState<DateRange>(() => {
-    const to = endOfDay(new Date())
-    const from = startOfDay(new Date())
-    return { from, to }
-  })
-  const [dateRangeLocked, setDateRangeLocked] = useState(false)
-
-  const allRange = useMemo(() => buildCommitDateRange(commits), [commits])
 
   useEffect(() => {
-    if (!allRange || dateRangeLocked) return
-    setDateRange(allRange)
-  }, [allRange, dateRangeLocked])
+    if (mode !== 'history') return
 
-  const filteredCommits = useMemo(() => {
-    const from = dateRange.from.getTime()
-    const to = dateRange.to.getTime()
-    return commits.filter((commit) => {
-      const ts = new Date(commit.committedAt).getTime()
-      return Number.isFinite(ts) && ts >= from && ts <= to
-    })
-  }, [commits, dateRange])
+    const controller = new AbortController()
+    setHistoryLoading(true)
+    setHistoryError(false)
+
+    void fetchCommitHistory(historyRange, controller.signal)
+      .then((payload) => {
+        setHistoryData(payload)
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+        setHistoryError(true)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setHistoryLoading(false)
+        }
+      })
+
+    return () => controller.abort()
+  }, [historyRange, mode])
+
+  const commits = mode === 'history'
+    ? (historyData?.commits ?? [])
+    : (Array.isArray(data?.commits) ? data.commits : [])
+  const runs = mode === 'history'
+    ? (historyData?.runs ?? [])
+    : (Array.isArray(data?.runs) ? data.runs : [])
+  const snapshotRange = useMemo(
+    () => (data ? buildCommitDateRange(data.commits) : null),
+    [data],
+  )
+  const effectiveSnapshotRange = useMemo(
+    () => buildSnapshotRange(snapshotWindow, snapshotRange),
+    [snapshotRange, snapshotWindow],
+  )
 
   const projectOptions = useMemo((): ProjectOption[] => {
     const grouped = new Map<string, ProjectOption>()
-    for (const commit of filteredCommits) {
+    for (const commit of commits) {
       const existing = grouped.get(commit.repoId)
       if (existing) {
         existing.commitCount += 1
@@ -119,7 +148,7 @@ export function CommitsView() {
       }
       return b.totalTokens - a.totalTokens
     })
-  }, [filteredCommits])
+  }, [commits])
 
   useEffect(() => {
     if (selectedRepoId === 'all') return
@@ -129,12 +158,23 @@ export function CommitsView() {
   }, [projectOptions, selectedRepoId])
 
   const visibleCommits = useMemo(() => {
-    return filteredCommits
+    const snapshotFrom = effectiveSnapshotRange?.from.getTime() ?? Number.NEGATIVE_INFINITY
+    const snapshotTo = effectiveSnapshotRange?.to.getTime() ?? Number.POSITIVE_INFINITY
+
+    return commits
+      .filter((commit) => {
+        if (mode !== 'snapshot') return true
+        const committedAt = new Date(commit.committedAt).getTime()
+        return Number.isFinite(committedAt) && committedAt >= snapshotFrom && committedAt <= snapshotTo
+      })
       .filter((commit) => selectedRepoId === 'all' || commit.repoId === selectedRepoId)
       .sort((a, b) => b.committedAt.localeCompare(a.committedAt))
-  }, [filteredCommits, selectedRepoId])
+  }, [commits, effectiveSnapshotRange, mode, selectedRepoId])
 
-  const visibleProjectCount = useMemo(() => new Set(visibleCommits.map((commit) => commit.repoId)).size, [visibleCommits])
+  const visibleProjectCount = useMemo(
+    () => new Set(visibleCommits.map((commit) => commit.repoId)).size,
+    [visibleCommits],
+  )
 
   const runsById = useMemo(() => new Map(runs.map((run) => [run.id, run])), [runs])
 
@@ -155,11 +195,6 @@ export function CommitsView() {
 
   const switcherLayout = projectOptions.length <= 6 ? 'horizontal' : 'grid'
 
-  function handleDateRangeChange(nextRange: DateRange) {
-    setDateRangeLocked(true)
-    setDateRange(nextRange)
-  }
-
   function toggleCommitSessions(commitId: string) {
     setExpandedCommitIds((prev) => (
       prev.includes(commitId)
@@ -168,7 +203,7 @@ export function CommitsView() {
     ))
   }
 
-  if (!data) {
+  if (mode === 'snapshot' && !data) {
     if (connectionStatus === 'connecting') return <CommitsSkeleton />
     return (
       <div className="commits-view commits-view-empty">
@@ -180,12 +215,59 @@ export function CommitsView() {
     )
   }
 
+  const snapshotDays = data?.config.historyDays ?? 7
+  const snapshotClampHint = mode === 'snapshot' && isSnapshotWindowClamped(snapshotWindow, snapshotDays)
+    ? t('history.snapshotClampHint').replace('{days}', String(snapshotDays))
+    : null
+
   return (
     <div className="commits-view">
-      {connectionStatus === 'offline' && (
+      {mode === 'snapshot' && connectionStatus === 'offline' && (
         <div className="status-notice offline">
           <strong>{t('commits.offlineTitle')}</strong>
           <span>{t('commits.offlineHint')}</span>
+        </div>
+      )}
+
+      <div className="history-toolbar">
+        <div className="history-toolbar-main">
+          <DataModeSwitch mode={mode} onChange={setMode} />
+          <span className="history-toolbar-hint">
+            {mode === 'snapshot'
+              ? t('history.snapshotHint').replace('{days}', String(snapshotDays))
+              : t('history.historyHint')}
+          </span>
+          {snapshotClampHint && (
+            <span className="history-toolbar-subhint">{snapshotClampHint}</span>
+          )}
+        </div>
+        {mode === 'snapshot' ? (
+          <SnapshotWindowSwitch
+            value={snapshotWindow}
+            onChange={(nextWindow) => updateSettings({ snapshotWindow: nextWindow })}
+          />
+        ) : (
+          <DateRangePicker
+            value={historyRange}
+            onChange={setHistoryRange}
+            presets={historyPresets}
+          />
+        )}
+      </div>
+
+      {mode === 'history' && historyLoading && (
+        <div className="status-notice">
+          <strong>{t('history.loading')}</strong>
+        </div>
+      )}
+      {mode === 'history' && historyError && (
+        <div className="status-notice offline">
+          <strong>{t('history.error')}</strong>
+        </div>
+      )}
+      {mode === 'history' && historyData?.truncated && (
+        <div className="status-notice warn">
+          <strong>{t('history.truncated')}</strong>
         </div>
       )}
 
@@ -208,7 +290,6 @@ export function CommitsView() {
             <strong className="commit-summary-value summary-value">{totals.projects}</strong>
           </div>
         </div>
-        <DateRangePicker value={dateRange} onChange={handleDateRangeChange} allRange={allRange} />
       </div>
 
       <section className="commits-history">
@@ -342,75 +423,71 @@ export function CommitsView() {
                             </button>
                           )}
                         </div>
-                        <div className="commit-category-list">
-                          {sources.length === 0 ? (
-                            <span className="commit-category-pill commit-category-pill-muted">
+
+                        <div className="commit-source-list">
+                          {sources.length === 0 && (
+                            <span className="commit-source-pill source-derived">
                               {t('commits.unattributed')}
                             </span>
-                          ) : (
-                            sources.map((source) => (
-                              <span
-                                key={`${commit.id}-${source.tool}`}
-                                className={`commit-category-pill tool-${sourceClass(source.tool)}`}
-                              >
-                                {sourceLabels[source.tool]}
-                              </span>
-                            ))
                           )}
-                          <span className="commit-category-pill commit-category-pill-secondary">
-                            {t('commits.allocation')}
-                          </span>
+                          {sources.map((source) => (
+                            <span
+                              key={`${commit.id}-${source.tool}`}
+                              className={`commit-source-pill source-${sourceClass(source.tool)}`}
+                            >
+                              {sourceLabels[source.tool]} · {formatTokens(source.attributedTokens)}
+                            </span>
+                          ))}
                         </div>
                       </div>
-                    </div>
 
-                    {isExpanded && links.length > 0 && (
-                      <div className="commit-sessions-panel">
-                        <h4 className="commit-subsection-label">
-                          {t('commits.sessionDetails')} ({links.length})
-                        </h4>
-                        <div className="commit-link-list">
-                          {links.map((link) => {
-                            const linkedRun = getLinkedRun(runsById, link)
-                            const linkWorktree = linkedRun?.vcs?.worktreeName ?? commit.worktreeName
-                            const sessionHandle = linkedSessionHandle(linkedRun, link)
-                            return (
-                              <div key={`${commit.id}-${link.runId}`} className="commit-link-row">
-                                <div className="commit-link-main">
-                                  <div className="commit-link-head">
-                                    <span className="commit-link-id">{sessionHandle}</span>
-                                    <span className={`commit-link-tool tool-${sourceClass(link.tool)}`}>
-                                      {sourceLabels[link.tool]}
-                                    </span>
-                                  </div>
-                                  <div className="commit-link-label" title={link.sessionLabel}>
-                                    {link.sessionLabel}
-                                  </div>
-                                  <div className="commit-link-meta-line">
-                                    {linkedRun?.model && <span className="commit-link-model">{linkedRun.model}</span>}
-                                    {linkedRun?.elapsedMs != null && <span>{formatDuration(linkedRun.elapsedMs)}</span>}
-                                    {linkWorktree && <span>{t('commits.worktree')} {linkWorktree}</span>}
-                                  </div>
-                                  <div className="commit-link-times">
-                                    {linkedRun?.startedAt && (
-                                      <span>{t('commits.started')}: {formatDateTime(linkedRun.startedAt)}</span>
-                                    )}
-                                    {linkedRun?.lastActivityAt && (
-                                      <span>{t('commits.ended')}: {formatDateTime(linkedRun.lastActivityAt)}</span>
-                                    )}
-                                  </div>
-                                </div>
-                                <div className="commit-link-tail">
-                                  <strong className="commit-link-total">{formatTokens(link.allocatedTokens)}</strong>
-                                  <span className="commit-link-cost">{formatCost(link.allocatedCostUsd)}</span>
-                                  <span className="commit-link-share">{formatShare(link.score)}</span>
-                                </div>
+                      {links.length > 0 && (
+                        <div className="commit-links-panel">
+                          <div className="commit-links-head">
+                            {t('commits.allocation')}
+                            <span>{formatTokens(links.reduce((sum, link) => sum + link.allocatedTokens, 0))}</span>
+                          </div>
+                          {isExpanded && (
+                            <div className="commit-session-list">
+                              <div className="commit-session-header">
+                                <span className="commit-subsection-label">
+                                  {t('commits.sessionDetails')} ({links.length})
+                                </span>
                               </div>
-                            )
-                          })}
+                              {links.map((link) => {
+                                const linkedRun = getLinkedRun(runsById, link)
+                                const linkWorktree = linkedRun?.vcs?.worktreeName ?? linkedRun?.workspaceShort
+
+                                return (
+                                  <div key={`${commit.id}-${link.runId}`} className="commit-session-card">
+                                    <div className="commit-session-top">
+                                      <strong>{link.sessionLabel}</strong>
+                                      <span>{formatShare(link.score)}</span>
+                                    </div>
+                                    <div className="commit-session-meta">
+                                      <span>{sourceLabels[link.tool]}</span>
+                                      <span>{t('commits.sourceMode')} {link.sourceMode}</span>
+                                      <span>{linkedSessionHandle(linkedRun, link)}</span>
+                                      {linkWorktree && <span>{t('commits.worktree')} {linkWorktree}</span>}
+                                    </div>
+                                    <div className="commit-session-values">
+                                      <span>{formatTokens(link.allocatedTokens)}</span>
+                                      <span>{formatCost(link.allocatedCostUsd)}</span>
+                                    </div>
+                                    {linkedRun && (
+                                      <div className="commit-session-times">
+                                        <span>{t('commits.started')}: {formatDateTime(linkedRun.startedAt)}</span>
+                                        <span>{t('commits.ended')}: {formatDateTime(linkedRun.lastActivityAt)}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </article>
                 )
               })}
@@ -420,4 +497,4 @@ export function CommitsView() {
       </section>
     </div>
   )
-}
+})

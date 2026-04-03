@@ -17,16 +17,18 @@ use axum::{
 };
 use tower_http::cors::CorsLayer;
 
-use config::load_config;
+use config::{load_config, save_config};
 use handlers::{
-    bootstrap, config as config_handler, ingest, inspect, installer, pairing, remote, stream,
+    bootstrap, config as config_handler, history, ingest, inspect, installer, pairing, remote,
+    stream,
 };
 use pricing::PricingStore;
-use probe::{build_bootstrap, spawn_probe_refresh};
+use probe::{empty_bootstrap, spawn_probe_refresh};
 use remote_access::spawn_remote_server;
 use state::AppState;
 
 const SERVER_PORT: u16 = 46321;
+const SNAPSHOT_WINDOW_MIGRATION_VERSION: u8 = 2;
 
 fn local_allowed_origins() -> Vec<HeaderValue> {
     [
@@ -69,20 +71,32 @@ async fn main() -> anyhow::Result<()> {
     let pricing = PricingStore::new();
     pricing.spawn_refresh();
 
-    let mut initial = build_bootstrap(&pricing);
+    let mut initial = empty_bootstrap();
     if let Some(saved) = load_config() {
+        let mut migrated = false;
         if let Some(v) = saved.companion_enabled {
             initial.config.companion_enabled = v;
+        }
+        if let Some(v) = saved.history_days {
+            let clamped = v.clamp(1, 180);
+            if saved.version.unwrap_or(0) < SNAPSHOT_WINDOW_MIGRATION_VERSION && clamped == 7 {
+                initial.config.history_days = 30;
+                migrated = true;
+            } else {
+                initial.config.history_days = clamped;
+            }
+        }
+        if migrated {
+            save_config(&initial.config);
         }
     }
     let state = AppState::new(initial, pricing);
 
-    spawn_probe_refresh(state.clone());
-    spawn_remote_server(state.clone());
-
     let app = Router::new()
         .route("/api/bootstrap", get(bootstrap::get_bootstrap))
         .route("/api/health", get(bootstrap::health))
+        .route("/api/history/usage", get(history::get_usage_history))
+        .route("/api/history/commits", get(history::get_commit_history))
         .route("/api/runs/{run_id}/inspect", get(inspect::get_run_inspect))
         .route(
             "/api/config",
@@ -120,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/ingest/codex/hook", post(ingest::ingest_codex_hook))
         .route("/api/stream", get(stream::stream))
         .layer(build_cors_layer())
-        .with_state(state)
+        .with_state(state.clone())
         .fallback(static_files::static_handler);
 
     let addr = resolve_bind_addr()?;
@@ -137,6 +151,8 @@ async fn main() -> anyhow::Result<()> {
 
     let open_browser = std::env::var("OCTOMONITOR_NO_OPEN").is_err();
     tracing::info!("OctoMonitor server listening on http://{}", addr);
+    spawn_probe_refresh(state.clone());
+    spawn_remote_server(state.clone());
     if open_browser {
         let _ = open::that(format!("http://{}", addr));
     }

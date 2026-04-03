@@ -402,6 +402,36 @@ pub struct BootstrapPayload {
     pub config: AppConfig,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HistoryRange {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UsageHistoryPayload {
+    pub generated_at: String,
+    pub range: HistoryRange,
+    pub truncated: bool,
+    pub runs: Vec<RunRecord>,
+    pub usage_buckets: Vec<UsageBucket>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CommitHistoryPayload {
+    pub generated_at: String,
+    pub range: HistoryRange,
+    pub truncated: bool,
+    pub runs: Vec<RunRecord>,
+    pub commits: Vec<CommitRecord>,
+}
+
 pub fn classify_freshness(seconds: i64) -> Freshness {
     match seconds {
         0..=3 => Freshness::Hot,

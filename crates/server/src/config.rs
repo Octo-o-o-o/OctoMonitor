@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigPatch {
+    pub version: Option<u8>,
     pub companion_enabled: Option<bool>,
+    pub history_days: Option<u8>,
 }
 
 pub fn config_path() -> std::path::PathBuf {
@@ -26,7 +28,9 @@ pub fn save_config(config: &AppConfig) {
         let _ = std::fs::create_dir_all(parent);
     }
     let patch = ConfigPatch {
+        version: Some(2),
         companion_enabled: Some(config.companion_enabled),
+        history_days: Some(config.history_days),
     };
     match serde_json::to_string_pretty(&patch) {
         Ok(json) => {

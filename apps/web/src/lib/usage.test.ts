@@ -100,6 +100,7 @@ describe('usage slicing', () => {
     expect(slice.totalTokens).toBeCloseTo(800)
     expect(slice.inputTokens).toBeCloseTo(500)
     expect(slice.costUsd).toBeCloseTo(0.8)
+    expect(slice.messageCount).toBe(0)
   })
 
   it('uses run totals when a matching bucket is unavailable', () => {
@@ -113,6 +114,7 @@ describe('usage slicing', () => {
 
     expect(slice.totalTokens).toBeCloseTo(800)
     expect(slice.costUsd).toBeCloseTo(0.8)
+    expect(slice.messageCount).toBeCloseTo(0.5)
   })
 
   it('indexes usage buckets by run id from scope metadata', () => {
@@ -133,6 +135,7 @@ describe('usage slicing', () => {
     expect(slices).toHaveLength(1)
     expect(slices[0]?.usage.totalTokens).toBeCloseTo(800)
     expect(slices[0]?.usage.costUsd).toBeCloseTo(0.8)
+    expect(slices[0]?.usage.messageCount).toBeCloseTo(0.5)
   })
 
   it('sums shared usage slices into one token/cost total', () => {
@@ -144,6 +147,7 @@ describe('usage slicing', () => {
         cacheWriteTokens: 0,
         totalTokens: 160,
         costUsd: 0.16,
+        messageCount: 1,
       },
       {
         inputTokens: 200,
@@ -152,6 +156,7 @@ describe('usage slicing', () => {
         cacheWriteTokens: 20,
         totalTokens: 250,
         costUsd: 0.25,
+        messageCount: 2.5,
       },
     ])
 
@@ -161,6 +166,7 @@ describe('usage slicing', () => {
     expect(total.cacheWriteTokens).toBe(20)
     expect(total.totalTokens).toBe(410)
     expect(total.costUsd).toBeCloseTo(0.41)
+    expect(total.messageCount).toBeCloseTo(3.5)
   })
 
   it('measures run overlap duration for shared window filtering', () => {

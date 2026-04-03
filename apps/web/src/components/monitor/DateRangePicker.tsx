@@ -6,8 +6,9 @@ export interface DateRange {
   to: Date
 }
 
-type PresetKey = '1d' | '3d' | '7d' | '14d' | '30d' | 'all' | 'custom'
+type PresetKey = '1d' | '3d' | '7d' | '14d' | '30d' | '90d' | '180d' | 'all' | 'custom'
 type FixedPresetKey = Exclude<PresetKey, 'custom' | 'all'>
+type SelectablePresetKey = Exclude<PresetKey, 'custom'>
 
 const PRESET_DAYS: Record<FixedPresetKey, number> = {
   '1d': 1,
@@ -15,6 +16,8 @@ const PRESET_DAYS: Record<FixedPresetKey, number> = {
   '7d': 7,
   '14d': 14,
   '30d': 30,
+  '90d': 90,
+  '180d': 180,
 }
 
 function startOfDay(d: Date): Date {
@@ -43,19 +46,24 @@ function rangeForPreset(
 
   const to = endOfDay(new Date())
   const from = startOfDay(new Date())
-  from.setDate(from.getDate() - PRESET_DAYS[key as FixedPresetKey] + 1)
+  const days = key === 'all' ? 30 : PRESET_DAYS[key as FixedPresetKey]
+  from.setDate(from.getDate() - days + 1)
   return { from, to }
 }
 
-function presetForRange(value: DateRange, allRange?: DateRange | null): PresetKey {
-  if (allRange) {
+function presetForRange(
+  value: DateRange,
+  allRange: DateRange | null | undefined,
+  presets: SelectablePresetKey[],
+): PresetKey {
+  if (allRange && presets.includes('all')) {
     const all = rangeForPreset('all', allRange)
     if (isSameDay(all.from, value.from) && isSameDay(all.to, value.to)) {
       return 'all'
     }
   }
 
-  for (const key of Object.keys(PRESET_DAYS) as FixedPresetKey[]) {
+  for (const key of presets.filter((preset): preset is FixedPresetKey => preset !== 'all')) {
     const preset = rangeForPreset(key, allRange)
     if (isSameDay(preset.from, value.from) && isSameDay(preset.to, value.to)) {
       return key
@@ -168,20 +176,25 @@ interface Props {
   value: DateRange
   onChange: (range: DateRange) => void
   allRange?: DateRange | null
+  presets?: readonly SelectablePresetKey[]
 }
 
-export function DateRangePicker({ value, onChange, allRange }: Props) {
+export function DateRangePicker({ value, onChange, allRange, presets }: Props) {
   const { locale } = useI18n()
+  const availablePresets = useMemo<SelectablePresetKey[]>(
+    () => presets?.filter((preset) => preset !== 'all' || Boolean(allRange)) ?? ['1d', '3d', '7d', '14d', '30d', ...(allRange ? ['all' as const] : [])],
+    [allRange, presets],
+  )
   const [open, setOpen] = useState(false)
-  const [activePreset, setActivePreset] = useState<PresetKey>(() => presetForRange(value, allRange))
+  const [activePreset, setActivePreset] = useState<PresetKey>(() => presetForRange(value, allRange, availablePresets))
   const [customStep, setCustomStep] = useState<'from' | 'to'>('from')
   const [customFrom, setCustomFrom] = useState<Date | null>(null)
   const [customTo, setCustomTo] = useState<Date | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setActivePreset(presetForRange(value, allRange))
-  }, [value, allRange])
+    setActivePreset(presetForRange(value, allRange, availablePresets))
+  }, [value, allRange, availablePresets])
 
   // Close on outside click
   useEffect(() => {
@@ -252,8 +265,8 @@ export function DateRangePicker({ value, onChange, allRange }: Props) {
   }, [activePreset, value, locale])
 
   const presetLabels: Record<Exclude<PresetKey, 'custom'>, string> = locale === 'zh'
-    ? { '1d': '今天', '3d': '3天', '7d': '7天', '14d': '14天', '30d': '30天', 'all': '全部' }
-    : { '1d': 'Today', '3d': '3d', '7d': '7d', '14d': '14d', '30d': '30d', 'all': 'All' }
+    ? { '1d': '今天', '3d': '3天', '7d': '7天', '14d': '14天', '30d': '30天', '90d': '90天', '180d': '180天', 'all': '全部' }
+    : { '1d': 'Today', '3d': '3d', '7d': '7d', '14d': '14d', '30d': '30d', '90d': '90d', '180d': '180d', 'all': 'All' }
 
   const customLabel = locale === 'zh' ? '自定义' : 'Custom'
 
@@ -274,7 +287,7 @@ export function DateRangePicker({ value, onChange, allRange }: Props) {
       {open && (
         <div className="drp-dropdown">
           <div className="drp-presets">
-            {(Object.keys(PRESET_DAYS) as FixedPresetKey[]).map((k) => (
+            {availablePresets.map((k) => (
               <button
                 key={k}
                 className={`drp-preset${activePreset === k ? ' active' : ''}`}
@@ -283,14 +296,6 @@ export function DateRangePicker({ value, onChange, allRange }: Props) {
                 {presetLabels[k]}
               </button>
             ))}
-            {allRange && (
-              <button
-                className={`drp-preset${activePreset === 'all' ? ' active' : ''}`}
-                onClick={() => selectPreset('all')}
-              >
-                {presetLabels.all}
-              </button>
-            )}
             <button
               className={`drp-preset${activePreset === 'custom' ? ' active' : ''}`}
               onClick={enterCustom}

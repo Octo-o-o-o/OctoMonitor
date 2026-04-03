@@ -9,6 +9,7 @@ type UsageSliceSource = {
   cacheWriteTokens: number
   totalTokens: number
   costUsd?: number | null
+  messageCount?: number
 }
 
 export interface UsageSlice {
@@ -18,12 +19,15 @@ export interface UsageSlice {
   cacheWriteTokens: number
   totalTokens: number
   costUsd?: number | null
+  messageCount: number
 }
 
 export interface RunUsageSlice {
   run: RunRecord
   usage: UsageSlice
 }
+
+export type UsageBucketIndex = Map<string, UsageBucket>
 
 const emptySlice: UsageSlice = {
   inputTokens: 0,
@@ -32,6 +36,7 @@ const emptySlice: UsageSlice = {
   cacheWriteTokens: 0,
   totalTokens: 0,
   costUsd: 0,
+  messageCount: 0,
 }
 
 function parseMs(value: string): number | undefined {
@@ -47,6 +52,7 @@ function scaleUsage(source: UsageSliceSource, ratio: number): UsageSlice {
     cacheWriteTokens: source.cacheWriteTokens * ratio,
     totalTokens: source.totalTokens * ratio,
     costUsd: source.costUsd == null ? undefined : source.costUsd * ratio,
+    messageCount: (source.messageCount ?? 0) * ratio,
   }
 }
 
@@ -79,7 +85,9 @@ export function sliceUsageBucket(
 
   const durationMs = Math.max(endMs - startMs, 0)
   if (durationMs === 0) {
-    return startMs >= rangeStartMs && startMs <= rangeEndMs ? { ...bucket } : emptySlice
+    return startMs >= rangeStartMs && startMs <= rangeEndMs
+      ? { ...bucket, messageCount: bucket.messageCount ?? 0 }
+      : emptySlice
   }
 
   const overlapMs = intervalOverlapMs(startMs, endMs, rangeStartMs, rangeEndMs)
@@ -122,23 +130,24 @@ export function sliceRunUsage(
   rangeEndMs: number,
 ): UsageSlice {
   return sliceUsageBucket(
-    bucket ?? {
-      start: run.startedAt,
-      end: run.lastActivityAt,
-      inputTokens: run.tokens.input,
-      outputTokens: run.tokens.output,
-      cacheReadTokens: run.tokens.cacheRead,
-      cacheWriteTokens: run.tokens.cacheWrite,
-      totalTokens: run.tokens.total,
-      costUsd: run.cost.usd,
+    {
+      start: bucket?.start ?? run.startedAt,
+      end: bucket?.end ?? run.lastActivityAt,
+      inputTokens: bucket?.inputTokens ?? run.tokens.input,
+      outputTokens: bucket?.outputTokens ?? run.tokens.output,
+      cacheReadTokens: bucket?.cacheReadTokens ?? run.tokens.cacheRead,
+      cacheWriteTokens: bucket?.cacheWriteTokens ?? run.tokens.cacheWrite,
+      totalTokens: bucket?.totalTokens ?? run.tokens.total,
+      costUsd: bucket?.costUsd ?? run.cost.usd,
+      messageCount: run.messageCount,
     },
     rangeStartMs,
     rangeEndMs,
   )
 }
 
-export function buildUsageBucketIndex(buckets: UsageBucket[]): Map<string, UsageBucket> {
-  const map = new Map<string, UsageBucket>()
+export function buildUsageBucketIndex(buckets: UsageBucket[]): UsageBucketIndex {
+  const map: UsageBucketIndex = new Map()
   for (const bucket of buckets) {
     const runId = bucket.scope.runId
     if (runId != null && runId !== '') {
@@ -148,13 +157,12 @@ export function buildUsageBucketIndex(buckets: UsageBucket[]): Map<string, Usage
   return map
 }
 
-export function collectRunUsageSlices(
+export function collectRunUsageSlicesFromIndex(
   runs: RunRecord[],
-  buckets: UsageBucket[],
+  bucketByRunId: UsageBucketIndex,
   rangeStartMs: number,
   rangeEndMs: number,
 ): RunUsageSlice[] {
-  const bucketByRunId = buildUsageBucketIndex(buckets)
   const out: RunUsageSlice[] = []
 
   for (const run of runs) {
@@ -168,6 +176,20 @@ export function collectRunUsageSlices(
   return out
 }
 
+export function collectRunUsageSlices(
+  runs: RunRecord[],
+  buckets: UsageBucket[],
+  rangeStartMs: number,
+  rangeEndMs: number,
+): RunUsageSlice[] {
+  return collectRunUsageSlicesFromIndex(
+    runs,
+    buildUsageBucketIndex(buckets),
+    rangeStartMs,
+    rangeEndMs,
+  )
+}
+
 export function sumUsageSlices(slices: Iterable<UsageSlice>): UsageSlice {
   const total: UsageSlice = { ...emptySlice }
 
@@ -178,6 +200,7 @@ export function sumUsageSlices(slices: Iterable<UsageSlice>): UsageSlice {
     total.cacheWriteTokens += slice.cacheWriteTokens
     total.totalTokens += slice.totalTokens
     total.costUsd = (total.costUsd ?? 0) + (slice.costUsd ?? 0)
+    total.messageCount += slice.messageCount
   }
 
   return total

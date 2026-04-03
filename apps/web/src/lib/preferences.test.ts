@@ -16,6 +16,7 @@ describe('frontend preferences', () => {
   it('migrates legacy settings while preserving supported fields', () => {
     localStorage.setItem('octomonitor-settings', JSON.stringify({
       monitorPeriod: '4h',
+      usageWindow: 'month',
       uiDensity: 'compact',
       companionEnabled: true,
       panelConfig: [{ tool: 'codex', enabled: true }],
@@ -28,6 +29,7 @@ describe('frontend preferences', () => {
     const settings = loadFrontendSettings()
 
     expect(settings.monitorPeriod).toBe('4h')
+    expect(settings.snapshotWindow).toBe('month')
     expect(settings.uiDensity).toBe('compact')
     expect(settings.showFingerprints).toBe(false)
     expect(settings.notificationsEnabled).toBe(false)
