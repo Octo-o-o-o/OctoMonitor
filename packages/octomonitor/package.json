@@ -13,7 +13,7 @@
     "octomonitor-darwin-arm64": "0.1.5",
     "octomonitor-darwin-x64": "0.1.5",
     "octomonitor-linux-x64": "0.1.5",
-    "octomonitor-win32-x64": "0.1.5"
+    "@clawbutler/octomonitor-win32-x64": "0.1.5"
   },
   "keywords": [
     "claude-code",

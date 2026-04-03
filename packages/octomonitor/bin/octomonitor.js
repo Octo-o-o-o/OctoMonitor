@@ -7,7 +7,7 @@ const PLATFORMS = {
   "darwin-arm64": "octomonitor-darwin-arm64",
   "darwin-x64": "octomonitor-darwin-x64",
   "linux-x64": "octomonitor-linux-x64",
-  "win32-x64": "octomonitor-win32-x64",
+  "win32-x64": "@clawbutler/octomonitor-win32-x64",
 };
 
 function getBinaryPath() {
