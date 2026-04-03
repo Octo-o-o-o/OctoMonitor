@@ -2248,7 +2248,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-adapter-common"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "serde",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-claude-adapter"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "octomonitor-adapter-common",
@@ -2267,7 +2267,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-codex-adapter"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "octomonitor-adapter-common",
@@ -2277,7 +2277,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-companion"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "serde",
@@ -2286,7 +2286,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "serde",
@@ -2296,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-desktop"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -2306,7 +2306,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-installer"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -2314,7 +2314,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-openclaw-adapter"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono",
  "octomonitor-adapter-common",
@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "octomonitor-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "axum",

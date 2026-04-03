@@ -1,7 +1,7 @@
 {
   "name": "@octomonitor/desktop",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "scripts": {
     "build:web": "pnpm --dir ../.. --filter @octomonitor/web build",
     "build:server": "cargo build --release -p octomonitor-server",

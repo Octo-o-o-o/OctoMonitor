@@ -29,7 +29,7 @@ OctoMonitor 用一个统一仪表盘实时查看你的 AI 编码会话状态，�
 - **Homebrew 服务 / 本地服务端**：`brew install Octo-o-o-o/octomonitor/octomonitor`
 - **npm 包**：安装命令为 `npm install -g octomonitor` 或 `npx octomonitor`
 
-Homebrew 和 npm 分发的是本地 `octomonitor-server` 二进制；桌面 `.dmg` 会单独通过 GitHub Releases 分发，当前仍仅提供 macOS 桌面包。Windows x64 的 npm 打包链路已经接入发布流程，会从下一次 npm 发版开始提供。如果你后续想使用短命令，可以先执行 `brew tap Octo-o-o-o/octomonitor`，再运行 `brew install octomonitor`。
+Homebrew 和 npm 分发的是本地 `octomonitor-server` 二进制；npm 现已覆盖 macOS、Linux x64 和 Windows x64。桌面 `.dmg` 会单独通过 GitHub Releases 分发，当前仍仅提供 macOS 桌面包。如果你后续想使用短命令，可以先执行 `brew tap Octo-o-o-o/octomonitor`，再运行 `brew install octomonitor`。
 
 ## 快速开始
 

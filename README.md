@@ -29,7 +29,7 @@ For end users who want a packaged build instead of running from source:
 - **Homebrew service / local server** — `brew install Octo-o-o-o/octomonitor/octomonitor`
 - **npm package** — `npm install -g octomonitor` or `npx octomonitor`
 
-The Homebrew and npm packages install the local `octomonitor-server` binary. The desktop `.dmg` is distributed separately through GitHub Releases and remains macOS-only. Windows x64 npm packaging is wired into the release pipeline and will be available starting with the next npm release. If you prefer the short Homebrew name later, run `brew tap Octo-o-o-o/octomonitor` first and then use `brew install octomonitor`.
+The Homebrew and npm packages install the local `octomonitor-server` binary. The npm release line now covers macOS, Linux x64, and Windows x64. The desktop `.dmg` is distributed separately through GitHub Releases and remains macOS-only. If you prefer the short Homebrew name later, run `brew tap Octo-o-o-o/octomonitor` first and then use `brew install octomonitor`.
 
 ## Quickstart
 

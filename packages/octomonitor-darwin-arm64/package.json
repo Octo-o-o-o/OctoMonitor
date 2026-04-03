@@ -1,6 +1,6 @@
 {
   "name": "octomonitor-darwin-arm64",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "OctoMonitor binary for macOS Apple Silicon",
   "license": "MIT",
   "os": ["darwin"],

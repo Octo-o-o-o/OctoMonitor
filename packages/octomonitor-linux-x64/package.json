@@ -1,6 +1,6 @@
 {
   "name": "octomonitor-linux-x64",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "OctoMonitor binary for Linux x64",
   "license": "MIT",
   "os": ["linux"],

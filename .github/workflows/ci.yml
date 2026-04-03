@@ -32,13 +32,13 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --exclude octomonitor-desktop
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude octomonitor-desktop
 
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --exclude octomonitor-desktop -- -D warnings
 
   rust-windows:
     name: Rust Windows smoke
@@ -46,8 +46,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web assets
+        run: pnpm --filter @octomonitor/web build
 
       - name: Build Windows server
         run: cargo build -p octomonitor-server

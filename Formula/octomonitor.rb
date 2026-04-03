@@ -2,10 +2,10 @@ class Octomonitor < Formula
   desc "Local-first unified monitor for Claude Code, Codex & OpenClaw"
   homepage "https://github.com/Octo-o-o-o/OctoMonitor"
   license "MIT"
-  version "0.1.4"
+  version "0.1.5"
 
   url "https://github.com/Octo-o-o-o/OctoMonitor.git",
-      tag: "v0.1.4"
+      tag: "v0.1.5"
 
   depends_on "rust" => :build
   depends_on "node" => :build
