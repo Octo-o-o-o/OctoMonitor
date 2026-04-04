@@ -316,6 +316,7 @@ export function InsightsSection() {
               <input
                 type="date"
                 className="historical-date-input"
+                aria-label={t('settings.historicalFrom')}
                 value={fromDate}
                 max={todayStr()}
                 onChange={(e) => setFromDate(e.target.value)}
@@ -324,6 +325,7 @@ export function InsightsSection() {
               <input
                 type="date"
                 className="historical-date-input"
+                aria-label={t('settings.historicalTo')}
                 value={toDate}
                 max={todayStr()}
                 onChange={(e) => setToDate(e.target.value)}

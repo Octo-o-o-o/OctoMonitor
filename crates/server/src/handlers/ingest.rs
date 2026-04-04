@@ -89,7 +89,7 @@ pub async fn ingest_claude_statusline(
         account_alias: Some("local-ingest".into()),
         auth_mode: Some("claude.ai".into()),
         auth_verified: true,
-        session_id: session_id,
+        session_id,
         thread_id: None,
         session_key: None,
         transcript_path: input.transcript_path,
