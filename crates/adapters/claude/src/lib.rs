@@ -2,7 +2,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
 };
 
@@ -76,7 +76,6 @@ fn mask_secret(value: &str) -> String {
     mask_value(value, 8)
 }
 
-/// Claude config directory: ~/.claude
 fn claude_config_dir() -> PathBuf {
     env::var("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
@@ -105,7 +104,6 @@ fn project_name_from_path(path: &str) -> String {
         .to_string()
 }
 
-/// Scan Claude projects directory for all available sessions
 fn scan_sessions(config_dir: &Path) -> Vec<ClaudeSession> {
     let projects_dir = config_dir.join("projects");
     if !projects_dir.is_dir() {
@@ -148,7 +146,23 @@ fn scan_sessions(config_dir: &Path) -> Vec<ClaudeSession> {
     sessions
 }
 
-/// Parse a single Claude transcript JSONL file (reads only first and last lines for speed)
+fn extract_text_from_content(msg: &serde_json::Value) -> Option<String> {
+    let content = msg.get("content")?;
+    if let Some(s) = content.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(arr) = content.as_array() {
+        return arr.iter().find_map(|block| {
+            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                block.get("text").and_then(|t| t.as_str()).map(String::from)
+            } else {
+                None
+            }
+        });
+    }
+    None
+}
+
 fn parse_claude_session(
     path: &Path,
     workspace_path: &str,
@@ -179,7 +193,6 @@ fn parse_claude_session(
             Err(_) => continue,
         };
 
-        // Extract sessionId
         if session_id.is_none() {
             if let Some(sid) = val.get("sessionId").and_then(|v| v.as_str()) {
                 session_id = Some(sid.to_string());
@@ -188,7 +201,6 @@ fn parse_claude_session(
 
         let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
-        // Track timestamps
         if let Some(ts) = val.get("timestamp").and_then(|v| v.as_str()) {
             if first_timestamp.is_none() {
                 first_timestamp = Some(ts.to_string());
@@ -208,40 +220,21 @@ fn parse_claude_session(
                 pending_user_ts = Some(dt);
             }
             // Extract user message text
-            if let Some(message) = val.get("message") {
-                let text = if let Some(content) = message.get("content") {
-                    if let Some(s) = content.as_str() {
-                        Some(s.to_string())
-                    } else if let Some(arr) = content.as_array() {
-                        arr.iter().find_map(|block| {
-                            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                block.get("text").and_then(|t| t.as_str()).map(String::from)
-                            } else {
-                                None
-                            }
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                if let Some(t) = text {
-                    // Skip system-injected messages
-                    if t.starts_with("<local-command-caveat>")
-                        || t.starts_with("<system-reminder>")
-                        || t.starts_with("<command-name>")
-                        || t.starts_with("<task-notification>")
-                    {
-                        continue;
-                    }
-                    let truncated: String = t.chars().take(200).collect();
-                    message_count += 1;
-                    if first_question.is_none() {
-                        first_question = Some(truncated.clone());
-                    }
-                    last_question = Some(truncated);
+            if let Some(t) = val.get("message").and_then(extract_text_from_content) {
+                // Skip system-injected messages
+                if t.starts_with("<local-command-caveat>")
+                    || t.starts_with("<system-reminder>")
+                    || t.starts_with("<command-name>")
+                    || t.starts_with("<task-notification>")
+                {
+                    continue;
                 }
+                let truncated: String = t.chars().take(200).collect();
+                message_count += 1;
+                if first_question.is_none() {
+                    first_question = Some(truncated.clone());
+                }
+                last_question = Some(truncated);
             }
         }
 
@@ -301,30 +294,26 @@ fn parse_claude_session(
     let total_tokens = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens;
 
     // Use file timestamps as fallback
-    let file_meta = fs::metadata(path).ok();
-    let file_modified = file_meta
-        .as_ref()
+    let file_modified = fs::metadata(path)
+        .ok()
         .and_then(|m| m.modified().ok())
         .map(|t| chrono::DateTime::<Utc>::from(t).to_rfc3339());
 
+    let fallback_ts = file_modified.unwrap_or_default();
     Some(ClaudeSession {
         session_id: sid,
         project_path: workspace_path.to_string(),
         project_name: project_name.to_string(),
         transcript_path: path.display().to_string(),
         model,
-        started_at: first_timestamp.unwrap_or_else(|| file_modified.clone().unwrap_or_default()),
-        last_activity_at: last_timestamp.unwrap_or_else(|| file_modified.unwrap_or_default()),
+        started_at: first_timestamp.unwrap_or_else(|| fallback_ts.clone()),
+        last_activity_at: last_timestamp.unwrap_or(fallback_ts),
         input_tokens,
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
         total_tokens,
-        cost_usd: if total_cost_usd > 0.0 {
-            Some(total_cost_usd)
-        } else {
-            None
-        },
+        cost_usd: (total_cost_usd > 0.0).then_some(total_cost_usd),
         message_count,
         first_question,
         last_question,
@@ -332,12 +321,9 @@ fn parse_claude_session(
     })
 }
 
-/// Read Claude HUD usage cache for quota percentages
 fn read_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {
     let cache_path = config_dir.join("plugins/claude-hud/.usage-cache.json");
-    let mut file = fs::File::open(&cache_path).ok()?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).ok()?;
+    let contents = fs::read_to_string(&cache_path).ok()?;
     let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let data = val.get("data")?;
 
@@ -365,7 +351,6 @@ fn read_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {
     })
 }
 
-/// Full probe: CLI version check + filesystem scan for config/sessions
 pub fn probe() -> ClaudeSnapshot {
     let config_dir = claude_config_dir();
     let projects_dir = config_dir.join("projects");
@@ -406,26 +391,15 @@ pub fn probe() -> ClaudeSnapshot {
 }
 
 fn find_recent_session(config_dir: &Path) -> Option<String> {
-    // Scan for .jsonl transcript files without reading their content
     let transcripts_dir = config_dir.join("transcripts");
-    if !transcripts_dir.is_dir() {
-        return None;
-    }
     let mut newest: Option<(std::time::SystemTime, String)> = None;
-    if let Ok(entries) = fs::read_dir(&transcripts_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "jsonl") {
-                if let Ok(meta) = fs::metadata(&path) {
-                    if let Ok(modified) = meta.modified() {
-                        let name = path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
-                            newest = Some((modified, name));
-                        }
-                    }
+    for entry in fs::read_dir(&transcripts_dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "jsonl") {
+            if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
+                    newest = Some((modified, name));
                 }
             }
         }

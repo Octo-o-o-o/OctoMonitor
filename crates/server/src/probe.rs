@@ -16,12 +16,7 @@ use crate::platform::last_path_component;
 use crate::pricing::PricingStore;
 use crate::state::AppState;
 
-/// Normal polling interval when at least one session is active.
 const PROBE_ACTIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
-
-/// When all sessions are done, the probe hibernates and only wakes on:
-///   1. An ingest event (via `probe_wake` Notify), or
-///   2. A long safety-net timeout so the dashboard isn't permanently stale.
 const PROBE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 const MAX_BOOTSTRAP_RUNS: usize = 1_500;
 const MAX_BOOTSTRAP_COMMITS: usize = 2_000;
@@ -98,14 +93,10 @@ pub fn spawn_probe_refresh(state: AppState) {
     tokio::spawn(async move {
         refresh_bootstrap_once(&state).await;
         loop {
-            // Decide sleep strategy based on whether any session is active.
             let active = has_active_runs(&*state.bootstrap.read().await);
             if active {
-                // Active sessions: poll on a normal cadence.
                 tokio::time::sleep(PROBE_ACTIVE_INTERVAL).await;
             } else {
-                // All sessions done: hibernate until ingest wakes us or
-                // the safety-net timeout fires (whichever comes first).
                 tokio::select! {
                     _ = state.probe_wake.notified() => {}
                     _ = tokio::time::sleep(PROBE_IDLE_TIMEOUT) => {}
@@ -117,8 +108,6 @@ pub fn spawn_probe_refresh(state: AppState) {
     });
 }
 
-/// Runs older than this are evicted from the in-memory history.
-/// Keep a long horizon so statistics can cover effectively all local history.
 const RUN_RETENTION: chrono::Duration = chrono::Duration::days(3650);
 
 fn merge_runtime_state(
@@ -126,7 +115,6 @@ fn merge_runtime_state(
     previous: &BootstrapPayload,
     pricing: &PricingStore,
 ) {
-    // Preserve user-patched config across probe refresh cycles
     target.config = previous.config.clone();
 
     let mut run_map: HashMap<String, RunRecord> = target
@@ -136,13 +124,10 @@ fn merge_runtime_state(
         .map(|run| (run.id.clone(), run))
         .collect();
 
-    // Preserve previous runs that are not in the fresh probe result:
-    //   - ingest-* runs (live ingest, not probe-discovered)
-    //   - completed/error runs (historical, so the period filter has depth)
     let eviction_cutoff = (Utc::now() - RUN_RETENTION).to_rfc3339();
     for run in &previous.runs {
         if run_map.contains_key(&run.id) {
-            continue; // fresh probe already has this run
+            continue;
         }
 
         if run.id.starts_with("ingest-")
@@ -166,7 +151,6 @@ fn merge_runtime_state(
         .runs
         .sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
 
-    // Merge completions: keep previous real completions, add new probe-generated ones
     let mut completions = previous.recent_completions.clone();
     for completion in &target.recent_completions {
         if !completions.iter().any(|item| item.id == completion.id) {
@@ -177,8 +161,6 @@ fn merge_runtime_state(
     completions.truncate(12);
     target.recent_completions = completions;
 
-    // Derived views must be rebuilt after the final run list is merged and
-    // re-sorted, otherwise usage buckets drift out of sync with the payload.
     rebuild_derived(target, pricing);
 }
 
@@ -187,22 +169,13 @@ fn same_underlying_run(a: &RunRecord, b: &RunRecord) -> bool {
         return false;
     }
 
-    match (&a.session_id, &b.session_id) {
-        (Some(left), Some(right)) if left == right => return true,
-        _ => {}
+    fn both_match(left: &Option<String>, right: &Option<String>) -> bool {
+        matches!((left, right), (Some(l), Some(r)) if l == r)
     }
 
-    match (&a.thread_id, &b.thread_id) {
-        (Some(left), Some(right)) if left == right => return true,
-        _ => {}
-    }
-
-    match (&a.session_key, &b.session_key) {
-        (Some(left), Some(right)) if left == right => return true,
-        _ => {}
-    }
-
-    false
+    both_match(&a.session_id, &b.session_id)
+        || both_match(&a.thread_id, &b.thread_id)
+        || both_match(&a.session_key, &b.session_key)
 }
 
 fn history_cutoff(config: &AppConfig) -> chrono::DateTime<Utc> {
@@ -306,128 +279,151 @@ fn scan_adapters() -> (
     (claude_probe, codex_probe, openclaw_probe)
 }
 
+fn make_identity(
+    tool: ToolKind,
+    auth_mode: &str,
+    provider: &str,
+    verified: bool,
+    configured: bool,
+    source: SourceConfidence,
+) -> IdentityState {
+    IdentityState {
+        tool,
+        auth_mode: Some(auth_mode.into()),
+        provider: Some(provider.into()),
+        account_alias: Some("local-probe".into()),
+        fingerprint: None,
+        auth_age: None,
+        verified,
+        configured,
+        source,
+    }
+}
+
+fn make_adapter_health(
+    tool: ToolKind,
+    mode: &str,
+    online: bool,
+    now: &str,
+    first_error: Option<String>,
+) -> AdapterHealth {
+    AdapterHealth {
+        tool,
+        mode: mode.into(),
+        online,
+        last_success_at: Some(now.into()),
+        last_error_at: None,
+        last_error: first_error,
+        freshness: Freshness::Hot,
+    }
+}
+
 fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
     let now = Utc::now().to_rfc3339();
     let (claude_probe, codex_probe, openclaw_probe) = scan_adapters();
     let mut runs: Vec<RunRecord> = Vec::new();
 
-    if !claude_probe.sessions.is_empty() {
-        for session in &claude_probe.sessions {
-            runs.push(build_run_from_claude_session(session, &claude_probe));
+    if claude_probe.sessions.is_empty() {
+        if include_placeholder_runs {
+            runs.push(build_probe_run_from_claude(&claude_probe));
         }
-    } else if include_placeholder_runs {
-        runs.push(build_probe_run_from_claude(&claude_probe));
+    } else {
+        runs.extend(claude_probe.sessions.iter().map(|s| build_run_from_claude_session(s, &claude_probe)));
     }
 
-    if !codex_probe.sessions.is_empty() {
-        for session in &codex_probe.sessions {
-            runs.push(build_run_from_codex_session(session, &codex_probe));
+    if codex_probe.sessions.is_empty() {
+        if include_placeholder_runs {
+            runs.push(build_probe_run_from_codex(&codex_probe));
         }
-    } else if include_placeholder_runs {
-        runs.push(build_probe_run_from_codex(&codex_probe));
+    } else {
+        runs.extend(codex_probe.sessions.iter().map(|s| build_run_from_codex_session(s, &codex_probe)));
     }
 
-    if !openclaw_probe.sessions.is_empty() {
-        for session in &openclaw_probe.sessions {
-            runs.push(build_run_from_openclaw_session(session, &openclaw_probe));
+    if openclaw_probe.sessions.is_empty() {
+        if include_placeholder_runs {
+            runs.push(build_probe_run_from_openclaw(&openclaw_probe));
         }
-    } else if include_placeholder_runs {
-        runs.push(build_probe_run_from_openclaw(&openclaw_probe));
+    } else {
+        runs.extend(openclaw_probe.sessions.iter().map(|s| build_run_from_openclaw_session(s, &openclaw_probe)));
     }
 
     dedupe_runs(&mut runs);
+
+    let claude_auth = if claude_probe.cli_available {
+        "claude.ai/configured"
+    } else {
+        "unavailable"
+    };
+    let codex_auth = if codex_probe.cli_available {
+        "configured"
+    } else {
+        "unavailable"
+    };
+    let openclaw_auth = if openclaw_probe.gateway_status_ok {
+        "gateway"
+    } else {
+        "sessions-scan"
+    };
+
     let identities = vec![
-        IdentityState {
-            tool: ToolKind::Claude,
-            auth_mode: Some(if claude_probe.cli_available {
-                "claude.ai/configured".into()
-            } else {
-                "unavailable".into()
-            }),
-            provider: Some("claude".into()),
-            account_alias: Some("local-probe".into()),
-            fingerprint: None,
-            auth_age: None,
-            verified: claude_probe.cli_available,
-            configured: claude_probe.config_exists,
-            source: SourceConfidence::Live,
-        },
-        IdentityState {
-            tool: ToolKind::Codex,
-            auth_mode: Some(if codex_probe.cli_available {
-                "configured".into()
-            } else {
-                "unavailable".into()
-            }),
-            provider: Some("openai".into()),
-            account_alias: Some("local-probe".into()),
-            fingerprint: None,
-            auth_age: None,
-            verified: codex_probe.cli_available,
-            configured: codex_probe.config_exists,
-            source: SourceConfidence::Live,
-        },
-        IdentityState {
-            tool: ToolKind::OpenClaw,
-            auth_mode: Some(if openclaw_probe.gateway_status_ok {
-                "gateway".into()
-            } else {
-                "sessions-scan".into()
-            }),
-            provider: Some("openclaw".into()),
-            account_alias: Some("local-probe".into()),
-            fingerprint: None,
-            auth_age: None,
-            verified: openclaw_probe.cli_available,
-            configured: openclaw_probe.sessions_dir_exists || openclaw_probe.state_file_exists,
-            source: SourceConfidence::Official,
-        },
+        make_identity(
+            ToolKind::Claude,
+            claude_auth,
+            "claude",
+            claude_probe.cli_available,
+            claude_probe.config_exists,
+            SourceConfidence::Live,
+        ),
+        make_identity(
+            ToolKind::Codex,
+            codex_auth,
+            "openai",
+            codex_probe.cli_available,
+            codex_probe.config_exists,
+            SourceConfidence::Live,
+        ),
+        make_identity(
+            ToolKind::OpenClaw,
+            openclaw_auth,
+            "openclaw",
+            openclaw_probe.cli_available,
+            openclaw_probe.sessions_dir_exists || openclaw_probe.state_file_exists,
+            SourceConfidence::Official,
+        ),
     ];
 
+    let openclaw_mode = if openclaw_probe.gateway_status_ok {
+        "gateway+status+probe"
+    } else {
+        "sessions-scan+probe"
+    };
+
+    let claude_error = claude_probe.command_probes.iter().find(|p| !p.success).and_then(|p| p.error.clone());
+    let codex_error = codex_probe.command_probes.iter().find(|p| !p.success).and_then(|p| p.error.clone());
+    let openclaw_error = openclaw_probe.command_probes.iter().find(|p| !p.success).and_then(|p| p.error.clone());
+
     let adapter_health = vec![
-        AdapterHealth {
-            tool: ToolKind::Claude,
-            mode: "hook+statusline+probe".into(),
-            online: claude_probe.cli_available,
-            last_success_at: Some(now.clone()),
-            last_error_at: None,
-            last_error: claude_probe
-                .command_probes
-                .iter()
-                .find(|probe| !probe.success)
-                .and_then(|probe| probe.error.clone()),
-            freshness: Freshness::Hot,
-        },
-        AdapterHealth {
-            tool: ToolKind::Codex,
-            mode: "app-server+hook+probe".into(),
-            online: codex_probe.cli_available,
-            last_success_at: Some(now.clone()),
-            last_error_at: None,
-            last_error: codex_probe
-                .command_probes
-                .iter()
-                .find(|probe| !probe.success)
-                .and_then(|probe| probe.error.clone()),
-            freshness: Freshness::Hot,
-        },
-        AdapterHealth {
-            tool: ToolKind::OpenClaw,
-            mode: if openclaw_probe.gateway_status_ok {
-                "gateway+status+probe".into()
-            } else {
-                "sessions-scan+probe".into()
-            },
-            online: openclaw_probe.cli_available,
-            last_success_at: Some(now.clone()),
-            last_error_at: None,
-            last_error: openclaw_probe
-                .command_probes
-                .iter()
-                .find(|probe| !probe.success)
-                .and_then(|probe| probe.error.clone()),
-            freshness: Freshness::Hot,
-        },
+        make_adapter_health(
+            ToolKind::Claude,
+            "hook+statusline+probe",
+            claude_probe.cli_available,
+            &now,
+            claude_error,
+        ),
+        make_adapter_health(
+            ToolKind::Codex,
+            "app-server+hook+probe",
+            codex_probe.cli_available,
+            &now,
+            codex_error,
+        ),
+        make_adapter_health(
+            ToolKind::OpenClaw,
+            openclaw_mode,
+            openclaw_probe.cli_available,
+            &now,
+            openclaw_error,
+        ),
     ];
 
     let pending_crons = openclaw_probe
@@ -453,8 +449,6 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
     }
 }
 
-/// Detect the primary LAN IP by opening a UDP socket to an external address.
-/// No packets are actually sent. Returns None if detection fails.
 fn detect_local_ip() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
@@ -462,18 +456,12 @@ fn detect_local_ip() -> Option<String> {
     Some(addr.ip().to_string())
 }
 
-// ============================================================
-// Build RunRecords from real scanned sessions
-// ============================================================
-
 fn build_run_from_claude_session(
     session: &claude_adapter::ClaudeSession,
     probe: &claude_adapter::ClaudeSnapshot,
 ) -> RunRecord {
-    let (five_h, seven_d) = match &probe.quota {
-        Some(q) => (q.five_hour_used_pct, q.seven_day_used_pct),
-        None => (None, None),
-    };
+    let five_h = probe.quota.as_ref().and_then(|q| q.five_hour_used_pct);
+    let seven_d = probe.quota.as_ref().and_then(|q| q.seven_day_used_pct);
 
     RunRecord {
         id: format!("claude-session-{}", session.session_id),
@@ -581,8 +569,8 @@ fn build_run_from_codex_session(
 
     let workspace_path = resolved_cwd.unwrap_or_else(|| "~/.codex".into());
 
-    let five_h = best_codex_quota_5h(&probe.sessions);
-    let seven_d = best_codex_quota_7d(&probe.sessions);
+    let five_h = probe.sessions.iter().find_map(|s| s.five_hour_used_pct);
+    let seven_d = probe.sessions.iter().find_map(|s| s.seven_day_used_pct);
 
     RunRecord {
         id: format!("codex-session-{}", session.session_id),
@@ -668,14 +656,6 @@ fn build_run_from_codex_session(
         origin_label: None,
         origin_provider: None,
     }
-}
-
-fn best_codex_quota_5h(sessions: &[codex_adapter::CodexSession]) -> Option<f64> {
-    sessions.iter().filter_map(|s| s.five_hour_used_pct).next()
-}
-
-fn best_codex_quota_7d(sessions: &[codex_adapter::CodexSession]) -> Option<f64> {
-    sessions.iter().filter_map(|s| s.seven_day_used_pct).next()
 }
 
 fn classify_codex_session_state(session: &codex_adapter::CodexSession) -> RunState {
@@ -829,243 +809,190 @@ fn build_run_from_openclaw_session(
     }
 }
 
-// ============================================================
-// Fallback single-probe runs (when no sessions found)
-// ============================================================
+/// Fields that vary between the three probe-only placeholder runs.
+struct ProbeRunParams {
+    id: &'static str,
+    tool: ToolKind,
+    source_mode: String,
+    project_name: &'static str,
+    workspace_path: String,
+    workspace_short: &'static str,
+    provider: &'static str,
+    auth_mode: &'static str,
+    auth_verified: bool,
+    state: RunState,
+    last_action: &'static str,
+    last_tail: Option<String>,
+    probed_at: String,
+    quota: QuotaValue,
+    cost_confidence: SourceConfidence,
+    source_confidence: SourceConfidence,
+}
 
-fn build_probe_run_from_claude(probe: &claude_adapter::ClaudeSnapshot) -> RunRecord {
+fn build_probe_placeholder_run(params: ProbeRunParams) -> RunRecord {
     let now = Utc::now();
-    let (five_h, seven_d) = match &probe.quota {
-        Some(q) => (q.five_hour_used_pct, q.seven_day_used_pct),
-        None => (None, None),
-    };
     RunRecord {
-        id: "claude-probe-run".into(),
-        tool: ToolKind::Claude,
-        source_mode: "claude_probe".into(),
-        project_name: "Claude Code".into(),
-        workspace_path: probe
-            .config_dir
-            .clone()
-            .unwrap_or_else(|| "~/.claude".into()),
-        workspace_short: "~/.claude".into(),
+        id: params.id.into(),
+        tool: params.tool,
+        source_mode: params.source_mode,
+        project_name: params.project_name.into(),
+        workspace_path: params.workspace_path,
+        workspace_short: params.workspace_short.into(),
         model: None,
-        provider: Some("claude".into()),
+        provider: Some(params.provider.into()),
         agent_name: Some("local-probe".into()),
         agent_display_name: None,
         account_alias: Some("local-probe".into()),
-        auth_mode: Some(
-            if probe.cli_available {
-                "configured"
-            } else {
-                "missing-cli"
-            }
-            .into(),
-        ),
-        auth_verified: probe.cli_available,
+        auth_mode: Some(params.auth_mode.into()),
+        auth_verified: params.auth_verified,
         session_id: None,
         thread_id: None,
         session_key: None,
         transcript_path: None,
         started_at: now.to_rfc3339(),
-        last_activity_at: probe.probed_at.clone(),
+        last_activity_at: params.probed_at.clone(),
         elapsed_ms: 0,
-        state: if probe.cli_available {
-            RunState::Idle
-        } else {
-            RunState::Error
-        },
-        last_action: Some("Probed local Claude CLI + config".into()),
-        last_tail: probe.active_session_hint.clone(),
+        state: params.state,
+        last_action: Some(params.last_action.into()),
+        last_tail: params.last_tail,
         pending_approval: false,
         first_question: None,
         last_question: None,
         error_message: None,
         message_count: 0,
-        tokens: TokenUsage {
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_write: 0,
-            total: 0,
-            context: 0,
-        },
+        tokens: TokenUsage::default(),
         cost: MoneyValue {
             usd: None,
-            confidence: SourceConfidence::Derived,
+            confidence: params.cost_confidence,
         },
+        quota: params.quota,
+        source: SourceInfo {
+            confidence: params.source_confidence,
+            freshness: Freshness::Hot,
+            last_updated_at: params.probed_at,
+        },
+        vcs: None,
+        origin_label: None,
+        origin_provider: None,
+    }
+}
+
+fn build_probe_run_from_claude(probe: &claude_adapter::ClaudeSnapshot) -> RunRecord {
+    let five_h = probe.quota.as_ref().and_then(|q| q.five_hour_used_pct);
+    let seven_d = probe.quota.as_ref().and_then(|q| q.seven_day_used_pct);
+    build_probe_placeholder_run(ProbeRunParams {
+        id: "claude-probe-run",
+        tool: ToolKind::Claude,
+        source_mode: "claude_probe".into(),
+        project_name: "Claude Code",
+        workspace_path: probe
+            .config_dir
+            .clone()
+            .unwrap_or_else(|| "~/.claude".into()),
+        workspace_short: "~/.claude",
+        provider: "claude",
+        auth_mode: if probe.cli_available {
+            "configured"
+        } else {
+            "missing-cli"
+        },
+        auth_verified: probe.cli_available,
+        state: if probe.cli_available {
+            RunState::Idle
+        } else {
+            RunState::Error
+        },
+        last_action: "Probed local Claude CLI + config",
+        last_tail: probe.active_session_hint.clone(),
+        probed_at: probe.probed_at.clone(),
         quota: QuotaValue {
             five_hour_used_pct: five_h,
             seven_day_used_pct: seven_d,
             reset_at: vec![],
             confidence: SourceConfidence::Derived,
         },
-        source: SourceInfo {
-            confidence: SourceConfidence::Live,
-            freshness: Freshness::Hot,
-            last_updated_at: probe.probed_at.clone(),
-        },
-        vcs: None,
-        origin_label: None,
-        origin_provider: None,
-    }
+        cost_confidence: SourceConfidence::Derived,
+        source_confidence: SourceConfidence::Live,
+    })
 }
 
 fn build_probe_run_from_codex(probe: &codex_adapter::CodexSnapshot) -> RunRecord {
-    let now = Utc::now();
-    RunRecord {
-        id: "codex-probe-run".into(),
+    build_probe_placeholder_run(ProbeRunParams {
+        id: "codex-probe-run",
         tool: ToolKind::Codex,
         source_mode: "codex_local_state".into(),
-        project_name: "Codex".into(),
+        project_name: "Codex",
         workspace_path: probe
             .config_dir
             .clone()
             .unwrap_or_else(|| "~/.codex".into()),
-        workspace_short: "~/.codex".into(),
-        model: None,
-        provider: Some("openai".into()),
-        agent_name: Some("local-probe".into()),
-        agent_display_name: None,
-        account_alias: Some("local-probe".into()),
-        auth_mode: Some(
-            if probe.cli_available {
-                "configured"
-            } else {
-                "missing-cli"
-            }
-            .into(),
-        ),
+        workspace_short: "~/.codex",
+        provider: "openai",
+        auth_mode: if probe.cli_available {
+            "configured"
+        } else {
+            "missing-cli"
+        },
         auth_verified: probe.cli_available,
-        session_id: None,
-        thread_id: None,
-        session_key: None,
-        transcript_path: None,
-        started_at: now.to_rfc3339(),
-        last_activity_at: probe.probed_at.clone(),
-        elapsed_ms: 0,
         state: if probe.history_exists {
             RunState::Idle
         } else {
             RunState::Stale
         },
-        last_action: Some("Scanned local Codex state".into()),
+        last_action: "Scanned local Codex state",
         last_tail: probe.recent_history_hint.clone(),
-        pending_approval: false,
-        first_question: None,
-        last_question: None,
-        error_message: None,
-        message_count: 0,
-        tokens: TokenUsage {
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_write: 0,
-            total: 0,
-            context: 0,
-        },
-        cost: MoneyValue {
-            usd: None,
-            confidence: SourceConfidence::Estimated,
-        },
+        probed_at: probe.probed_at.clone(),
         quota: QuotaValue {
             five_hour_used_pct: None,
             seven_day_used_pct: None,
             reset_at: vec![],
             confidence: SourceConfidence::Derived,
         },
-        source: SourceInfo {
-            confidence: SourceConfidence::Live,
-            freshness: Freshness::Hot,
-            last_updated_at: probe.probed_at.clone(),
-        },
-        vcs: None,
-        origin_label: None,
-        origin_provider: None,
-    }
+        cost_confidence: SourceConfidence::Estimated,
+        source_confidence: SourceConfidence::Live,
+    })
 }
 
 fn build_probe_run_from_openclaw(probe: &openclaw_adapter::OpenClawSnapshot) -> RunRecord {
-    let now = Utc::now();
-    RunRecord {
-        id: "openclaw-probe-run".into(),
+    build_probe_placeholder_run(ProbeRunParams {
+        id: "openclaw-probe-run",
         tool: ToolKind::OpenClaw,
         source_mode: if probe.gateway_status_ok {
             "openclaw_gateway".into()
         } else {
             "openclaw_sessions".into()
         },
-        project_name: "OpenClaw".into(),
+        project_name: "OpenClaw",
         workspace_path: probe
             .workspace_dir
             .clone()
             .unwrap_or_else(|| "~/.openclaw".into()),
-        workspace_short: "~/.openclaw".into(),
-        model: None,
-        provider: Some("openclaw".into()),
-        agent_name: Some("local-probe".into()),
-        agent_display_name: None,
-        account_alias: Some("local-probe".into()),
-        auth_mode: Some(
-            if probe.gateway_status_ok {
-                "gateway"
-            } else {
-                "sessions-scan"
-            }
-            .into(),
-        ),
+        workspace_short: "~/.openclaw",
+        provider: "openclaw",
+        auth_mode: if probe.gateway_status_ok {
+            "gateway"
+        } else {
+            "sessions-scan"
+        },
         auth_verified: probe.cli_available,
-        session_id: None,
-        thread_id: None,
-        session_key: None,
-        transcript_path: None,
-        started_at: now.to_rfc3339(),
-        last_activity_at: probe.probed_at.clone(),
-        elapsed_ms: 0,
         state: if probe.gateway_status_ok || probe.sessions_dir_exists {
             RunState::Idle
         } else {
             RunState::GatewayOffline
         },
-        last_action: Some("Probed Gateway/CLI/session store".into()),
+        last_action: "Probed Gateway/CLI/session store",
         last_tail: probe.recent_session_hint.clone(),
-        pending_approval: false,
-        first_question: None,
-        last_question: None,
-        error_message: None,
-        message_count: 0,
-        tokens: TokenUsage {
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_write: 0,
-            total: 0,
-            context: 0,
-        },
-        cost: MoneyValue {
-            usd: None,
-            confidence: SourceConfidence::Official,
-        },
+        probed_at: probe.probed_at.clone(),
         quota: QuotaValue {
             five_hour_used_pct: None,
             seven_day_used_pct: None,
             reset_at: vec![],
             confidence: SourceConfidence::Official,
         },
-        source: SourceInfo {
-            confidence: SourceConfidence::Official,
-            freshness: Freshness::Hot,
-            last_updated_at: probe.probed_at.clone(),
-        },
-        vcs: None,
-        origin_label: None,
-        origin_provider: None,
-    }
+        cost_confidence: SourceConfidence::Official,
+        source_confidence: SourceConfidence::Official,
+    })
 }
-
-// ============================================================
-// Shared utility functions (used by both probe and ingest)
-// ============================================================
 
 pub fn elapsed_from_timestamps(start: &str, end: &str) -> i64 {
     let start_dt = chrono::DateTime::parse_from_rfc3339(start).ok();
@@ -1111,8 +1038,8 @@ fn normalize_run_token_totals(run: &mut RunRecord) {
 }
 
 fn dedupe_runs(runs: &mut Vec<RunRecord>) {
-    let mut seen = HashMap::new();
-    runs.retain(|run| seen.insert(run.id.clone(), true).is_none());
+    let mut seen = std::collections::HashSet::new();
+    runs.retain(|run| seen.insert(run.id.clone()));
 }
 
 fn build_usage_buckets(runs: &[RunRecord], pricing: &PricingStore) -> Vec<UsageBucket> {
@@ -1836,7 +1763,7 @@ pub fn resolve_worktree_cwd(cwd: &str) -> String {
                 // gitdir points to e.g. /real/project/.git/worktrees/name
                 // Walk up to find the parent of `.git`
                 for ancestor in gitdir_path.ancestors() {
-                    if ancestor.file_name().map(|n| n == ".git").unwrap_or(false) {
+                    if ancestor.file_name().is_some_and(|n| n == ".git") {
                         if let Some(project_root) = ancestor.parent() {
                             return project_root.to_string_lossy().to_string();
                         }
@@ -1848,6 +1775,4 @@ pub fn resolve_worktree_cwd(cwd: &str) -> String {
     cwd.to_string()
 }
 
-pub fn shorten_path(path: &str) -> String {
-    crate::platform::shorten_path(path)
-}
+pub use crate::platform::shorten_path;

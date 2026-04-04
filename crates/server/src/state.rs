@@ -12,9 +12,7 @@ pub struct AppState {
     pub pairings: Arc<RwLock<Vec<PairingRecord>>>,
     pub viewer_sessions: Arc<RwLock<Vec<ViewerSession>>>,
     pub notify: broadcast::Sender<()>,
-    /// Wakes the probe loop when live ingest receives new activity.
     pub probe_wake: Arc<Notify>,
-    /// LiteLLM-sourced model pricing with file cache.
     pub pricing: PricingStore,
 }
 
@@ -31,23 +29,19 @@ impl AppState {
         }
     }
 
-    /// Signal all WS listeners that state has changed.
     pub fn signal_change(&self) {
         let _ = self.notify.send(());
     }
 
-    /// Wake the probe loop so it runs a fresh scan soon.
     pub fn wake_probe(&self) {
         self.probe_wake.notify_one();
     }
 
-    /// Revoke every pending remote pairing and active viewer session.
     pub async fn clear_remote_access_state(&self) {
         self.pairings.write().await.clear();
         self.viewer_sessions.write().await.clear();
     }
 
-    /// Revoke a single remote viewer device by id.
     pub async fn revoke_remote_device(&self, device_id: &str) -> bool {
         let mut sessions = self.viewer_sessions.write().await;
         let original_len = sessions.len();

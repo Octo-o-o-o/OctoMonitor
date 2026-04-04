@@ -194,7 +194,8 @@ fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
                     .and_then(|value| value.as_str())
                     .unwrap_or_default();
                 if payload_type == "message" && role == "assistant" {
-                    if let Some(text) = extract_block_text(payload.get("content"), &["output_text"])
+                    if let Some(text) =
+                        payload.get("content").and_then(|c| extract_string_or_text_blocks(c, &["output_text"]))
                     {
                         pending_output = build_entry(
                             InspectEntryKind::Output,
@@ -251,7 +252,7 @@ fn parse_claude_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
                 let Some(message) = val.get("message") else {
                     continue;
                 };
-                let Some(text) = extract_claude_assistant_text(message) else {
+                let Some(text) = extract_content_text(message) else {
                     continue;
                 };
                 pending_output = build_entry(
@@ -296,7 +297,7 @@ fn parse_openclaw_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
 
         match role {
             "user" => {
-                let Some(text) = extract_openclaw_text(message) else {
+                let Some(text) = extract_content_text(message) else {
                     continue;
                 };
                 let Some(text) = sanitize_openclaw_input_text(&text) else {
@@ -305,7 +306,7 @@ fn parse_openclaw_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
                 push_entry(&mut entries, InspectEntryKind::Input, &timestamp, text);
             }
             "assistant" => {
-                let text = extract_openclaw_text(message).or_else(|| {
+                let text = extract_content_text(message).or_else(|| {
                     message
                         .get("errorMessage")
                         .and_then(|value| value.as_str())
@@ -335,11 +336,7 @@ fn extract_claude_user_text(message: &serde_json::Value) -> Option<String> {
     Some(text)
 }
 
-fn extract_claude_assistant_text(message: &serde_json::Value) -> Option<String> {
-    extract_string_or_text_blocks(message.get("content")?, &["text"])
-}
-
-fn extract_openclaw_text(message: &serde_json::Value) -> Option<String> {
+fn extract_content_text(message: &serde_json::Value) -> Option<String> {
     extract_string_or_text_blocks(message.get("content")?, &["text"])
 }
 
@@ -367,13 +364,6 @@ fn extract_string_or_text_blocks(
 
     let normalized = normalize_text(&joined);
     (!normalized.is_empty()).then_some(normalized)
-}
-
-fn extract_block_text(
-    content: Option<&serde_json::Value>,
-    allowed_types: &[&str],
-) -> Option<String> {
-    extract_string_or_text_blocks(content?, allowed_types)
 }
 
 fn sanitize_openclaw_input_text(text: &str) -> Option<String> {
@@ -545,14 +535,13 @@ fn normalize_text(text: &str) -> String {
     text.replace("\r\n", "\n").trim().to_string()
 }
 
-fn truncate_text(text: String) -> String {
-    let mut chars = text.chars();
-    let truncated: String = chars.by_ref().take(MAX_ENTRY_CHARS).collect();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        text
+fn truncate_text(text: impl Into<String>) -> String {
+    let text = text.into();
+    if text.chars().count() <= MAX_ENTRY_CHARS {
+        return text;
     }
+    let truncated: String = text.chars().take(MAX_ENTRY_CHARS).collect();
+    format!("{truncated}…")
 }
 
 fn dedupe_consecutive(entries: Vec<InspectEntry>) -> Vec<InspectEntry> {

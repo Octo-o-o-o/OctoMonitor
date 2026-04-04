@@ -1,5 +1,5 @@
+import type { AgentDisplayFormat } from './preferences'
 import type { RunRecord } from './types'
-import type { AgentDisplayFormat } from '../store/monitorStore'
 
 export function formatTokens(n: number): string {
   const value = Math.round(n)
@@ -22,7 +22,7 @@ export function formatDuration(ms: number): string {
   return `${m}m${String(s).padStart(2, '0')}s`
 }
 
-const pad2 = (n: number) => String(n).padStart(2, '0')
+export const pad2 = (n: number) => String(n).padStart(2, '0')
 
 /** Full ISO → "YYYY-MM-DD HH:MM:SS" */
 export function formatDateTime(iso: string): string {
@@ -37,9 +37,8 @@ export function formatLastUpdated(iso: string): string {
   if (isNaN(d.getTime())) return ''
   const now = new Date()
   const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
-  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
-    return `Today ${time}`
-  }
+  const isToday = d.toDateString() === now.toDateString()
+  if (isToday) return `Today ${time}`
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${time}`
 }
 

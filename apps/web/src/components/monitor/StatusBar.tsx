@@ -150,10 +150,6 @@ export function StatusBar({ runtimeMode, wsConnected }: { runtimeMode: RuntimeMo
   const showUsageWindowPill = statusBarWidth > 920
   const showStatusStats = statusBarWidth > 840
 
-  function handleTabSelect(tab: ActiveTab) {
-    setActiveTab(tab)
-  }
-
   function handleMenuTabSelect(event: MouseEvent<HTMLButtonElement>, tab: ActiveTab) {
     setActiveTab(tab)
     const details = event.currentTarget.closest('details')
@@ -194,7 +190,7 @@ export function StatusBar({ runtimeMode, wsConnected }: { runtimeMode: RuntimeMo
               <button
                 key={tab}
                 className={`view-tab ${activeTab === tab ? 'active' : ''}`}
-                onClick={() => handleTabSelect(tab)}
+                onClick={() => setActiveTab(tab)}
                 role="tab"
                 aria-selected={activeTab === tab}
                 type="button"

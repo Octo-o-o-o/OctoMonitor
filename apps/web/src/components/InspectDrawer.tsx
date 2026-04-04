@@ -12,13 +12,21 @@ type InspectEntry = {
   text: string
 }
 
-function stateLabel(state: string, t: (key: any) => string): string {
-  return t(`state.${state}` as any) ?? state.toUpperCase()
+const errorStates = new Set(['error', 'gatewayOffline', 'limitExceeded', 'contextExceeded'])
+
+const stateClassMap: Record<string, string> = {
+  active: 'inspect-state--active',
+  waitingApproval: 'inspect-state--waiting',
 }
 
-function formatQuota(pct: number | undefined): string {
-  if (pct == null) return '—'
-  return `${Math.round(pct)}%`
+const toolColorMap: Record<string, string> = {
+  claude: 'var(--claude-accent)',
+  codex: 'var(--codex-accent)',
+  openClaw: 'var(--openclaw-accent)',
+}
+
+function stateLabel(state: string, t: (key: any) => string): string {
+  return t(`state.${state}` as any) ?? state.toUpperCase()
 }
 
 export function InspectDrawer() {
@@ -51,64 +59,41 @@ export function InspectDrawer() {
   useEffect(() => {
     let cancelled = false
     setEntries([])
+    setEntriesLoading(false)
 
-    if (!selectedRun || runtimeMode === 'remoteViewer') {
-      setEntriesLoading(false)
-      return () => {
-        cancelled = true
-      }
+    if (selectedRun && runtimeMode !== 'remoteViewer') {
+      setEntriesLoading(true)
+      void apiFetch(`/api/runs/${encodeURIComponent(selectedRun.id)}/inspect`)
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`inspect fetch failed: ${response.status}`)
+          return response.json() as Promise<{ entries?: InspectEntry[] }>
+        })
+        .then((payload) => {
+          if (!cancelled) setEntries(Array.isArray(payload.entries) ? payload.entries : [])
+        })
+        .catch(() => {
+          if (!cancelled) setEntries([])
+        })
+        .finally(() => {
+          if (!cancelled) setEntriesLoading(false)
+        })
     }
 
-    setEntriesLoading(true)
-    void apiFetch(`/api/runs/${encodeURIComponent(selectedRun.id)}/inspect`)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`inspect fetch failed: ${response.status}`)
-        }
-        return response.json() as Promise<{ entries?: InspectEntry[] }>
-      })
-      .then((payload) => {
-        if (!cancelled) {
-          setEntries(Array.isArray(payload.entries) ? payload.entries : [])
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setEntries([])
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setEntriesLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [runtimeMode, selectedRun])
 
   if (!selectedRun) return null
 
-  const stateClass =
-    selectedRun.state === 'active' ? 'inspect-state--active' :
-    selectedRun.state === 'waitingApproval' ? 'inspect-state--waiting' :
-    selectedRun.state === 'error' || selectedRun.state === 'gatewayOffline' || selectedRun.state === 'limitExceeded' || selectedRun.state === 'contextExceeded' ? 'inspect-state--error' :
-    'inspect-state--done'
-
-  const isError = selectedRun.state === 'error' || selectedRun.state === 'gatewayOffline' || selectedRun.state === 'limitExceeded' || selectedRun.state === 'contextExceeded'
-
-  const toolColor =
-    selectedRun.tool === 'claude' ? 'var(--claude-accent)' :
-    selectedRun.tool === 'codex' ? 'var(--codex-accent)' :
-    'var(--openclaw-accent)'
+  const isError = errorStates.has(selectedRun.state)
+  const stateClass = stateClassMap[selectedRun.state]
+    ?? (isError ? 'inspect-state--error' : 'inspect-state--done')
+  const toolColor = toolColorMap[selectedRun.tool] ?? 'var(--openclaw-accent)'
 
   return (
     <div className="inspect-overlay" onClick={(e) => {
       if (e.target === e.currentTarget) selectRun(undefined)
     }}>
       <div className="inspect-panel" ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="inspect-title">
-        {/* Header: title row + timestamps */}
         <div className="inspect-header">
           <div className="inspect-title-row">
             <div className="inspect-title-left">
@@ -131,7 +116,6 @@ export function InspectDrawer() {
           </div>
         </div>
 
-        {/* Metrics grid */}
         <div className="inspect-grid">
           <div className="inspect-cell">
             <span className="inspect-cell-label">{t('drawer.model')}</span>
@@ -161,7 +145,6 @@ export function InspectDrawer() {
           </div>
         </div>
 
-        {/* Origin */}
         {selectedRun.originLabel && (
           <div className="inspect-section">
             <span className="inspect-section-label">{t('drawer.origin')}</span>
@@ -169,7 +152,6 @@ export function InspectDrawer() {
           </div>
         )}
 
-        {/* Questions */}
         {selectedRun.firstQuestion && (
           <div className="inspect-section">
             <span className="inspect-section-label">{t('drawer.firstQuestion')}</span>
@@ -208,12 +190,12 @@ export function InspectDrawer() {
           </div>
         )}
 
-        {/* Error */}
         {isError && (
           <div className="inspect-error">
             <span className="inspect-error-state">{selectedRun.state}</span>
-            {selectedRun.errorMessage && <p className="inspect-error-msg">{selectedRun.errorMessage}</p>}
-            {!selectedRun.errorMessage && selectedRun.lastTail && <p className="inspect-error-msg">{selectedRun.lastTail}</p>}
+            {(selectedRun.errorMessage ?? selectedRun.lastTail) && (
+              <p className="inspect-error-msg">{selectedRun.errorMessage ?? selectedRun.lastTail}</p>
+            )}
           </div>
         )}
       </div>

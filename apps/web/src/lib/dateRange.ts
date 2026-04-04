@@ -1,6 +1,6 @@
 import type { CommitRecord, RunRecord, UsageBucket } from './types'
 
-function parseMs(value: string): number | undefined {
+export function parseMs(value: string): number | undefined {
   const ms = Date.parse(value)
   return Number.isFinite(ms) ? ms : undefined
 }

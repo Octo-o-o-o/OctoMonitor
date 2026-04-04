@@ -31,8 +31,8 @@ export function buildSnapshotRange(
   const requestedFrom = startOfDay(new Date())
   requestedFrom.setDate(requestedFrom.getDate() - snapshotWindowDays[window] + 1)
 
-  const effectiveTo = loadedTo < requestedTo ? loadedTo : requestedTo
-  const effectiveFrom = loadedFrom > requestedFrom ? loadedFrom : requestedFrom
+  const effectiveTo = new Date(Math.min(loadedTo.getTime(), requestedTo.getTime()))
+  const effectiveFrom = new Date(Math.max(loadedFrom.getTime(), requestedFrom.getTime()))
 
   if (effectiveFrom > effectiveTo) {
     return { from: loadedFrom, to: loadedTo }

@@ -1,3 +1,4 @@
+import { parseMs } from './dateRange'
 import type { RunRecord, UsageBucket } from './types'
 
 type UsageSliceSource = {
@@ -37,11 +38,6 @@ const emptySlice: UsageSlice = {
   totalTokens: 0,
   costUsd: 0,
   messageCount: 0,
-}
-
-function parseMs(value: string): number | undefined {
-  const ms = Date.parse(value)
-  return Number.isFinite(ms) ? ms : undefined
 }
 
 function scaleUsage(source: UsageSliceSource, ratio: number): UsageSlice {
@@ -150,7 +146,7 @@ export function buildUsageBucketIndex(buckets: UsageBucket[]): UsageBucketIndex 
   const map: UsageBucketIndex = new Map()
   for (const bucket of buckets) {
     const runId = bucket.scope.runId
-    if (runId != null && runId !== '') {
+    if (runId) {
       map.set(runId, bucket)
     }
   }

@@ -117,18 +117,24 @@ const ThemeContext = createContext<ThemeContextValue>({
   removeCustomTheme: () => {},
 })
 
+const cssVarNames: Record<keyof ThemeColors, string> = {
+  bg: '--bg',
+  surface: '--surface',
+  surface2: '--surface2',
+  border: '--border',
+  text: '--text',
+  muted: '--muted',
+  accent: '--accent',
+  warn: '--warn',
+  danger: '--danger',
+  barBg: '--bar-bg',
+}
+
 function applyThemeColors(colors: ThemeColors) {
   const root = document.documentElement
-  root.style.setProperty('--bg', colors.bg)
-  root.style.setProperty('--surface', colors.surface)
-  root.style.setProperty('--surface2', colors.surface2)
-  root.style.setProperty('--border', colors.border)
-  root.style.setProperty('--text', colors.text)
-  root.style.setProperty('--muted', colors.muted)
-  root.style.setProperty('--accent', colors.accent)
-  root.style.setProperty('--warn', colors.warn)
-  root.style.setProperty('--danger', colors.danger)
-  root.style.setProperty('--bar-bg', colors.barBg)
+  for (const [key, cssVar] of Object.entries(cssVarNames)) {
+    root.style.setProperty(cssVar, colors[key as keyof ThemeColors])
+  }
 
   const lum = hexLuminance(colors.bg)
   root.style.colorScheme = lum > 0.5 ? 'light' : 'dark'
@@ -202,17 +208,10 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   const applyCurrentTheme = useCallback(
     (id: ThemeId, customs: CustomTheme[]) => {
       applyThemeId(id)
-      const builtin = builtinThemes[id]
-      if (builtin) {
-        applyThemeColors(builtin)
-        return
-      }
-      const custom = customs.find((t) => t.id === id)
-      if (custom) {
-        applyThemeColors(custom.colors)
-      } else {
-        applyThemeColors(builtinThemes.dark)
-      }
+      const colors = builtinThemes[id]
+        ?? customs.find((t) => t.id === id)?.colors
+        ?? builtinThemes.dark
+      applyThemeColors(colors)
     },
     [],
   )

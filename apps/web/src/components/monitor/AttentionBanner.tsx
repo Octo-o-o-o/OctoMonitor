@@ -2,11 +2,7 @@ import type { AttentionItem } from '../../lib/types'
 import { useI18n, type I18nKey } from '../../lib/i18n'
 import { useMonitorStore } from '../../store/monitorStore'
 
-const sourceLabels: Record<string, string> = {
-  claude: 'Claude Code',
-  codex: 'Codex',
-  openClaw: 'OpenClaw',
-}
+import { sourceLabels } from '../../lib/constants'
 
 function dismissKey(item: AttentionItem): string {
   return `${item.id}:${item.since}`

@@ -95,11 +95,10 @@ pub fn discover_vcs_context(path: &str) -> Option<VcsContext> {
         )),
         &git_dir,
     );
-    let repo_root = if common_dir
+    let is_git_dir = common_dir
         .file_name()
-        .map(|part| part == ".git")
-        .unwrap_or(false)
-    {
+        .is_some_and(|name| name == ".git");
+    let repo_root = if is_git_dir {
         common_dir
             .parent()
             .map(Path::to_path_buf)
@@ -115,20 +114,10 @@ pub fn discover_vcs_context(path: &str) -> Option<VcsContext> {
         .arg("--show-current")
         .output()
         .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout).ok().map(|s| {
-                    let trimmed = s.trim().to_string();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed)
-                    }
-                })?
-            } else {
-                None
-            }
-        });
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let repo_name = repo_root
         .file_name()
@@ -156,12 +145,10 @@ pub fn hydrate_run_vcs(runs: &mut [RunRecord]) {
         if run.vcs.is_some() {
             continue;
         }
-        let key = run.workspace_path.clone();
-        let cached = cache
-            .entry(key.clone())
-            .or_insert_with(|| discover_vcs_context(&key))
+        run.vcs = cache
+            .entry(run.workspace_path.clone())
+            .or_insert_with(|| discover_vcs_context(&run.workspace_path))
             .clone();
-        run.vcs = cached;
     }
 }
 
@@ -178,13 +165,16 @@ pub fn build_commit_records(
         .collect::<HashMap<_, _>>();
 
     for run in runs {
-        let Some(vcs) = run.vcs.clone() else {
+        let Some(vcs) = &run.vcs else {
             continue;
         };
         repo_contexts
             .entry(vcs.repo_id.clone())
             .or_insert_with(|| vcs.clone());
-        repo_runs.entry(vcs.repo_id.clone()).or_default().push(run);
+        repo_runs
+            .entry(vcs.repo_id.clone())
+            .or_default()
+            .push(run);
     }
 
     let mut out = Vec::new();
@@ -278,11 +268,12 @@ pub fn build_commit_records(
                     has_cost = true;
                 }
 
-                if let Some(run) = run_index.get(link.run_id.as_str()) {
-                    if let Some(vcs) = &run.vcs {
-                        let key = (vcs.worktree_id.clone(), vcs.worktree_name.clone());
-                        *worktree_votes.entry(key).or_insert(0) += link.allocated_tokens;
-                    }
+                if let Some(vcs) = run_index
+                    .get(link.run_id.as_str())
+                    .and_then(|run| run.vcs.as_ref())
+                {
+                    let key = (vcs.worktree_id.clone(), vcs.worktree_name.clone());
+                    *worktree_votes.entry(key).or_insert(0) += link.allocated_tokens;
                 }
             }
 
@@ -474,20 +465,16 @@ fn keyword_overlap_score(summary: &str, run: &RunRecord) -> f64 {
         return 0.0;
     }
 
-    let mut session_text = String::new();
-    session_text.push_str(&run.project_name);
-    session_text.push(' ');
-    if let Some(value) = &run.first_question {
-        session_text.push_str(value);
-        session_text.push(' ');
-    }
-    if let Some(value) = &run.last_question {
-        session_text.push_str(value);
-        session_text.push(' ');
-    }
-    if let Some(value) = &run.last_action {
-        session_text.push_str(value);
-    }
+    let session_parts: Vec<&str> = [Some(run.project_name.as_str())]
+        .into_iter()
+        .chain(
+            [&run.first_question, &run.last_question, &run.last_action]
+                .into_iter()
+                .map(|opt| opt.as_deref()),
+        )
+        .flatten()
+        .collect();
+    let session_text = session_parts.join(" ");
 
     let session_tokens = tokenize(&session_text);
     if session_tokens.is_empty() {
@@ -556,13 +543,13 @@ fn allocate_proportionally(total: u64, weights: &[f64]) -> Vec<u64> {
 }
 
 fn primary_worktree(commit: &ScannedCommit) -> (Option<String>, Option<String>) {
-    let worktree_id = (commit.worktree_ids.len() == 1)
-        .then(|| commit.worktree_ids.iter().next().cloned())
-        .flatten();
-    let worktree_name = (commit.worktree_names.len() == 1)
-        .then(|| commit.worktree_names.iter().next().cloned())
-        .flatten();
-    (worktree_id, worktree_name)
+    fn sole_element(set: &BTreeSet<String>) -> Option<String> {
+        (set.len() == 1).then(|| set.iter().next().cloned()).flatten()
+    }
+    (
+        sole_element(&commit.worktree_ids),
+        sole_element(&commit.worktree_names),
+    )
 }
 
 fn canonicalize_flexible(path: &Path, base: Option<&Path>) -> PathBuf {
@@ -593,41 +580,33 @@ fn derive_common_dir(common_dir: PathBuf, git_dir: &Path) -> PathBuf {
     }
     git_dir
         .ancestors()
-        .find(|ancestor| {
-            ancestor
-                .file_name()
-                .map(|part| part == ".git")
-                .unwrap_or(false)
-        })
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".git"))
         .map(Path::to_path_buf)
         .unwrap_or(common_dir)
 }
 
 fn run_rev_parse(path: &str) -> Option<std::process::Output> {
-    let absolute = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .arg("rev-parse")
-        .arg("--path-format=absolute")
-        .arg("--show-toplevel")
-        .arg("--git-dir")
-        .arg("--git-common-dir")
-        .output()
-        .ok()?;
-    if absolute.status.success() {
-        return Some(absolute);
-    }
+    let shared_args = ["--show-toplevel", "--git-dir", "--git-common-dir"];
 
-    let fallback = Command::new("git")
+    // Try with --path-format=absolute first, fall back without it.
+    Command::new("git")
         .arg("-C")
         .arg(path)
-        .arg("rev-parse")
-        .arg("--show-toplevel")
-        .arg("--git-dir")
-        .arg("--git-common-dir")
+        .args(["rev-parse", "--path-format=absolute"])
+        .args(shared_args)
         .output()
-        .ok()?;
-    fallback.status.success().then_some(fallback)
+        .ok()
+        .filter(|o| o.status.success())
+        .or_else(|| {
+            Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .arg("rev-parse")
+                .args(shared_args)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+        })
 }
 
 fn stable_id(prefix: &str, value: &str) -> String {
@@ -640,22 +619,18 @@ fn stable_id(prefix: &str, value: &str) -> String {
 }
 
 fn list_worktree_targets(vcs: &VcsContext) -> Vec<WorktreeScanTarget> {
-    let output = Command::new("git")
+    let stdout = Command::new("git")
         .arg("-C")
         .arg(&vcs.repo_root)
         .arg("worktree")
         .arg("list")
         .arg("--porcelain")
-        .output();
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok());
 
-    let Ok(output) = output else {
-        return fallback_worktree_targets(vcs);
-    };
-    if !output.status.success() {
-        return fallback_worktree_targets(vcs);
-    }
-
-    let Ok(stdout) = String::from_utf8(output.stdout) else {
+    let Some(stdout) = stdout else {
         return fallback_worktree_targets(vcs);
     };
 
@@ -736,23 +711,17 @@ fn scan_worktree_commits(
     if let Some(since) = since {
         command.arg(format!("--since=@{}", since.timestamp()));
     }
-    let output = command
+    let stdout = command
         .arg("--numstat")
         .arg("--pretty=format:\u{1e}%H\u{1f}%h\u{1f}%cI\u{1f}%an\u{1f}%s")
-        .output();
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok());
 
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    let Ok(stdout) = String::from_utf8(output.stdout) else {
-        return Vec::new();
-    };
-
-    parse_scanned_commits(&stdout, target)
+    stdout
+        .map(|s| parse_scanned_commits(&s, target))
+        .unwrap_or_default()
 }
 
 fn commit_cache_key(repo_root: &str, since: Option<DateTime<Utc>>) -> String {
@@ -805,20 +774,9 @@ fn parse_scanned_commits(stdout: &str, target: &WorktreeScanTarget) -> Vec<Scann
             deletions += removed.parse::<u64>().unwrap_or(0);
         }
 
-        let mut branches = BTreeSet::new();
-        if let Some(branch) = &target.branch {
-            branches.insert(branch.clone());
-        }
-
-        let mut worktree_ids = BTreeSet::new();
-        if let Some(worktree_id) = &target.worktree_id {
-            worktree_ids.insert(worktree_id.clone());
-        }
-
-        let mut worktree_names = BTreeSet::new();
-        if let Some(worktree_name) = &target.worktree_name {
-            worktree_names.insert(worktree_name.clone());
-        }
+        let branches: BTreeSet<String> = target.branch.iter().cloned().collect();
+        let worktree_ids: BTreeSet<String> = target.worktree_id.iter().cloned().collect();
+        let worktree_names: BTreeSet<String> = target.worktree_name.iter().cloned().collect();
 
         commits.push(ScannedCommit {
             sha: sha.to_string(),
@@ -845,18 +803,18 @@ fn scan_fingerprint(repo_root: &str) -> String {
 }
 
 fn command_stdout(repo_root: &str, args: &[&str]) -> String {
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repo_root);
-    for arg in args {
-        command.arg(arg);
-    }
-    let output = command.output();
-
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|o| o.status.success());
     match output {
-        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
-            .map(|value| value.trim().to_string())
+        Some(o) => String::from_utf8(o.stdout)
+            .map(|s| s.trim().to_string())
             .unwrap_or_default(),
-        _ => String::new(),
+        None => String::new(),
     }
 }
 

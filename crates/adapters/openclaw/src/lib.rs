@@ -2,7 +2,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
 };
 
@@ -94,26 +94,16 @@ fn mask_tail(value: &str) -> String {
 }
 
 fn recent_session_hint(sessions_dir: &Path) -> Option<String> {
-    if !sessions_dir.is_dir() {
-        return None;
-    }
     let mut newest: Option<(std::time::SystemTime, String)> = None;
-    if let Ok(entries) = fs::read_dir(sessions_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Ok(meta) = fs::metadata(&path) {
-                    if let Ok(modified) = meta.modified() {
-                        let name = path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
-                            newest = Some((modified, name));
-                        }
-                    }
-                }
-            }
+    for entry in fs::read_dir(sessions_dir).ok()?.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let Ok(modified) = meta.modified() else { continue };
+        let name = entry.file_name().to_string_lossy().to_string();
+        if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
+            newest = Some((modified, name));
         }
     }
     newest.map(|(_, name)| format!("latest session artifact: {}", mask_tail(&name)))
@@ -138,18 +128,19 @@ fn derive_origin(
     // Also check session-level label (e.g. "Cron: AI Daily Brief")
     let session_label = session_val.get("label").and_then(|v| v.as_str());
 
-    // Determine provider from origin or session key pattern
-    let provider = if let Some(p) = origin_provider_raw {
-        Some(p.to_string())
-    } else if session_key.contains(":cron:") {
-        Some("cron".to_string())
-    } else if session_key.contains(":telegram:") {
-        Some("telegram".to_string())
-    } else if session_key.contains(":weixin:") || session_key.contains(":wechat:") {
-        Some("wechat".to_string())
-    } else {
-        None
-    };
+    let provider = origin_provider_raw
+        .map(|p| p.to_string())
+        .or_else(|| {
+            [
+                (":cron:", "cron"),
+                (":telegram:", "telegram"),
+                (":weixin:", "wechat"),
+                (":wechat:", "wechat"),
+            ]
+            .iter()
+            .find(|(pattern, _)| session_key.contains(pattern))
+            .map(|(_, name)| name.to_string())
+        });
 
     // Build human-readable label
     let label = match provider.as_deref() {
@@ -187,14 +178,7 @@ fn derive_origin(
                 Some(capitalize(other))
             }
         }
-        None => {
-            // Fallback: try session key pattern
-            if session_key.contains(":cron:") {
-                session_label.map(|l| l.to_string())
-            } else {
-                None
-            }
-        }
+        None => None
     };
 
     (label, provider)
@@ -208,7 +192,6 @@ fn capitalize(s: &str) -> String {
     }
 }
 
-/// Human-readable description of a cron expression
 fn cron_to_human(expr: &str, tz: &str) -> String {
     let parts: Vec<&str> = expr.split_whitespace().collect();
     if parts.len() < 5 {
@@ -222,60 +205,37 @@ fn cron_to_human(expr: &str, tz: &str) -> String {
         return format!("{} ({})", expr, tz);
     };
 
-    let dow_str = match dow {
-        "*" => "Daily".to_string(),
-        "0" => "Sun".to_string(),
-        "1" => "Mon".to_string(),
-        "2" => "Tue".to_string(),
-        "3" => "Wed".to_string(),
-        "4" => "Thu".to_string(),
-        "5" => "Fri".to_string(),
-        "6" => "Sat".to_string(),
-        combo => {
-            let days: Vec<&str> = combo
-                .split(',')
-                .map(|d| match d {
-                    "0" => "Sun",
-                    "1" => "Mon",
-                    "2" => "Tue",
-                    "3" => "Wed",
-                    "4" => "Thu",
-                    "5" => "Fri",
-                    "6" => "Sat",
-                    _ => d,
-                })
-                .collect();
-            days.join(",")
-        }
-    };
-
     if dow == "*" {
-        format!("Daily {}", time_str)
-    } else {
-        format!("{} {}", dow_str, time_str)
+        return format!("Daily {time_str}");
     }
+
+    let dow_str: String = dow
+        .split(',')
+        .map(|d| match d {
+            "0" => "Sun",
+            "1" => "Mon",
+            "2" => "Tue",
+            "3" => "Wed",
+            "4" => "Thu",
+            "5" => "Fri",
+            "6" => "Sat",
+            other => other,
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{dow_str} {time_str}")
 }
 
-/// Scan cron jobs from ~/.openclaw/cron/jobs.json
 fn scan_cron_jobs(root: &Path) -> Vec<OpenClawCronJob> {
-    let jobs_file = root.join("cron").join("jobs.json");
-    if !jobs_file.exists() {
-        return vec![];
-    }
-    let contents = match fs::read_to_string(&jobs_file) {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    let val: serde_json::Value = match serde_json::from_str(&contents) {
-        Ok(v) => v,
-        Err(_) => return vec![],
-    };
-    let jobs = match val.get("jobs").and_then(|j| j.as_array()) {
-        Some(j) => j,
-        None => return vec![],
-    };
+    scan_cron_jobs_inner(root).unwrap_or_default()
+}
 
-    jobs.iter()
+fn scan_cron_jobs_inner(root: &Path) -> Option<Vec<OpenClawCronJob>> {
+    let contents = fs::read_to_string(root.join("cron").join("jobs.json")).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    let jobs = val.get("jobs").and_then(|j| j.as_array())?;
+
+    Some(jobs.iter()
         .filter_map(|j| {
             let id = j.get("id")?.as_str()?.to_string();
             let name = j.get("name")?.as_str()?.to_string();
@@ -305,35 +265,29 @@ fn scan_cron_jobs(root: &Path) -> Vec<OpenClawCronJob> {
                 schedule_human,
             })
         })
-        .collect()
+        .collect())
 }
 
-/// Load agent id → display name mapping from ~/.openclaw/openclaw.json agents.list
 fn load_agent_name_map(root: &Path) -> std::collections::HashMap<String, String> {
+    load_agent_name_map_inner(root).unwrap_or_default()
+}
+
+fn load_agent_name_map_inner(root: &Path) -> Option<std::collections::HashMap<String, String>> {
+    let contents = fs::read_to_string(root.join("openclaw.json")).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    let agents = val.pointer("/agents/list").and_then(|v| v.as_array())?;
     let mut map = std::collections::HashMap::new();
-    let config_file = root.join("openclaw.json");
-    let contents = match fs::read_to_string(&config_file) {
-        Ok(c) => c,
-        Err(_) => return map,
-    };
-    let val: serde_json::Value = match serde_json::from_str(&contents) {
-        Ok(v) => v,
-        Err(_) => return map,
-    };
-    if let Some(agents) = val.pointer("/agents/list").and_then(|v| v.as_array()) {
-        for agent in agents {
-            if let (Some(id), Some(name)) = (
-                agent.get("id").and_then(|v| v.as_str()),
-                agent.get("name").and_then(|v| v.as_str()),
-            ) {
-                map.insert(id.to_string(), name.to_string());
-            }
+    for agent in agents {
+        if let (Some(id), Some(name)) = (
+            agent.get("id").and_then(|v| v.as_str()),
+            agent.get("name").and_then(|v| v.as_str()),
+        ) {
+            map.insert(id.to_string(), name.to_string());
         }
     }
-    map
+    Some(map)
 }
 
-/// Scan agent sessions from sessions.json files across all agents
 fn scan_agent_sessions(root: &Path) -> Vec<OpenClawSession> {
     let agents_dir = root.join("agents");
     if !agents_dir.is_dir() {
@@ -369,7 +323,6 @@ fn scan_agent_sessions(root: &Path) -> Vec<OpenClawSession> {
     sessions
 }
 
-/// Extract first/last user question and error info from an OpenClaw session JSONL
 fn extract_questions_from_jsonl(
     path: &Path,
 ) -> (Option<String>, Option<String>, u64, Option<String>) {
@@ -418,14 +371,10 @@ fn extract_questions_from_jsonl(
                         last_question = Some(truncated);
                     }
                 } else if role == "assistant" {
-                    // Track last assistant message for error context
                     if let Some(text) = extract_text_content(msg) {
-                        // Keep updating - we want the very last one
-                        if text.contains("error")
-                            || text.contains("Error")
-                            || text.contains("ERROR")
-                            || text.contains("failed")
-                            || text.contains("Failed")
+                        let lower = text.to_lowercase();
+                        if lower.contains("error")
+                            || lower.contains("failed")
                             || text.contains("无法")
                         {
                             error_message = Some(text.chars().take(300).collect());
@@ -439,7 +388,6 @@ fn extract_questions_from_jsonl(
     (first_question, last_question, message_count, error_message)
 }
 
-/// Extract text content from an OpenClaw message object
 fn extract_text_content(msg: &serde_json::Value) -> Option<String> {
     let content = msg.get("content")?;
     if let Some(s) = content.as_str() {
@@ -467,9 +415,7 @@ fn parse_sessions_json(
     agent_name: &str,
     agent_display_name: &Option<String>,
 ) -> Option<Vec<OpenClawSession>> {
-    let mut file = fs::File::open(path).ok()?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).ok()?;
+    let contents = fs::read_to_string(path).ok()?;
     let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let obj = val.as_object()?;
 
@@ -478,14 +424,14 @@ fn parse_sessions_json(
     for (session_key, session_val) in obj {
         let updated_at = session_val.get("updatedAt").and_then(|v| v.as_i64());
 
-        let session_id = session_val
+        let Some(session_id) = session_val
             .get("sessionId")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if session_id.is_empty() {
+            .filter(|s| !s.is_empty())
+        else {
             continue;
-        }
+        };
+        let session_id = session_id.to_string();
 
         let status = session_val
             .get("status")
@@ -537,7 +483,6 @@ fn parse_sessions_json(
             .unwrap_or(0);
         let cost_usd = session_val.get("estimatedCostUsd").and_then(|v| v.as_f64());
 
-        // Try to read the JSONL session file for questions and error info
         let session_file = session_val
             .get("sessionFile")
             .and_then(|v| v.as_str())
@@ -547,7 +492,6 @@ fn parse_sessions_json(
             .map(|p| extract_questions_from_jsonl(p))
             .unwrap_or((None, None, 0, None));
 
-        // Extract origin info
         let (origin_label, origin_provider) = derive_origin(session_key, session_val);
 
         result.push(OpenClawSession {

@@ -4,18 +4,18 @@ use std::process::Command;
 
 use octomonitor_core::AdvertisedAddress;
 
+fn is_wireguard_iface(name: &str) -> bool {
+    name.starts_with("wg") || name.starts_with("utun")
+}
+
 fn classify_address(name: &str, ip: IpAddr) -> Option<(&'static str, &'static str)> {
+    if ip.is_loopback() {
+        return None;
+    }
     match ip {
-        IpAddr::V4(v4) if v4.is_loopback() => None,
         IpAddr::V4(v4) if is_tailscale_ipv4(v4) => Some(("tailscale", "Tailscale")),
-        IpAddr::V4(_) if name.starts_with("wg") || name.starts_with("utun") => {
-            Some(("private", "Private network"))
-        }
+        _ if is_wireguard_iface(name) => Some(("private", "Private network")),
         IpAddr::V4(v4) if v4.is_private() => Some(("lan", "LAN")),
-        IpAddr::V6(v6) if v6.is_loopback() => None,
-        IpAddr::V6(_) if name.starts_with("wg") || name.starts_with("utun") => {
-            Some(("private", "Private network"))
-        }
         _ => None,
     }
 }
@@ -45,19 +45,13 @@ pub fn detect_advertised_addresses(port: u16) -> Vec<AdvertisedAddress> {
                     continue;
                 }
 
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("inet ") {
-                    if let Some(ip_text) = rest.split_whitespace().next() {
-                        if let Ok(ip) = ip_text.parse::<Ipv4Addr>() {
-                            push_address(
-                                &mut seen,
-                                &mut addresses,
-                                port,
-                                &current_iface,
-                                IpAddr::V4(ip),
-                            );
-                        }
-                    }
+                let ip = line
+                    .trim()
+                    .strip_prefix("inet ")
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .and_then(|text| text.parse::<Ipv4Addr>().ok());
+                if let Some(ip) = ip {
+                    push_address(&mut seen, &mut addresses, port, &current_iface, IpAddr::V4(ip));
                 }
             }
         }

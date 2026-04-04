@@ -15,7 +15,6 @@ pub async fn stream(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 }
 
 async fn stream_socket(mut socket: WebSocket, state: AppState) {
-    // Send initial snapshot immediately on connect
     {
         let payload = state.bootstrap.read().await.clone();
         let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
@@ -28,19 +27,15 @@ async fn stream_socket(mut socket: WebSocket, state: AppState) {
         }
     }
 
-    // Subscribe to state change notifications
     let mut rx = state.notify.subscribe();
 
     loop {
         tokio::select! {
-            // State changed — send new snapshot
             result = rx.recv() => {
                 match result {
                     Err(RecvError::Closed) => break,
-                    Err(RecvError::Lagged(_)) => {} // skip, send fresh snapshot below
-                    Ok(_) => {}
+                    Err(RecvError::Lagged(_)) | Ok(_) => {}
                 }
-                // Drain any extra signals that arrived while we were sending
                 while rx.try_recv().is_ok() {}
 
                 let payload = state.bootstrap.read().await.clone();
@@ -53,7 +48,6 @@ async fn stream_socket(mut socket: WebSocket, state: AppState) {
                     break;
                 }
             }
-            // Client sent something (ping/pong/close) or disconnected
             client_msg = socket.recv() => {
                 match client_msg {
                     Some(Ok(Message::Ping(data))) => {
@@ -63,7 +57,7 @@ async fn stream_socket(mut socket: WebSocket, state: AppState) {
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
-                    _ => {} // ignore text/binary from client
+                    _ => {}
                 }
             }
         }

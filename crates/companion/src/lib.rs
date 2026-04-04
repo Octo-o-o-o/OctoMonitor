@@ -28,12 +28,12 @@ pub struct ViewerSession {
 pub fn request_pairing(label: Option<&str>) -> PairingRecord {
     let now = Utc::now();
     let token = Uuid::new_v4().to_string();
-    let code = token
+    let code: String = token
         .chars()
         .filter(|ch| *ch != '-')
         .take(8)
-        .collect::<String>()
-        .to_uppercase();
+        .flat_map(char::to_uppercase)
+        .collect();
 
     PairingRecord {
         id: Uuid::new_v4().to_string(),
@@ -79,22 +79,21 @@ pub fn claim_pairing(
 
     let now = Utc::now();
     let paired_at = now.to_rfc3339();
+    let updated = PairingRecord {
+        approved: true,
+        claimed_at: Some(paired_at.clone()),
+        ..record.clone()
+    };
     let session = ViewerSession {
         id: Uuid::new_v4().to_string(),
         secret: Uuid::new_v4().to_string(),
         label: device_label
-            .filter(|label| !label.trim().is_empty())
+            .filter(|l| !l.trim().is_empty())
             .unwrap_or(&record.label)
             .to_string(),
-        paired_at: paired_at.clone(),
         last_seen_at: Some(paired_at.clone()),
+        paired_at,
         expires_at: (now + Duration::days(30)).to_rfc3339(),
-    };
-
-    let updated = PairingRecord {
-        approved: true,
-        claimed_at: Some(paired_at),
-        ..record.clone()
     };
 
     Some((updated, session))
@@ -102,7 +101,7 @@ pub fn claim_pairing(
 
 pub fn session_is_expired(session: &ViewerSession) -> bool {
     DateTime::parse_from_rfc3339(&session.expires_at)
-        .map(|value| value.with_timezone(&Utc) < Utc::now())
+        .map(|dt| dt < Utc::now())
         .unwrap_or(true)
 }
 

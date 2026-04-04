@@ -20,8 +20,8 @@ use tower_http::cors::CorsLayer;
 
 use config::{load_config, save_config};
 use handlers::{
-    bootstrap, config as config_handler, history, ingest, inspect, installer, pairing, remote,
-    stream,
+    bootstrap, config as config_handler, daily_summary, history, ingest, inspect, installer,
+    pairing, remote, stream,
 };
 use pricing::PricingStore;
 use probe::{empty_bootstrap, spawn_probe_refresh};
@@ -53,6 +53,27 @@ fn build_cors_layer() -> CorsLayer {
         .allow_headers([header::CONTENT_TYPE, header::ACCEPT])
 }
 
+fn apply_saved_config(initial: &mut octomonitor_core::BootstrapPayload) -> bool {
+    let Some(saved) = load_config() else {
+        return false;
+    };
+    if let Some(v) = saved.companion_enabled {
+        initial.config.companion_enabled = v;
+    }
+    let Some(days) = saved.history_days else {
+        return false;
+    };
+    let clamped = days.clamp(1, 180);
+    let needs_migration =
+        saved.version.unwrap_or(0) < SNAPSHOT_WINDOW_MIGRATION_VERSION && clamped == 7;
+    if needs_migration {
+        initial.config.history_days = 30;
+    } else {
+        initial.config.history_days = clamped;
+    }
+    needs_migration
+}
+
 fn parse_bind_ip(raw: Option<&str>) -> anyhow::Result<IpAddr> {
     raw.unwrap_or("127.0.0.1")
         .parse::<IpAddr>()
@@ -68,28 +89,13 @@ fn resolve_bind_addr() -> anyhow::Result<SocketAddr> {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
 
-    // Initialise LiteLLM pricing (loads from disk cache, fetches in background)
     let pricing = PricingStore::new();
     pricing.spawn_refresh();
 
     let mut initial = empty_bootstrap();
-    if let Some(saved) = load_config() {
-        let mut migrated = false;
-        if let Some(v) = saved.companion_enabled {
-            initial.config.companion_enabled = v;
-        }
-        if let Some(v) = saved.history_days {
-            let clamped = v.clamp(1, 180);
-            if saved.version.unwrap_or(0) < SNAPSHOT_WINDOW_MIGRATION_VERSION && clamped == 7 {
-                initial.config.history_days = 30;
-                migrated = true;
-            } else {
-                initial.config.history_days = clamped;
-            }
-        }
-        if migrated {
-            save_config(&initial.config);
-        }
+    let migrated = apply_saved_config(&mut initial);
+    if migrated {
+        save_config(&initial.config);
     }
     let state = AppState::new(initial, pricing);
 
@@ -102,6 +108,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/config",
             get(config_handler::get_config).patch(config_handler::patch_config),
+        )
+        .route(
+            "/api/daily-summary/generate",
+            post(daily_summary::generate_daily_summary),
         )
         .route("/api/installer/detect", get(installer::installer_detect))
         .route("/api/installer/doctor", get(installer::installer_doctor))

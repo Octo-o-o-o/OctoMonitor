@@ -31,12 +31,14 @@ pub fn save_config(config: &AppConfig) {
         companion_enabled: Some(config.companion_enabled),
         history_days: Some(config.history_days),
     };
-    match serde_json::to_string_pretty(&patch) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                tracing::warn!("Failed to save config to {}: {e}", path.display());
-            }
+    let json = match serde_json::to_string_pretty(&patch) {
+        Ok(json) => json,
+        Err(e) => {
+            tracing::warn!("Failed to serialize config: {e}");
+            return;
         }
-        Err(e) => tracing::warn!("Failed to serialize config: {e}"),
+    };
+    if let Err(e) = std::fs::write(&path, json) {
+        tracing::warn!("Failed to save config to {}: {e}", path.display());
     }
 }
