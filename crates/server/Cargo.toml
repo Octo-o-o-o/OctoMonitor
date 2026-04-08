@@ -8,6 +8,8 @@ license.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 chrono.workspace = true
+notify.workspace = true
+notify-debouncer-mini.workspace = true
 mime_guess = "2"
 open = "5"
 reqwest.workspace = true
@@ -24,6 +26,9 @@ octomonitor-companion = { path = "../companion" }
 octomonitor-claude-adapter = { path = "../adapters/claude" }
 octomonitor-codex-adapter = { path = "../adapters/codex" }
 octomonitor-openclaw-adapter = { path = "../adapters/openclaw" }
+
+[dev-dependencies]
+tempfile = "3"
 
 [[bin]]
 name = "octomonitor-server"

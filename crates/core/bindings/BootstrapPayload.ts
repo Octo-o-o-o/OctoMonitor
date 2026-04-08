@@ -8,5 +8,6 @@ import type { IdentityState } from "./IdentityState";
 import type { PendingCron } from "./PendingCron";
 import type { RunRecord } from "./RunRecord";
 import type { UsageBucket } from "./UsageBucket";
+import type { WorkflowRunSummary } from "./WorkflowRunSummary";
 
-export type BootstrapPayload = { generatedAt: string, runs: Array<RunRecord>, attentions: Array<AttentionItem>, usageBuckets: Array<UsageBucket>, commits: Array<CommitRecord>, identities: Array<IdentityState>, adapterHealth: Array<AdapterHealth>, recentCompletions: Array<CompletionRecord>, pendingCrons: Array<PendingCron>, config: AppConfig, };
+export type BootstrapPayload = { generatedAt: string, runs: Array<RunRecord>, attentions: Array<AttentionItem>, usageBuckets: Array<UsageBucket>, commits: Array<CommitRecord>, identities: Array<IdentityState>, adapterHealth: Array<AdapterHealth>, recentCompletions: Array<CompletionRecord>, pendingCrons: Array<PendingCron>, config: AppConfig, workflowRuns: Array<WorkflowRunSummary>, };

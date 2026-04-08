@@ -8,6 +8,8 @@ mod probe;
 mod remote_access;
 mod state;
 mod static_files;
+mod watcher;
+mod workflows;
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -21,7 +23,7 @@ use tower_http::cors::CorsLayer;
 use config::{load_config, save_config};
 use handlers::{
     bootstrap, config as config_handler, daily_summary, history, ingest, inspect, installer,
-    pairing, remote, stream,
+    pairing, remote, stream, workflows as wf,
 };
 use pricing::PricingStore;
 use probe::{empty_bootstrap, spawn_probe_refresh};
@@ -49,7 +51,7 @@ fn local_allowed_origins() -> Vec<HeaderValue> {
 fn build_cors_layer() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(local_allowed_origins())
-        .allow_methods([Method::GET, Method::POST, Method::PATCH])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::PUT, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE, header::ACCEPT])
 }
 
@@ -97,7 +99,17 @@ async fn main() -> anyhow::Result<()> {
     if migrated {
         save_config(&initial.config);
     }
-    let state = AppState::new(initial, pricing);
+
+    let wf_store = workflows::store::WorkflowStore::new(
+        workflows::store::WorkflowStore::default_base_dir(),
+    )
+    .expect("Failed to initialize workflow store");
+    let wf_coordinator = workflows::coordinator::WorkflowCoordinator::new(wf_store);
+
+    // Load workflow summaries into bootstrap
+    initial.workflow_runs = wf_coordinator.get_summary_list();
+
+    let state = AppState::new(initial, pricing, wf_coordinator);
 
     let app = Router::new()
         .route("/api/bootstrap", get(bootstrap::get_bootstrap))
@@ -144,6 +156,53 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/ingest/claude/hook", post(ingest::ingest_claude_hook))
         .route("/api/ingest/codex/hook", post(ingest::ingest_codex_hook))
         .route("/api/stream", get(stream::stream))
+        // Workflow routes
+        .route("/api/workflows", get(wf::list_defs).post(wf::create_def))
+        .route(
+            "/api/workflows/{id}",
+            get(wf::get_def).put(wf::update_def).delete(wf::delete_def),
+        )
+        .route("/api/workflows/{id}/runs", post(wf::create_run))
+        .route("/api/workflow-runs", get(wf::list_runs))
+        .route("/api/workflow-runs/{id}", get(wf::get_run))
+        .route("/api/workflow-runs/{id}/cancel", post(wf::cancel_run))
+        .route("/api/workflow-runs/{id}/mode", post(wf::change_mode))
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/link",
+            post(wf::link_run),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/unlink",
+            post(wf::unlink_run),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/complete",
+            post(wf::complete_step),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/fail",
+            post(wf::fail_step),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/skip",
+            post(wf::skip_step),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/retry",
+            post(wf::retry_step),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/candidates",
+            get(wf::get_candidates),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/preview",
+            get(wf::get_launch_preview),
+        )
+        .route(
+            "/api/workflow-runs/{id}/steps/{step_id}/approve",
+            post(wf::approve_step),
+        )
         .layer(build_cors_layer())
         .with_state(state.clone())
         .fallback(static_files::static_handler);
@@ -163,6 +222,7 @@ async fn main() -> anyhow::Result<()> {
     let open_browser = std::env::var("OCTOMONITOR_NO_OPEN").is_err();
     tracing::info!("OctoMonitor server listening on http://{}", addr);
     spawn_probe_refresh(state.clone());
+    watcher::spawn_fs_watcher(state.clone());
     spawn_remote_server(state.clone());
     if open_browser {
         let _ = open::that(format!("http://{}", addr));

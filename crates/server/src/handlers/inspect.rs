@@ -434,14 +434,26 @@ fn summarize_output_text(text: &str) -> String {
         return String::new();
     }
 
-    for line in meaningful_lines(&normalized) {
-        if should_skip_summary_line(&line, false) {
-            continue;
-        }
-        return truncate_text(strip_markdown_noise(&line));
-    }
+    let lines = meaningful_lines(&normalized);
 
-    truncate_text(normalized)
+    // Find the first non-skippable line index
+    let start = lines
+        .iter()
+        .position(|line| !should_skip_summary_line(line, false));
+
+    match start {
+        Some(idx) => {
+            // Keep all lines from the first meaningful one onward
+            let kept: String = lines[idx..]
+                .iter()
+                .map(|l| strip_markdown_noise(l))
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            truncate_text(kept)
+        }
+        None => truncate_text(normalized),
+    }
 }
 
 fn meaningful_lines(text: &str) -> Vec<String> {

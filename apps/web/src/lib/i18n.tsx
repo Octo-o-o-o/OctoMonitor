@@ -11,6 +11,7 @@ const en = {
   'tab.commits': 'COMMITS',
   'tab.heatmap': 'INSIGHTS',
   'tab.settings': 'SETTINGS',
+  'tab.workflows': 'WORKFLOWS',
   'stat.active': 'ACTIVE',
   'stat.wait': 'APPROVAL',
   'stat.done': 'DONE',
@@ -359,6 +360,8 @@ const en = {
   'shortcut.closeDrawer': 'Close drawer',
   'shortcut.toggleHelp': 'Toggle this overlay',
   'desktop.startupIssue': 'Desktop startup issue',
+  'app.loading': 'Connecting to OctoMonitor…',
+  'app.loadingHint': 'Scanning your local agents — this takes a moment on the first launch.',
 } as const
 
 const zh: Record<I18nKey, string> = {
@@ -369,6 +372,7 @@ const zh: Record<I18nKey, string> = {
   'tab.commits': '\u63D0\u4EA4',
   'tab.heatmap': '\u6D1E\u5BDF',
   'tab.settings': '\u8BBE\u7F6E',
+  'tab.workflows': '\u5DE5\u4F5C\u6D41',
   'stat.active': '\u6D3B\u8DC3',
   'stat.wait': '\u5F85\u6279\u51C6',
   'stat.done': '\u5DF2\u5B8C\u6210',
@@ -701,6 +705,8 @@ const zh: Record<I18nKey, string> = {
   'shortcut.closeDrawer': '\u5173\u95ED\u9762\u677F',
   'shortcut.toggleHelp': '\u663E\u793A / \u9690\u85CF\u6B64\u53E0\u52A0\u5C42',
   'desktop.startupIssue': '\u684C\u9762\u7AEF\u542F\u52A8\u5F02\u5E38',
+  'app.loading': '正在连接 OctoMonitor…',
+  'app.loadingHint': '正在扫描本地 Agent，首次启动需要稍等片刻。',
 }
 
 export type I18nKey = keyof typeof en

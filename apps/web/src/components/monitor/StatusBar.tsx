@@ -95,8 +95,8 @@ export function StatusBar({ runtimeMode, wsConnected }: { runtimeMode: RuntimeMo
   const { themeId, setTheme } = useTheme()
   const { ref: headerRef, width: statusBarWidth } = useMeasuredWidth<HTMLElement>()
   const tabs: ActiveTab[] = runtimeMode === 'remoteViewer'
-    ? ['monitor', 'usage', 'commits', 'heatmap']
-    : ['monitor', 'usage', 'commits', 'heatmap', 'settings']
+    ? ['monitor', 'usage', 'commits', 'heatmap', 'workflows']
+    : ['monitor', 'usage', 'commits', 'heatmap', 'settings', 'workflows']
   const usageBucketIndex = useMemo(
     () => buildUsageBucketIndex(data?.usageBuckets ?? []),
     [data?.usageBuckets],

@@ -43,6 +43,19 @@ pub struct ClaudeSession {
     /// Sum of (user_message_timestamp → next_assistant_response_timestamp) intervals in ms.
     /// Excludes idle time between an assistant response and the next user message.
     pub active_elapsed_ms: i64,
+    /// Workflow hint from .octomonitor/workflow-context.json in the workspace
+    pub workflow_hint: Option<WorkflowContextFile>,
+}
+
+/// Contents of `.octomonitor/workflow-context.json` placed in a workspace directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowContextFile {
+    pub workflow_id: Option<String>,
+    pub step_id: Option<String>,
+    pub parent_step_id: Option<String>,
+    pub artifact_refs: Option<Vec<String>>,
+    pub updated_at: Option<String>,
 }
 
 /// Usage quota data from Claude HUD cache
@@ -318,7 +331,14 @@ fn parse_claude_session(
         first_question,
         last_question,
         active_elapsed_ms,
+        workflow_hint: read_workflow_context(workspace_path),
     })
+}
+
+fn read_workflow_context(workspace_path: &str) -> Option<WorkflowContextFile> {
+    let ctx_path = Path::new(workspace_path).join(".octomonitor/workflow-context.json");
+    let contents = fs::read_to_string(&ctx_path).ok()?;
+    serde_json::from_str(&contents).ok()
 }
 
 fn read_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {

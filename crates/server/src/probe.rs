@@ -16,8 +16,8 @@ use crate::platform::last_path_component;
 use crate::pricing::PricingStore;
 use crate::state::AppState;
 
-const PROBE_ACTIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
-const PROBE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+const PROBE_ACTIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+const PROBE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const MAX_BOOTSTRAP_RUNS: usize = 1_500;
 const MAX_BOOTSTRAP_COMMITS: usize = 2_000;
 const MAX_HISTORY_USAGE_RUNS: usize = 20_000;
@@ -63,6 +63,7 @@ pub fn empty_bootstrap() -> BootstrapPayload {
         recent_completions: Vec::new(),
         pending_crons: Vec::new(),
         config: default_app_config(),
+        workflow_runs: Vec::new(),
     };
     payload.config.local_ip = detect_local_ip();
     payload
@@ -79,7 +80,12 @@ async fn refresh_bootstrap_once(state: &AppState) {
     .await;
 
     match result {
-        Ok(refreshed) => {
+        Ok(mut refreshed) => {
+            refreshed.workflow_runs = state
+                .workflow_coordinator
+                .lock()
+                .await
+                .get_summary_list();
             *state.bootstrap.write().await = refreshed;
             state.signal_change();
         }
@@ -94,13 +100,14 @@ pub fn spawn_probe_refresh(state: AppState) {
         refresh_bootstrap_once(&state).await;
         loop {
             let active = has_active_runs(&*state.bootstrap.read().await);
-            if active {
-                tokio::time::sleep(PROBE_ACTIVE_INTERVAL).await;
+            let timeout = if active {
+                PROBE_ACTIVE_INTERVAL
             } else {
-                tokio::select! {
-                    _ = state.probe_wake.notified() => {}
-                    _ = tokio::time::sleep(PROBE_IDLE_TIMEOUT) => {}
-                }
+                PROBE_IDLE_TIMEOUT
+            };
+            tokio::select! {
+                _ = state.probe_wake.notified() => {}
+                _ = tokio::time::sleep(timeout) => {}
             }
 
             refresh_bootstrap_once(&state).await;
@@ -540,6 +547,13 @@ fn build_run_from_claude_session(
         vcs: crate::commits::discover_vcs_context(&session.project_path),
         origin_label: None,
         origin_provider: None,
+        workflow_hint: session.workflow_hint.as_ref().map(|wh| octomonitor_core::WorkflowHint {
+            workflow_id: wh.workflow_id.clone(),
+            step_id: wh.step_id.clone(),
+            parent_step_id: wh.parent_step_id.clone(),
+            artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
+            updated_at: wh.updated_at.clone(),
+        }),
     }
 }
 
@@ -655,6 +669,13 @@ fn build_run_from_codex_session(
             .and_then(crate::commits::discover_vcs_context),
         origin_label: None,
         origin_provider: None,
+        workflow_hint: session.workflow_hint.as_ref().map(|wh| octomonitor_core::WorkflowHint {
+            workflow_id: wh.workflow_id.clone(),
+            step_id: wh.step_id.clone(),
+            parent_step_id: wh.parent_step_id.clone(),
+            artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
+            updated_at: wh.updated_at.clone(),
+        }),
     }
 }
 
@@ -806,6 +827,7 @@ fn build_run_from_openclaw_session(
         vcs: crate::commits::discover_vcs_context(&workspace),
         origin_label: session.origin_label.clone(),
         origin_provider: session.origin_provider.clone(),
+        workflow_hint: None,
     }
 }
 
@@ -874,6 +896,7 @@ fn build_probe_placeholder_run(params: ProbeRunParams) -> RunRecord {
         vcs: None,
         origin_label: None,
         origin_provider: None,
+        workflow_hint: None,
     }
 }
 
@@ -1278,6 +1301,7 @@ mod tests {
             vcs: None,
             origin_label: None,
             origin_provider: None,
+            workflow_hint: None,
         }
     }
 
@@ -1299,6 +1323,7 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
+            workflow_runs: Vec::new(),
         }
     }
 
@@ -1338,6 +1363,7 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
+            workflow_runs: Vec::new(),
         };
         let previous = BootstrapPayload {
             generated_at: String::new(),
@@ -1350,6 +1376,7 @@ mod tests {
             recent_completions: Vec::new(),
             pending_crons: Vec::new(),
             config: target.config.clone(),
+            workflow_runs: Vec::new(),
         };
 
         merge_runtime_state(&mut target, &previous, &pricing);
@@ -1405,6 +1432,7 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
+            workflow_runs: Vec::new(),
         };
         let previous = BootstrapPayload {
             generated_at: String::new(),
@@ -1417,6 +1445,7 @@ mod tests {
             recent_completions: Vec::new(),
             pending_crons: Vec::new(),
             config: target.config.clone(),
+            workflow_runs: Vec::new(),
         };
 
         merge_runtime_state(&mut target, &previous, &pricing);
@@ -1535,24 +1564,35 @@ mod tests {
     #[test]
     fn rebuild_derived_normalizes_missing_total_tokens_by_tool() {
         let pricing = pricing_store();
+        let now = chrono::Utc::now();
+        let recent = now - chrono::Duration::hours(1);
+        let recent_str = recent.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let recent_end = (recent + chrono::Duration::minutes(10))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
         let mut codex_run = run(
             "codex-missing-total",
             ToolKind::Codex,
             RunState::Completed,
-            "2026-04-01T08:00:00Z",
-            "2026-04-01T08:10:00Z",
+            &recent_str,
+            &recent_end,
         );
         codex_run.tokens.input = 1_000;
         codex_run.tokens.output = 200;
         codex_run.tokens.cache_read = 300;
         codex_run.tokens.total = 0;
 
+        let earlier = recent - chrono::Duration::hours(2);
+        let earlier_str = earlier.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let earlier_end = (earlier + chrono::Duration::minutes(30))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
         let mut claude_run = run(
             "claude-missing-total",
             ToolKind::Claude,
             RunState::Completed,
-            "2026-04-01T06:00:00Z",
-            "2026-04-01T06:30:00Z",
+            &earlier_str,
+            &earlier_end,
         );
         claude_run.tokens.input = 800;
         claude_run.tokens.output = 150;
@@ -1577,6 +1617,7 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
+            workflow_runs: Vec::new(),
         };
 
         rebuild_derived(&mut payload, &pricing);
@@ -1635,6 +1676,7 @@ mod tests {
             last_question: None,
             message_count: 1,
             active_elapsed_ms: 10_000,
+            workflow_hint: None,
         };
         let probe = codex_adapter::CodexSnapshot {
             probed_at: "2026-04-01T08:10:00Z".into(),

@@ -8,3 +8,4 @@ pub mod installer;
 pub mod pairing;
 pub mod remote;
 pub mod stream;
+pub mod workflows;

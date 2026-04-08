@@ -17,7 +17,7 @@ function loadDismissedAttentionKeys(): string[] {
   }
 }
 
-export type ActiveTab = 'monitor' | 'usage' | 'commits' | 'heatmap' | 'settings'
+export type ActiveTab = 'monitor' | 'usage' | 'commits' | 'heatmap' | 'workflows' | 'settings'
 export type {
   AgentDisplayFormat,
   ColumnLayout,

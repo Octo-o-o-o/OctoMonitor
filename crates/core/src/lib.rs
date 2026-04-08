@@ -1,3 +1,5 @@
+pub mod workflow;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -149,6 +151,20 @@ pub struct RunRecord {
     pub origin_label: Option<String>,
     /// Source provider type, e.g. "telegram", "cron", "heartbeat"
     pub origin_provider: Option<String>,
+    /// Workflow hint from context file, ingest, or prompt marker
+    pub workflow_hint: Option<WorkflowHint>,
+}
+
+/// Workflow metadata attached to a run, discovered via context file, ingest hint, or prompt marker.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WorkflowHint {
+    pub workflow_id: Option<String>,
+    pub step_id: Option<String>,
+    pub parent_step_id: Option<String>,
+    pub artifact_refs: Vec<String>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -400,6 +416,7 @@ pub struct BootstrapPayload {
     pub recent_completions: Vec<CompletionRecord>,
     pub pending_crons: Vec<PendingCron>,
     pub config: AppConfig,
+    pub workflow_runs: Vec<workflow::WorkflowRunSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -518,6 +535,7 @@ mod tests {
                 }),
                 origin_label: None,
                 origin_provider: None,
+                workflow_hint: None,
             },
             RunRecord {
                 id: "codex-run-1".into(),
@@ -583,6 +601,7 @@ mod tests {
                 }),
                 origin_label: None,
                 origin_provider: None,
+                workflow_hint: None,
             },
             RunRecord {
                 id: "openclaw-run-1".into(),
@@ -650,6 +669,7 @@ mod tests {
                 }),
                 origin_label: Some("Telegram: Yixiao".into()),
                 origin_provider: Some("telegram".into()),
+                workflow_hint: None,
             },
         ],
         attentions: vec![
@@ -927,6 +947,7 @@ mod tests {
             companion_enabled: false,
             local_ip: None,
         },
+        workflow_runs: Vec::new(),
     }
 }
 

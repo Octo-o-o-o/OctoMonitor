@@ -29,6 +29,7 @@ function createBootstrap(): BootstrapPayload {
     adapterHealth: [],
     recentCompletions: [],
     pendingCrons: [],
+    workflowRuns: [],
     config: {
       listenHost: '127.0.0.1',
       listenPort: 46321,
@@ -103,6 +104,7 @@ function createUsagePayload(): UsageHistoryPayload {
         vcs: null,
         originLabel: null,
         originProvider: null,
+        workflowHint: null,
       },
     ],
     usageBuckets: [

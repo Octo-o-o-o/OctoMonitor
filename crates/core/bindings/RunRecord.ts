@@ -6,6 +6,7 @@ import type { SourceInfo } from "./SourceInfo";
 import type { TokenUsage } from "./TokenUsage";
 import type { ToolKind } from "./ToolKind";
 import type { VcsContext } from "./VcsContext";
+import type { WorkflowHint } from "./WorkflowHint";
 
 export type RunRecord = { id: string, tool: ToolKind, sourceMode: string, projectName: string, workspacePath: string, workspaceShort: string, model: string | null, provider: string | null, agentName: string | null, agentDisplayName: string | null, accountAlias: string | null, authMode: string | null, authVerified: boolean, sessionId: string | null, threadId: string | null, sessionKey: string | null, transcriptPath: string | null, startedAt: string, lastActivityAt: string, elapsedMs: number, state: RunState, lastAction: string | null, lastTail: string | null, pendingApproval: boolean, firstQuestion: string | null, lastQuestion: string | null, errorMessage: string | null, messageCount: number, tokens: TokenUsage, cost: MoneyValue, quota: QuotaValue, source: SourceInfo, vcs: VcsContext | null, 
 /**
@@ -15,4 +16,8 @@ originLabel: string | null,
 /**
  * Source provider type, e.g. "telegram", "cron", "heartbeat"
  */
-originProvider: string | null, };
+originProvider: string | null, 
+/**
+ * Workflow hint from context file, ingest, or prompt marker
+ */
+workflowHint: WorkflowHint | null, };

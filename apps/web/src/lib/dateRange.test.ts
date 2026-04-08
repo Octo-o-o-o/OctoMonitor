@@ -37,6 +37,7 @@ const baseRun: RunRecord = {
   vcs: null,
   originLabel: null,
   originProvider: null,
+  workflowHint: null,
 }
 
 describe('date range helpers', () => {

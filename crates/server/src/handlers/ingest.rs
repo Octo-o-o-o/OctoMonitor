@@ -2,6 +2,7 @@ use axum::{extract::State, Json};
 use chrono::Utc;
 use octomonitor_core::{
     Freshness, MoneyValue, RunRecord, RunState, SourceConfidence, SourceInfo, TokenUsage, ToolKind,
+    WorkflowHint,
 };
 use serde::Deserialize;
 
@@ -16,6 +17,24 @@ fn default_quota() -> octomonitor_core::QuotaValue {
         reset_at: vec![],
         confidence: SourceConfidence::Derived,
     }
+}
+
+fn build_workflow_hint(
+    workflow_id: &Option<String>,
+    step_id: &Option<String>,
+    parent_step_id: &Option<String>,
+    artifact_refs: &Option<Vec<String>>,
+) -> Option<WorkflowHint> {
+    if workflow_id.is_none() && step_id.is_none() {
+        return None;
+    }
+    Some(WorkflowHint {
+        workflow_id: workflow_id.clone(),
+        step_id: step_id.clone(),
+        parent_step_id: parent_step_id.clone(),
+        artifact_refs: artifact_refs.clone().unwrap_or_default(),
+        updated_at: Some(Utc::now().to_rfc3339()),
+    })
 }
 
 fn live_source() -> SourceInfo {
@@ -52,6 +71,10 @@ pub struct ClaudeHookIngest {
     pub model: Option<String>,
     pub event: Option<String>,
     pub transcript_path: Option<String>,
+    pub workflow_id: Option<String>,
+    pub step_id: Option<String>,
+    pub parent_step_id: Option<String>,
+    pub artifact_refs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,6 +86,10 @@ pub struct CodexHookIngest {
     pub event: Option<String>,
     pub waiting_on_approval: Option<bool>,
     pub total_tokens: Option<u64>,
+    pub workflow_id: Option<String>,
+    pub step_id: Option<String>,
+    pub parent_step_id: Option<String>,
+    pub artifact_refs: Option<Vec<String>>,
 }
 
 pub async fn ingest_claude_statusline(
@@ -126,6 +153,7 @@ pub async fn ingest_claude_statusline(
         workspace_path,
         origin_label: None,
         origin_provider: None,
+        workflow_hint: None,
     };
     upsert_runtime_run(&state, run).await;
     Json(serde_json::json!({"ok": true}))
@@ -138,6 +166,12 @@ pub async fn ingest_claude_hook(
     let event = input.event.unwrap_or_else(|| "notification".into());
     let pending = event.contains("permission");
     let workspace_path = input.cwd.unwrap_or_else(|| "~/.claude".into());
+    let wf_hint = build_workflow_hint(
+        &input.workflow_id,
+        &input.step_id,
+        &input.parent_step_id,
+        &input.artifact_refs,
+    );
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
@@ -188,8 +222,13 @@ pub async fn ingest_claude_hook(
         workspace_path,
         origin_label: None,
         origin_provider: None,
+        workflow_hint: wf_hint.clone(),
     };
+    let run_id = run.id.clone();
     upsert_runtime_run(&state, run).await;
+    if let Some(hint) = wf_hint {
+        notify_coordinator(&state, &run_id, &hint).await;
+    }
     Json(serde_json::json!({"ok": true}))
 }
 
@@ -204,6 +243,12 @@ pub async fn ingest_codex_hook(
         .as_deref()
         .map(crate::probe::resolve_worktree_cwd)
         .unwrap_or_else(|| "~/.codex".into());
+    let wf_hint = build_workflow_hint(
+        &input.workflow_id,
+        &input.step_id,
+        &input.parent_step_id,
+        &input.artifact_refs,
+    );
     let run = RunRecord {
         id: format!(
             "ingest-codex-{}",
@@ -257,8 +302,13 @@ pub async fn ingest_codex_hook(
         workspace_path,
         origin_label: None,
         origin_provider: None,
+        workflow_hint: wf_hint.clone(),
     };
+    let run_id = run.id.clone();
     upsert_runtime_run(&state, run).await;
+    if let Some(hint) = wf_hint {
+        notify_coordinator(&state, &run_id, &hint).await;
+    }
     Json(serde_json::json!({"ok": true}))
 }
 
@@ -276,4 +326,78 @@ async fn upsert_runtime_run(state: &AppState, mut run: RunRecord) {
     drop(payload);
     state.signal_change();
     state.wake_probe();
+}
+
+/// When an ingest event carries workflow hints, attempt to auto-link the run to the matching step.
+async fn notify_coordinator(state: &AppState, run_id: &str, hint: &WorkflowHint) {
+    let wf_id = match &hint.workflow_id {
+        Some(w) => w.clone(),
+        None => return,
+    };
+
+    // If we have both workflow_id and step_id, do a direct link (fast path)
+    if let Some(step_id) = &hint.step_id {
+        let coord = state.workflow_coordinator.lock().await;
+        if let Ok(runs) = coord.list_runs_for_def(&wf_id) {
+            for wr_id in runs {
+                let _ = coord.link_run(
+                    &wr_id,
+                    step_id,
+                    run_id,
+                    octomonitor_core::workflow::LinkConfidence::Explicit,
+                    "ingest-hint-explicit",
+                );
+            }
+        }
+        return;
+    }
+
+    // workflow_id present but no step_id — use resolve_strong / resolve_prompt_marker
+    // to find the right step by scanning the run record
+    let payload = state.bootstrap.read().await;
+    let monitor_run = match payload.runs.iter().find(|r| r.id == run_id) {
+        Some(r) => r,
+        None => return,
+    };
+
+    let coord = state.workflow_coordinator.lock().await;
+    let wr_ids = match coord.list_runs_for_def(&wf_id) {
+        Ok(ids) => ids,
+        Err(_) => return,
+    };
+
+    for wr_id in wr_ids {
+        let wf_run = match coord.store().load_run(&wr_id) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for step in &wf_run.steps {
+            // Try strong match (context-file with artifacts)
+            if let Some(linked) =
+                crate::workflows::link_resolver::resolve_strong(monitor_run, step, &wf_id)
+            {
+                let _ = coord.link_run(
+                    &wr_id,
+                    &step.step_id,
+                    run_id,
+                    linked.confidence,
+                    &linked.matched_by,
+                );
+                return;
+            }
+            // Try prompt marker match
+            if let Some(linked) =
+                crate::workflows::link_resolver::resolve_prompt_marker(monitor_run, step, &wf_id)
+            {
+                let _ = coord.link_run(
+                    &wr_id,
+                    &step.step_id,
+                    run_id,
+                    linked.confidence,
+                    &linked.matched_by,
+                );
+                return;
+            }
+        }
+    }
 }

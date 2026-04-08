@@ -830,6 +830,27 @@ input, textarea, select { font: inherit; }
 }
 .attention-close:hover { opacity: 1; }
 
+/* Workflow handoff banner (shown in Monitor tab) */
+.workflow-handoff-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 25%, var(--shell-border));
+  border-radius: var(--radius-md, 10px);
+  background: color-mix(in srgb, var(--warn) 6%, transparent);
+  font-size: var(--font-size-sm);
+  color: var(--warn);
+}
+.workflow-handoff-banner strong { color: var(--text); }
+.workflow-handoff-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--warn);
+  animation: wf-pulse-dot 1.5s infinite;
+  flex-shrink: 0;
+}
+@keyframes wf-pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
 /* === Monitor View === */
 .monitor-view {
   display: flex;
@@ -3716,6 +3737,50 @@ input, textarea, select { font: inherit; }
 }
 @container source-col (max-width: 200px) {
   .session-updated { display: none; }
+}
+
+/* === Loading Screen === */
+.loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 60vh;
+}
+.loading-screen-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: loading-fadein 0.4s ease-out;
+}
+@keyframes loading-fadein {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes loading-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes loading-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.loading-ring { animation: loading-spin 3s linear infinite; transform-origin: 24px 24px; }
+.loading-dot { animation: loading-pulse 1.5s ease-in-out infinite; }
+.loading-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.loading-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 280px;
+  text-align: center;
+  line-height: 1.5;
 }
 
 /* === Skeleton Loading === */

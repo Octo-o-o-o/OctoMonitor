@@ -6,7 +6,7 @@ import { buildVisiblePanels, buildVisibleRunsBySource, summarizeRunsByState } fr
 import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
 import { AttentionBanner } from './AttentionBanner'
 import { MonitorSkeleton } from './Skeleton'
-import type { PendingCron, RunRecord, ToolKind } from '../../lib/types'
+import type { PendingCron, RunRecord, ToolKind, WorkflowRunSummary } from '../../lib/types'
 
 import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
 const sourceAccents: Record<ToolKind, string> = {
@@ -499,6 +499,27 @@ const periodDisplayLabels: Record<string, string> = {
   '4h': '4 hours', '8h': '8 hours', '24h': '24 hours',
 }
 
+function WorkflowHandoffBanner({ summaries }: { summaries: WorkflowRunSummary[] }) {
+  const pending = summaries.filter(
+    (s) => s.state === 'waitingInput' || s.state === 'waitingApproval',
+  )
+  if (pending.length === 0) return null
+  const waitingLink = pending.filter((s) => s.state === 'waitingInput').length
+  const waitingApproval = pending.filter((s) => s.state === 'waitingApproval').length
+  const parts: string[] = []
+  if (waitingLink > 0) parts.push(`${waitingLink} waiting link`)
+  if (waitingApproval > 0) parts.push(`${waitingApproval} waiting approval`)
+  return (
+    <div className="workflow-handoff-banner">
+      <span className="workflow-handoff-dot" />
+      <span>
+        <strong>Workflow{pending.length > 1 ? 's' : ''}</strong> &mdash; {parts.join(', ')}
+        {pending.length === 1 && pending[0].currentStep && ` (${pending[0].currentStep})`}
+      </span>
+    </div>
+  )
+}
+
 export function MonitorView() {
   const data = useMonitorStore((s) => s.data)
   const connectionStatus = useMonitorStore((s) => s.connectionStatus)
@@ -564,6 +585,7 @@ export function MonitorView() {
         </div>
       )}
       <AttentionBanner items={data.attentions} />
+      <WorkflowHandoffBanner summaries={data.workflowRuns ?? []} />
       {!hasVisibleRuns && (
         <div className="empty-state-panel">
           <strong>{t('monitor.emptyTitle')}</strong>

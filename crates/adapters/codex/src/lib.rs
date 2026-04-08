@@ -48,6 +48,19 @@ pub struct CodexSession {
     pub message_count: u64,
     /// Sum of (user_message → next_response) intervals in ms, excluding idle gaps.
     pub active_elapsed_ms: i64,
+    /// Workflow hint from .octomonitor/workflow-context.json in the workspace
+    pub workflow_hint: Option<WorkflowContextFile>,
+}
+
+/// Contents of `.octomonitor/workflow-context.json` placed in a workspace directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowContextFile {
+    pub workflow_id: Option<String>,
+    pub step_id: Option<String>,
+    pub parent_step_id: Option<String>,
+    pub artifact_refs: Option<Vec<String>>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,6 +329,8 @@ fn parse_codex_session(
     let first_q = first_question.or_else(|| thread_name.clone());
     let last_q = last_question.or_else(|| first_q.clone());
 
+    let workflow_hint = cwd.as_deref().and_then(read_workflow_context);
+
     Some(CodexSession {
         session_id: sid,
         thread_name,
@@ -338,7 +353,14 @@ fn parse_codex_session(
         last_question: last_q,
         message_count,
         active_elapsed_ms,
+        workflow_hint,
     })
+}
+
+fn read_workflow_context(workspace_path: &str) -> Option<WorkflowContextFile> {
+    let ctx_path = Path::new(workspace_path).join(".octomonitor/workflow-context.json");
+    let contents = fs::read_to_string(&ctx_path).ok()?;
+    serde_json::from_str(&contents).ok()
 }
 
 pub fn probe() -> CodexSnapshot {

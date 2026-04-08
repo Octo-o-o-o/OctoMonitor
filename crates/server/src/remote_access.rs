@@ -421,6 +421,17 @@ mod tests {
     use super::*;
     use crate::pricing::PricingStore;
     use crate::probe::build_bootstrap;
+    use crate::workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore};
+
+    fn test_state(pricing: &PricingStore) -> AppState {
+        let dir = std::env::temp_dir().join(format!(
+            "octomonitor-ra-test-{}",
+            std::process::id()
+        ));
+        let store = WorkflowStore::new(dir).unwrap();
+        let coord = WorkflowCoordinator::new(store);
+        AppState::new(build_bootstrap(pricing), pricing.clone(), coord)
+    }
 
     #[test]
     fn redaction_removes_local_paths_and_identities() {
@@ -474,7 +485,7 @@ mod tests {
     #[tokio::test]
     async fn remote_access_state_hides_devices_and_codes_when_disabled() {
         let pricing = PricingStore::new();
-        let state = AppState::new(build_bootstrap(&pricing), pricing);
+        let state = test_state(&pricing);
         state
             .pairings
             .write()
@@ -499,7 +510,7 @@ mod tests {
     #[tokio::test]
     async fn viewer_session_is_inactive_when_remote_is_disabled() {
         let pricing = PricingStore::new();
-        let state = AppState::new(build_bootstrap(&pricing), pricing);
+        let state = test_state(&pricing);
         state.viewer_sessions.write().await.push(ViewerSession {
             id: "viewer-1".into(),
             secret: "secret-1".into(),

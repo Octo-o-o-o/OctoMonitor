@@ -7,13 +7,17 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager};
 
-struct ServerState(Mutex<Option<Child>>);
+/// Shared handle to the server child process.
+/// Both the Tauri window-destroy handler and the post-run cleanup use this.
+type SharedChild = Arc<Mutex<Option<Child>>>;
+
+struct ServerState(SharedChild);
 struct DesktopBootState(Mutex<Option<DesktopBootIssue>>);
 
 const SERVER_ADDR: &str = "127.0.0.1:46321";
@@ -67,10 +71,29 @@ fn find_server_binary() -> Option<PathBuf> {
     candidates.into_iter().find(|candidate| candidate.exists())
 }
 
+/// Build a Command for the server, setting up a new process group on Unix
+/// so that kill_child can terminate the entire tree.
+fn new_server_command(program: &std::ffi::OsStr) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Start the child in its own process group (pgid = child pid).
+        // This lets us kill the whole group later.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setpgid(0, 0);
+                Ok(())
+            });
+        }
+    }
+    cmd
+}
+
 fn spawn_server() -> SpawnResult {
     // Try to find the pre-built server binary first
     if let Some(binary) = find_server_binary() {
-        return match Command::new(&binary)
+        return match new_server_command(binary.as_os_str())
             .env("OCTOMONITOR_NO_OPEN", "1")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -101,7 +124,7 @@ fn spawn_server() -> SpawnResult {
             })
             .unwrap_or_else(|| PathBuf::from("."));
 
-        match Command::new("cargo")
+        match new_server_command(std::ffi::OsStr::new("cargo"))
             .args(["run", "-p", "octomonitor-server"])
             .current_dir(workspace_root)
             .env("OCTOMONITOR_NO_OPEN", "1")
@@ -283,21 +306,43 @@ fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
     });
 }
 
-fn stop_server(app: &AppHandle) {
-    if let Some(state) = app.try_state::<ServerState>() {
-        if let Ok(mut guard) = state.0.lock() {
-            if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-            }
+/// Terminate the server child process and its entire process group.
+fn kill_child(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // Kill the entire process group (the child was spawned with setpgid).
+        unsafe {
+            libc::kill(-(child.id() as libc::pid_t), libc::SIGTERM);
+        }
+        // Give the group a moment to exit gracefully, then force-kill.
+        thread::sleep(Duration::from_millis(200));
+        let _ = child.try_wait();
+        let _ = child.kill(); // SIGKILL if still alive
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
+    let _ = child.wait(); // reap to avoid zombie
+}
+
+/// Take the child out of the shared state and kill it.
+fn stop_server_shared(shared: &SharedChild) {
+    if let Ok(mut guard) = shared.lock() {
+        if let Some(mut child) = guard.take() {
+            kill_child(&mut child);
         }
     }
 }
 
 fn main() {
+    let spawn_result = spawn_server();
+    let shared_child: SharedChild = Arc::new(Mutex::new(spawn_result.child));
+    let shared_for_setup = shared_child.clone();
+
     tauri::Builder::default()
-        .setup(|app| {
-            let spawn_result = spawn_server();
-            app.manage(ServerState(Mutex::new(spawn_result.child)));
+        .setup(move |app| {
+            app.manage(ServerState(shared_for_setup));
             app.manage(DesktopBootState(Mutex::new(None)));
             monitor_server_readiness(app.handle().clone(), spawn_result.launch_error);
             Ok(())
@@ -315,9 +360,15 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
-                stop_server(window.app_handle());
+                if let Some(state) = window.app_handle().try_state::<ServerState>() {
+                    stop_server_shared(&state.0);
+                }
             }
         })
         .run(tauri::generate_context!())
         .expect("failed to run tauri app");
+
+    // Safety net: if the Destroyed event never fired (e.g. Cmd+Q on macOS),
+    // the shared Arc still holds the child. Kill it now.
+    stop_server_shared(&shared_child);
 }

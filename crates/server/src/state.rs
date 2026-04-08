@@ -1,10 +1,11 @@
 use std::sync::Arc;
-use tokio::sync::{broadcast, Notify, RwLock};
+use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 
 use octomonitor_companion::{PairingRecord, ViewerSession};
 use octomonitor_core::BootstrapPayload;
 
 use crate::pricing::PricingStore;
+use crate::workflows::coordinator::WorkflowCoordinator;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,10 +15,15 @@ pub struct AppState {
     pub notify: broadcast::Sender<()>,
     pub probe_wake: Arc<Notify>,
     pub pricing: PricingStore,
+    pub workflow_coordinator: Arc<Mutex<WorkflowCoordinator>>,
 }
 
 impl AppState {
-    pub fn new(initial: BootstrapPayload, pricing: PricingStore) -> Self {
+    pub fn new(
+        initial: BootstrapPayload,
+        pricing: PricingStore,
+        workflow_coordinator: WorkflowCoordinator,
+    ) -> Self {
         let (notify, _) = broadcast::channel(16);
         Self {
             bootstrap: Arc::new(RwLock::new(initial)),
@@ -26,6 +32,7 @@ impl AppState {
             notify,
             probe_wake: Arc::new(Notify::new()),
             pricing,
+            workflow_coordinator: Arc::new(Mutex::new(workflow_coordinator)),
         }
     }
 
@@ -55,7 +62,18 @@ mod tests {
     use octomonitor_companion::{request_pairing, ViewerSession};
 
     use super::*;
-    use crate::{pricing::PricingStore, probe::build_bootstrap};
+    use crate::{
+        pricing::PricingStore,
+        probe::build_bootstrap,
+        workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore},
+    };
+
+    fn test_state(pricing: &PricingStore) -> AppState {
+        let dir = std::env::temp_dir().join(format!("octomonitor-test-{}", std::process::id()));
+        let store = WorkflowStore::new(dir).unwrap();
+        let coord = WorkflowCoordinator::new(store);
+        AppState::new(build_bootstrap(pricing), pricing.clone(), coord)
+    }
 
     fn sample_session() -> ViewerSession {
         ViewerSession {
@@ -71,7 +89,7 @@ mod tests {
     #[tokio::test]
     async fn clear_remote_access_state_revokes_pairings_and_sessions() {
         let pricing = PricingStore::new();
-        let state = AppState::new(build_bootstrap(&pricing), pricing);
+        let state = test_state(&pricing);
         state.pairings.write().await.push(request_pairing(None));
         state.viewer_sessions.write().await.push(sample_session());
 
@@ -84,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn revoke_remote_device_removes_matching_session_only() {
         let pricing = PricingStore::new();
-        let state = AppState::new(build_bootstrap(&pricing), pricing);
+        let state = test_state(&pricing);
         state.viewer_sessions.write().await.extend([
             sample_session(),
             ViewerSession {

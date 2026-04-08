@@ -20,3 +20,6 @@ apps/desktop/src-tauri/icons/source/octomonitor-inner-only-source.png
 apps/desktop/src-tauri/icons/source/octomonitor-mark.png
 *.local
 *.env
+CommitUIDemo/
+ccusage-main/
+b_*/
