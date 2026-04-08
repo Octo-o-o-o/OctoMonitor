@@ -2,6 +2,7 @@
 members = [
   "crates/core",
   "crates/server",
+  "crates/cli",
   "crates/installer",
   "crates/companion",
   "crates/adapters/common",
@@ -20,6 +21,7 @@ version = "0.1.5"
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws", "macros"] }
+clap = { version = "4", features = ["derive", "env"] }
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }

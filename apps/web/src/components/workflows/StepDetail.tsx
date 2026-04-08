@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../../lib/api'
+import { useI18n } from '../../lib/i18n'
 import type { StepRun, WorkflowRun, RunRecord, LinkedRunRef } from '../../lib/types'
 
 interface Props {
@@ -33,14 +34,8 @@ const confidenceClasses: Record<string, string> = {
   heuristicCandidate: 'wf-conf-heuristic',
 }
 
-const completionModeLabels: Record<string, string> = {
-  manualLink: 'manual-link',
-  launcherExit: 'launcher-exit',
-  hookEvent: 'hook-event',
-  manualComplete: 'manual-complete',
-}
-
 export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
+  const { t } = useI18n()
   const [showLinkPicker, setShowLinkPicker] = useState(false)
   const [preview, setPreview] = useState<LaunchPreview | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
@@ -57,6 +52,13 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
   const canApprove = isLaunch && (step.state === 'waitingApproval' || step.state === 'ready')
   const canRetry = step.state === 'failed'
   const isRunning = step.state === 'running'
+
+  const completionModeLabels: Record<string, string> = {
+    manualLink: t('wf.completionManualLink'),
+    launcherExit: t('wf.completionLauncherExit'),
+    hookEvent: t('wf.completionHookEvent'),
+    manualComplete: t('wf.completionManualComplete'),
+  }
 
   // Fetch heuristic candidates when link picker is opened
   useEffect(() => {
@@ -95,14 +97,14 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
               {step.tool === 'claude' ? 'Claude Code' : step.tool === 'codex' ? 'Codex' : 'OpenClaw'}
             </span>
             <span className={`wf-step-kind ${isObserve ? 'observe' : 'launch'}`}>
-              {isObserve ? '\u{1F441} observe' : '\u{1F680} launch'}
+              {isObserve ? `\u{1F441} ${t('wf.stepObserve')}` : `\u{1F680} ${t('wf.stepLaunch')}`}
             </span>
           </div>
 
           {defStep && (
             <div className="wf-completion-policy">
               <div className="wf-cpol-mode">
-                completion: {completionModeLabels[defStep.completion.mode] ?? defStep.completion.mode}
+                {t('wf.completion')}: {completionModeLabels[defStep.completion.mode] ?? defStep.completion.mode}
               </div>
               {defStep.completion.requiredArtifacts.map((a) => (
                 <div key={a} className="wf-cpol-check">
@@ -119,7 +121,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
               className="wf-btn wf-btn-primary"
               onClick={() => setShowLinkPicker(!showLinkPicker)}
             >
-              Link Run
+              {t('wf.linkRun')}
             </button>
           )}
           {canApprove && (
@@ -127,22 +129,22 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
               className="wf-btn wf-btn-primary"
               onClick={() => onAction('approve', step.stepId)}
             >
-              Approve & Launch
+              {t('wf.approveAndLaunch')}
             </button>
           )}
           {canComplete && (
             <button className="wf-btn" onClick={() => onAction('complete', step.stepId)}>
-              Complete
+              {t('wf.complete')}
             </button>
           )}
           {canRetry && (
             <button className="wf-btn wf-btn-primary" onClick={() => onAction('retry', step.stepId)}>
-              Retry
+              {t('wf.retry')}
             </button>
           )}
           {canSkip && (
             <button className="wf-btn" onClick={() => onAction('skip', step.stepId)}>
-              Skip
+              {t('wf.skip')}
             </button>
           )}
         </div>
@@ -154,7 +156,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
           <div className="wf-panel-body">
             <div className="wf-running-indicator">
               <span className="wf-running-dot" />
-              Running... CLI process active
+              {t('wf.runningCli')}
             </div>
           </div>
         </div>
@@ -163,18 +165,18 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
       {/* Launch Preview */}
       {canApprove && preview && (
         <div className="wf-panel">
-          <div className="wf-panel-title">Launch Preview</div>
+          <div className="wf-panel-title">{t('wf.launchPreview')}</div>
           <div className="wf-panel-body">
             {preview.model && (
-              <div className="wf-preview-meta">Model: {preview.model}</div>
+              <div className="wf-preview-meta">{t('wf.previewModel')}: {preview.model}</div>
             )}
             {preview.allowedTools.length > 0 && (
               <div className="wf-preview-meta">
-                Tools: {preview.allowedTools.join(', ')}
+                {t('wf.previewTools')}: {preview.allowedTools.join(', ')}
               </div>
             )}
             <div className="wf-preview-meta">
-              Prompt: ~{preview.estimatedPromptChars.toLocaleString()} chars
+              {t('wf.previewPrompt')}: ~{preview.estimatedPromptChars.toLocaleString()} {t('wf.previewChars')}
             </div>
             <pre className="wf-preview-prompt">{preview.renderedPrompt}</pre>
           </div>
@@ -183,10 +185,10 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
 
       {/* Linked Runs */}
       <div className="wf-panel">
-        <div className="wf-panel-title">Linked Runs</div>
+        <div className="wf-panel-title">{t('wf.linkedRuns')}</div>
         <div className="wf-panel-body">
           {step.linkedRuns.length === 0 ? (
-            <div className="wf-empty-sm">No runs linked yet</div>
+            <div className="wf-empty-sm">{t('wf.noLinkedRuns')}</div>
           ) : (
             step.linkedRuns.map((lr) => (
               <div key={lr.runId} className="wf-linked-run">
@@ -203,7 +205,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
                     onAction('unlink', step.stepId, { runId: lr.runId })
                   }
                 >
-                  Unlink
+                  {t('wf.unlink')}
                 </button>
               </div>
             ))
@@ -217,7 +219,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
           {/* Heuristic candidates from server */}
           {candidates.length > 0 && (
             <div className="wf-panel">
-              <div className="wf-panel-title">Suggested Matches</div>
+              <div className="wf-panel-title">{t('wf.suggestedMatches')}</div>
               <div className="wf-panel-body">
                 {candidates.map((c) => (
                   <div key={c.runId} className="wf-candidate">
@@ -239,7 +241,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
                         setShowLinkPicker(false)
                       }}
                     >
-                      Link
+                      {t('wf.link')}
                     </button>
                   </div>
                 ))}
@@ -249,11 +251,11 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
 
           {/* Manual picker — all monitor runs */}
           <div className="wf-panel">
-            <div className="wf-panel-title">All Runs</div>
+            <div className="wf-panel-title">{t('wf.allRuns')}</div>
             <div className="wf-panel-body">
-              {loadingCandidates && <div className="wf-empty-sm">Loading...</div>}
+              {loadingCandidates && <div className="wf-empty-sm">{t('wf.loading')}</div>}
               {monitorRuns.length === 0 ? (
-                <div className="wf-empty-sm">No monitor runs available</div>
+                <div className="wf-empty-sm">{t('wf.noMonitorRuns')}</div>
               ) : (
                 monitorRuns
                   .filter((r) => !step.linkedRuns.some((lr) => lr.runId === r.id))
@@ -280,7 +282,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
                           setShowLinkPicker(false)
                         }}
                       >
-                        Link
+                        {t('wf.link')}
                       </button>
                     </div>
                   ))
@@ -293,7 +295,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
       {/* Artifacts */}
       {step.artifacts.length > 0 && (
         <div className="wf-panel">
-          <div className="wf-panel-title">Artifacts</div>
+          <div className="wf-panel-title">{t('wf.artifacts')}</div>
           <div className="wf-panel-body">
             {step.artifacts.map((a) => (
               <div key={a.id} className="wf-artifact">
@@ -308,7 +310,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
       {/* Error */}
       {step.error && (
         <div className="wf-panel">
-          <div className="wf-panel-title">Error</div>
+          <div className="wf-panel-title">{t('wf.error')}</div>
           <div className="wf-panel-body">
             <div className="wf-error-text">{step.error}</div>
           </div>

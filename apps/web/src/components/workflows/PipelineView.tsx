@@ -1,4 +1,5 @@
 import type { StepRun } from '../../lib/types'
+import { useI18n, type I18nKey } from '../../lib/i18n'
 
 interface Props {
   steps: StepRun[]
@@ -24,16 +25,16 @@ const stateClasses: Record<string, string> = {
   pending: 'wf-step-pending',
 }
 
-const stateLabels: Record<string, string> = {
-  pending: 'Pending',
-  ready: 'Ready',
-  waitingLink: 'Waiting Link',
-  waitingApproval: 'Approval',
-  running: 'Running',
-  completed: 'Completed',
-  failed: 'Failed',
-  skipped: 'Skipped',
-  cancelled: 'Cancelled',
+const stateI18nKeys: Record<string, I18nKey> = {
+  pending: 'wf.statePending',
+  ready: 'wf.stateReady',
+  waitingLink: 'wf.stateWaitingLink',
+  waitingApproval: 'wf.stateApproval',
+  running: 'wf.stateRunning',
+  completed: 'wf.stateDone',
+  failed: 'wf.stateFailed',
+  skipped: 'wf.stateSkipped',
+  cancelled: 'wf.stateCancelled',
 }
 
 function edgeClass(prevState: string, nextState: string): string {
@@ -45,6 +46,8 @@ function edgeClass(prevState: string, nextState: string): string {
 }
 
 export function PipelineView({ steps, selectedStepId, onSelectStep }: Props) {
+  const { t } = useI18n()
+
   return (
     <div className="wf-pipeline">
       <div className="wf-pipe-row">
@@ -52,6 +55,8 @@ export function PipelineView({ steps, selectedStepId, onSelectStep }: Props) {
           const tool = toolLabels[step.tool] ?? { short: '?', cls: '' }
           const isSelected = step.stepId === selectedStepId
           const isObserve = step.kind === 'observe'
+          const stateKey = stateI18nKeys[step.state]
+          const stateLabel = stateKey ? t(stateKey) : step.state
 
           return (
             <div key={step.stepId} style={{ display: 'contents' }}>
@@ -74,11 +79,11 @@ export function PipelineView({ steps, selectedStepId, onSelectStep }: Props) {
                     <span className="wf-step-label">{step.label}</span>
                   </div>
                   <span className={`wf-step-kind ${isObserve ? 'observe' : 'launch'}`}>
-                    {isObserve ? '\u{1F441} observe' : '\u{1F680} launch'}
+                    {isObserve ? `\u{1F441} ${t('wf.stepObserve')}` : `\u{1F680} ${t('wf.stepLaunch')}`}
                   </span>
                   <div className="wf-step-bottom">
                     <span className={`wf-step-state ${stateClasses[step.state] ?? ''}`}>
-                      {stateLabels[step.state] ?? step.state}
+                      {stateLabel}
                     </span>
                     <span className="wf-step-dur">
                       {step.completedAt && step.startedAt
@@ -88,7 +93,7 @@ export function PipelineView({ steps, selectedStepId, onSelectStep }: Props) {
                   </div>
                   {(step.linkedRuns.length > 0 || step.artifacts.length > 0) && (
                     <div className="wf-step-links">
-                      {step.linkedRuns.length} linked &middot; {step.artifacts.length} artifacts
+                      {step.linkedRuns.length} {t('wf.linked')} &middot; {step.artifacts.length} {t('wf.artifactsCount')}
                     </div>
                   )}
                 </div>

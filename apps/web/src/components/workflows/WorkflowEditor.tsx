@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { apiFetch } from '../../lib/api'
+import { useMonitorStore } from '../../store/monitorStore'
+import { useI18n } from '../../lib/i18n'
 import type { ToolKind, WorkflowStepKind } from '../../lib/types'
 
 interface Props {
@@ -32,12 +34,25 @@ function newStep(): StepDraft {
 }
 
 export function WorkflowEditor({ onClose, onCreated }: Props) {
+  const { t } = useI18n()
+  const data = useMonitorStore((s) => s.data)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [workingDir, setWorkingDir] = useState('')
   const [steps, setSteps] = useState<StepDraft[]>([newStep()])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showDirDropdown, setShowDirDropdown] = useState(false)
+
+  // Collect unique project paths from monitor runs
+  const projectPaths = useMemo(() => {
+    if (!data?.runs) return []
+    const paths = new Set<string>()
+    for (const run of data.runs) {
+      if (run.workspacePath) paths.add(run.workspacePath)
+    }
+    return Array.from(paths).sort()
+  }, [data?.runs])
 
   function addStep() {
     setSteps([...steps, newStep()])
@@ -62,15 +77,15 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
 
   async function save(andRun: boolean) {
     if (!name.trim()) {
-      setError('Name is required')
+      setError(t('wf.errorNameRequired'))
       return
     }
     if (steps.length === 0) {
-      setError('At least one step is required')
+      setError(t('wf.errorStepRequired'))
       return
     }
     if (steps.some((s) => !s.label.trim())) {
-      setError('All steps must have a label')
+      setError(t('wf.errorStepLabel'))
       return
     }
 
@@ -114,7 +129,7 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
       })
 
       if (!res.ok) {
-        setError(`Failed to save: ${res.status}`)
+        setError(t('wf.errorSave').replace('{status}', String(res.status)))
         setSaving(false)
         return
       }
@@ -145,48 +160,76 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
     }
   }
 
+  const filteredPaths = projectPaths.filter(
+    (p) => !workingDir || p.toLowerCase().includes(workingDir.toLowerCase()),
+  )
+
   return (
     <div className="wf-editor">
       <div className="wf-editor-header">
-        <h2 className="wf-editor-title">New Workflow</h2>
+        <h2 className="wf-editor-title">{t('wf.newWorkflow')}</h2>
         <button className="wf-btn" onClick={onClose}>
-          Cancel
+          {t('wf.cancel')}
         </button>
       </div>
 
       <div className="wf-editor-body">
         <div className="wf-field">
-          <label className="wf-field-label">Name</label>
+          <label className="wf-field-label">{t('wf.name')}</label>
           <input
             className="wf-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Plan Design & Review"
+            placeholder={t('wf.namePlaceholder')}
           />
         </div>
         <div className="wf-field">
-          <label className="wf-field-label">Description (optional)</label>
+          <label className="wf-field-label">{t('wf.description')}</label>
           <input
             className="wf-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Brief description"
+            placeholder={t('wf.descriptionPlaceholder')}
           />
         </div>
-        <div className="wf-field">
-          <label className="wf-field-label">Working Directory</label>
-          <input
-            className="wf-input"
-            value={workingDir}
-            onChange={(e) => setWorkingDir(e.target.value)}
-            placeholder="/path/to/repo"
-          />
+        <div className="wf-field wf-field-dir">
+          <label className="wf-field-label">{t('wf.workingDir')}</label>
+          <div className="wf-dir-wrapper">
+            <input
+              className="wf-input"
+              value={workingDir}
+              onChange={(e) => {
+                setWorkingDir(e.target.value)
+                setShowDirDropdown(true)
+              }}
+              onFocus={() => setShowDirDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDirDropdown(false), 200)}
+              placeholder={t('wf.workingDirPlaceholder')}
+            />
+            {showDirDropdown && filteredPaths.length > 0 && (
+              <div className="wf-dir-dropdown">
+                {filteredPaths.map((p) => (
+                  <button
+                    key={p}
+                    className="wf-dir-option"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      setWorkingDir(p)
+                      setShowDirDropdown(false)
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="wf-steps-header">
-          <span className="wf-field-label">Steps</span>
+          <span className="wf-field-label">{t('wf.steps')}</span>
           <button className="wf-btn wf-btn-sm" onClick={addStep}>
-            + Add Step
+            {t('wf.addStep')}
           </button>
         </div>
 
@@ -215,7 +258,7 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
                   className="wf-input wf-input-sm"
                   value={step.label}
                   onChange={(e) => updateStep(step.key, { label: e.target.value })}
-                  placeholder="Step label"
+                  placeholder={t('wf.stepLabel')}
                 />
                 <div className="wf-step-edit-row">
                   <select
@@ -234,18 +277,18 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
                       updateStep(step.key, { kind: e.target.value as WorkflowStepKind })
                     }
                   >
-                    <option value="observe">Observe</option>
-                    <option value="launch">Launch</option>
+                    <option value="observe">{t('wf.stepObserve')}</option>
+                    <option value="launch">{t('wf.stepLaunch')}</option>
                   </select>
                   <select
                     className="wf-select"
                     value={step.completionMode}
                     onChange={(e) => updateStep(step.key, { completionMode: e.target.value })}
                   >
-                    <option value="manualLink">Manual Link</option>
-                    <option value="manualComplete">Manual Complete</option>
-                    <option value="launcherExit">Launcher Exit</option>
-                    <option value="hookEvent">Hook Event</option>
+                    <option value="manualLink">{t('wf.completionManualLink')}</option>
+                    <option value="manualComplete">{t('wf.completionManualComplete')}</option>
+                    <option value="launcherExit">{t('wf.completionLauncherExit')}</option>
+                    <option value="hookEvent">{t('wf.completionHookEvent')}</option>
                   </select>
                   <label className="wf-checkbox-label">
                     <input
@@ -255,7 +298,7 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
                         updateStep(step.key, { approvalRequired: e.target.checked })
                       }
                     />
-                    Approval
+                    {t('wf.approval')}
                   </label>
                 </div>
                 {step.kind === 'launch' && (
@@ -263,7 +306,7 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
                     className="wf-input wf-input-sm wf-prompt-input"
                     value={step.promptTemplate}
                     onChange={(e) => updateStep(step.key, { promptTemplate: e.target.value })}
-                    placeholder="Prompt template (supports {{workflow.name}}, {{step.label}}, {{file:path}}, {{previous.summary}}, etc.)"
+                    placeholder={t('wf.promptPlaceholder')}
                     rows={3}
                   />
                 )}
@@ -279,10 +322,10 @@ export function WorkflowEditor({ onClose, onCreated }: Props) {
 
         <div className="wf-editor-actions">
           <button className="wf-btn" onClick={() => void save(false)} disabled={saving}>
-            Save
+            {t('wf.save')}
           </button>
           <button className="wf-btn wf-btn-primary" onClick={() => void save(true)} disabled={saving}>
-            Save & Run
+            {t('wf.saveAndRun')}
           </button>
         </div>
       </div>

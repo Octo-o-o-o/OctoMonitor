@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useMonitorStore } from '../../store/monitorStore'
 import { apiFetch } from '../../lib/api'
+import { useI18n } from '../../lib/i18n'
 import type { WorkflowRun, WorkflowRunSummary } from '../../lib/types'
 import { WorkflowRunList } from './WorkflowRunList'
 import { PipelineView } from './PipelineView'
 import { StepDetail } from './StepDetail'
 import { WorkflowEditor } from './WorkflowEditor'
+import { WorkflowGuide } from './WorkflowGuide'
 import './workflows.css'
 
 export function WorkflowsView() {
+  const { t } = useI18n()
   const data = useMonitorStore((s) => s.data)
   const connectionStatus = useMonitorStore((s) => s.connectionStatus)
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>()
   const [selectedStepId, setSelectedStepId] = useState<string | undefined>()
   const [runDetail, setRunDetail] = useState<WorkflowRun | null>(null)
   const [showEditor, setShowEditor] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
 
   const summaries: WorkflowRunSummary[] = data?.workflowRuns ?? []
 
@@ -119,7 +123,13 @@ export function WorkflowsView() {
   }
 
   if (!data && connectionStatus === 'connecting') {
-    return <div className="wf-empty">Connecting...</div>
+    return <div className="wf-empty">{t('wf.connecting')}</div>
+  }
+
+  const modeLabels: Record<string, string> = {
+    trackingOnly: t('wf.modeTracking'),
+    assisted: t('wf.modeAssisted'),
+    auto: t('wf.modeAuto'),
   }
 
   const selectedStep = runDetail?.steps.find((s) => s.stepId === selectedStepId)
@@ -127,11 +137,13 @@ export function WorkflowsView() {
 
   return (
     <div className="wf-layout">
+      {showGuide && <WorkflowGuide onClose={() => setShowGuide(false)} />}
       <WorkflowRunList
         summaries={summaries}
         selectedRunId={selectedRunId}
         onSelect={setSelectedRunId}
         onNewWorkflow={() => setShowEditor(true)}
+        onShowHelp={() => setShowGuide(true)}
       />
       <div className="wf-center">
         {runDetail ? (
@@ -153,7 +165,7 @@ export function WorkflowsView() {
                       className={`wf-mode-opt ${runDetail.executionMode === m ? 'active' : ''} ${m}`}
                       onClick={() => handleModeChange(m)}
                     >
-                      {m === 'trackingOnly' ? 'Tracking' : m === 'assisted' ? 'Assisted' : 'Auto'}
+                      {modeLabels[m]}
                     </button>
                   ))}
                 </div>
@@ -161,7 +173,7 @@ export function WorkflowsView() {
                   runDetail.state !== 'cancelled' &&
                   runDetail.state !== 'failed' && (
                     <button className="wf-btn wf-btn-danger" onClick={handleCancel}>
-                      Cancel
+                      {t('wf.cancel')}
                     </button>
                   )}
               </div>
@@ -175,8 +187,8 @@ export function WorkflowsView() {
         ) : (
           <div className="wf-empty">
             {summaries.length === 0
-              ? 'No workflows yet. Create one to get started.'
-              : 'Select a workflow run from the list.'}
+              ? t('wf.emptyCreate')
+              : t('wf.emptySelect')}
           </div>
         )}
       </div>
@@ -189,7 +201,7 @@ export function WorkflowsView() {
             onAction={handleStepAction}
           />
         ) : (
-          <div className="wf-empty">Select a step to view details.</div>
+          <div className="wf-empty">{t('wf.emptyStep')}</div>
         )}
       </div>
     </div>

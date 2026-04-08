@@ -85,6 +85,52 @@ Or for development:
 cargo tauri dev
 ```
 
+## CLI
+
+OctoMonitor includes a CLI (`octomonitor`) for managing workflows programmatically — especially useful for LLM-driven automation where an AI agent reads a spec and creates workflows via the terminal.
+
+```bash
+# Build the CLI
+cargo build -p octomonitor-cli
+
+# Print a workflow JSON template (shows all fields and variable docs)
+octomonitor workflow template > my-workflow.json
+
+# Create a workflow from a JSON file
+octomonitor workflow create -f my-workflow.json
+
+# Create and immediately start a run
+octomonitor workflow create -f my-workflow.json --run --dir /path/to/project --mode assisted
+
+# List definitions and runs
+octomonitor wf list
+octomonitor wf runs
+
+# Start a run from an existing definition
+octomonitor wf run <workflow-id> -d /path/to/project -m auto
+
+# Inspect a run (shows step states, linked runs, etc.)
+octomonitor wf inspect <run-id>
+
+# Step operations
+octomonitor wf step <run-id> step-0 approve
+octomonitor wf step <run-id> step-0 complete
+octomonitor wf step <run-id> step-0 skip
+
+# Link a monitor run to a step
+octomonitor wf link <run-id> step-0 <monitor-run-id>
+
+# Read from stdin (LLM can pipe JSON directly)
+echo '{ ... }' | octomonitor wf create -f -
+
+# Custom server URL
+octomonitor --server http://192.168.1.100:46321 wf list
+# Or via environment variable
+export OCTOMONITOR_URL=http://192.168.1.100:46321
+```
+
+The CLI talks to the running `octomonitor-server` over HTTP (default `http://127.0.0.1:46321`). Make sure the server is running before using CLI commands.
+
 ## Architecture
 
 ```
@@ -92,6 +138,7 @@ OctoMonitor
 ├── crates/
 │   ├── core/            # Domain types, ts-rs exports
 │   ├── server/          # Axum local API + remote read-only viewer surface
+│   ├── cli/             # CLI for workflow management (octomonitor binary)
 │   ├── adapters/
 │   │   ├── claude/      # Claude Code session parser
 │   │   ├── codex/       # Codex session parser

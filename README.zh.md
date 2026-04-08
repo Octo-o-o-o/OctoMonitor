@@ -83,6 +83,52 @@ pnpm build:desktop:notarized
 cargo tauri dev
 ```
 
+## CLI
+
+OctoMonitor 提供了命令行工具 `octomonitor`，用于通过终端管理工作流。适合 LLM 驱动的自动化场景——让 AI 读完规范后直接创建工作流。
+
+```bash
+# 构建 CLI
+cargo build -p octomonitor-cli
+
+# 输出工作流 JSON 模板（含字段说明和模板变量文档）
+octomonitor workflow template > my-workflow.json
+
+# 从 JSON 文件创建工作流
+octomonitor workflow create -f my-workflow.json
+
+# 创建并立即启动运行
+octomonitor workflow create -f my-workflow.json --run --dir /path/to/project --mode assisted
+
+# 列出定义和运行
+octomonitor wf list
+octomonitor wf runs
+
+# 从已有定义启动运行
+octomonitor wf run <workflow-id> -d /path/to/project -m auto
+
+# 查看运行详情（步骤状态、关联 run 等）
+octomonitor wf inspect <run-id>
+
+# 步骤操作
+octomonitor wf step <run-id> step-0 approve   # 审批
+octomonitor wf step <run-id> step-0 complete   # 完成
+octomonitor wf step <run-id> step-0 skip       # 跳过
+
+# 关联 monitor run 到步骤
+octomonitor wf link <run-id> step-0 <monitor-run-id>
+
+# 从 stdin 读取（LLM 可直接 pipe JSON）
+echo '{ ... }' | octomonitor wf create -f -
+
+# 自定义服务器地址
+octomonitor --server http://192.168.1.100:46321 wf list
+# 或通过环境变量
+export OCTOMONITOR_URL=http://192.168.1.100:46321
+```
+
+CLI 通过 HTTP 与运行中的 `octomonitor-server` 通信（默认 `http://127.0.0.1:46321`），使用前请确保服务已启动。
+
 ## 架构
 
 ```text
@@ -90,6 +136,7 @@ OctoMonitor
 ├── crates/
 │   ├── core/            # 领域模型、ts-rs 导出
 │   ├── server/          # 本地 Axum HTTP / WS 服务 + 远程只读查看面
+│   ├── cli/             # 工作流命令行工具（octomonitor 二进制）
 │   ├── adapters/
 │   │   ├── claude/      # Claude Code 会话解析
 │   │   ├── codex/       # Codex 会话解析

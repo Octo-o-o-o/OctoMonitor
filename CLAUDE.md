@@ -15,12 +15,15 @@
 - Build web: `pnpm --filter @octomonitor/web build`
 - Run a11y audit: `pnpm test:a11y`
 - Build desktop release artifact: `pnpm build:desktop`
+- Build CLI: `cargo build -p octomonitor-cli`
+- Run CLI: `cargo run -p octomonitor-cli -- workflow <subcommand>`
 
 ## Structure
 - `apps/web`: web UI + companion layouts + Playwright/axe audit
 - `apps/desktop/src-tauri`: desktop shell scaffold + release build target
 - `crates/core`: domain and aggregation
 - `crates/server`: local HTTP/WS API + live probe/ingest state
+- `crates/cli`: workflow management CLI (`octomonitor` binary)
 - `crates/adapters/*`: source adapters
 - `crates/installer`: setup/doctor/rollback probes
 - `crates/companion`: pairing/session logic
