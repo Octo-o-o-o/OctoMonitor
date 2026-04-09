@@ -513,6 +513,7 @@ async fn scan_adapters_isolated(
 ) {
     let started_at = Instant::now();
     let claude_cache = state.claude_probe_cache.clone();
+    let codex_cache = state.codex_probe_cache.clone();
     let (claude_probe, codex_probe, openclaw_probe) = tokio::join!(
         run_probe_task(
             "claude",
@@ -522,7 +523,14 @@ async fn scan_adapters_isolated(
             },
             failed_claude_snapshot
         ),
-        run_probe_task("codex", codex_adapter::probe, failed_codex_snapshot),
+        run_probe_task(
+            "codex",
+            move || match codex_cache.try_lock() {
+                Ok(mut cache) => codex_adapter::probe_with_cache(&mut cache),
+                Err(_) => failed_codex_snapshot("probe cache busy after previous timeout".into()),
+            },
+            failed_codex_snapshot
+        ),
         run_probe_task(
             "openclaw",
             openclaw_adapter::probe,
