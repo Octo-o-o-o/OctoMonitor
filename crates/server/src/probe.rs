@@ -21,6 +21,10 @@ use crate::state::AppState;
 const PROBE_ACTIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const PROBE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 #[cfg(test)]
+const ADAPTER_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+#[cfg(not(test))]
+const ADAPTER_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(test)]
 const DERIVE_DEBOUNCE: Duration = Duration::from_millis(20);
 #[cfg(not(test))]
 const DERIVE_DEBOUNCE: Duration = Duration::from_millis(250);
@@ -86,6 +90,105 @@ fn bootstrap_from_scan(scanned: ProbeScanResult) -> BootstrapPayload {
     payload
 }
 
+fn failed_claude_snapshot(reason: String) -> claude_adapter::ClaudeSnapshot {
+    claude_adapter::ClaudeSnapshot {
+        probed_at: Utc::now().to_rfc3339(),
+        cli_available: false,
+        cli_version: None,
+        config_dir: None,
+        config_exists: false,
+        projects_dir_exists: false,
+        active_session_hint: None,
+        sessions: Vec::new(),
+        quota: None,
+        command_probes: vec![claude_adapter::CommandProbeResult {
+            command: "claude probe".into(),
+            success: false,
+            stdout_snippet: None,
+            error: Some(reason),
+        }],
+        file_probes: Vec::new(),
+    }
+}
+
+fn failed_codex_snapshot(reason: String) -> codex_adapter::CodexSnapshot {
+    codex_adapter::CodexSnapshot {
+        probed_at: Utc::now().to_rfc3339(),
+        cli_available: false,
+        cli_version: None,
+        config_dir: None,
+        config_exists: false,
+        history_exists: false,
+        recent_history_hint: None,
+        sessions: Vec::new(),
+        command_probes: vec![codex_adapter::CommandProbeResult {
+            command: "codex probe".into(),
+            success: false,
+            stdout_snippet: None,
+            error: Some(reason),
+        }],
+        file_probes: Vec::new(),
+    }
+}
+
+fn failed_openclaw_snapshot(reason: String) -> openclaw_adapter::OpenClawSnapshot {
+    openclaw_adapter::OpenClawSnapshot {
+        probed_at: Utc::now().to_rfc3339(),
+        cli_available: false,
+        gateway_status_ok: false,
+        cli_version: None,
+        workspace_dir: None,
+        sessions_dir_exists: false,
+        state_file_exists: false,
+        recent_session_hint: None,
+        sessions: Vec::new(),
+        cron_jobs: Vec::new(),
+        command_probes: vec![openclaw_adapter::CommandProbeResult {
+            command: "openclaw probe".into(),
+            success: false,
+            stdout_snippet: None,
+            error: Some(reason),
+        }],
+        file_probes: Vec::new(),
+    }
+}
+
+async fn run_probe_task<T, F, B>(name: &'static str, probe: F, fallback: B) -> T
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+    B: FnOnce(String) -> T,
+{
+    let started_at = Instant::now();
+    match tokio::time::timeout(ADAPTER_PROBE_TIMEOUT, tokio::task::spawn_blocking(probe)).await {
+        Ok(Ok(snapshot)) => {
+            perf::log_elapsed_with_details("adapter_probe", started_at, || {
+                format!("adapter={name} status=ok")
+            });
+            snapshot
+        }
+        Ok(Err(error)) => {
+            let reason = format!("probe panicked: {error}");
+            tracing::error!("{name} probe panicked: {error}");
+            perf::log_elapsed_with_details("adapter_probe", started_at, || {
+                format!("adapter={name} status=panic")
+            });
+            fallback(reason)
+        }
+        Err(_) => {
+            let reason = format!(
+                "probe timed out after {}ms",
+                ADAPTER_PROBE_TIMEOUT.as_millis()
+            );
+            tracing::warn!("{name} probe timed out after {:?}", ADAPTER_PROBE_TIMEOUT);
+            perf::log_elapsed_with_details("adapter_probe", started_at, || {
+                format!("adapter={name} status=timeout")
+            });
+            fallback(reason)
+        }
+    }
+}
+
 fn replace_derived_sections(target: &mut BootstrapPayload, derived: BootstrapPayload) {
     let BootstrapPayload {
         generated_at,
@@ -122,18 +225,7 @@ async fn try_commit_refreshed_payload(
 
 async fn refresh_bootstrap_once(state: &AppState) {
     let started_at = Instant::now();
-    let scan_result = tokio::task::spawn_blocking(|| collect_probe_scan(true)).await;
-
-    let scanned = match scan_result {
-        Ok(scanned) => scanned,
-        Err(e) => {
-            tracing::error!("Probe scan thread panicked: {e}; will retry next cycle");
-            perf::log_elapsed_with_details("refresh_bootstrap_once", started_at, || {
-                format!("status=scan_join_error error={e}")
-            });
-            return;
-        }
-    };
+    let scanned = collect_probe_scan_isolated(true).await;
 
     let mut attempts = 0usize;
     loop {
@@ -412,7 +504,33 @@ pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
     payload
 }
 
-fn scan_adapters() -> (
+async fn scan_adapters_isolated() -> (
+    claude_adapter::ClaudeSnapshot,
+    codex_adapter::CodexSnapshot,
+    openclaw_adapter::OpenClawSnapshot,
+) {
+    let started_at = Instant::now();
+    let (claude_probe, codex_probe, openclaw_probe) = tokio::join!(
+        run_probe_task("claude", claude_adapter::probe, failed_claude_snapshot),
+        run_probe_task("codex", codex_adapter::probe, failed_codex_snapshot),
+        run_probe_task(
+            "openclaw",
+            openclaw_adapter::probe,
+            failed_openclaw_snapshot
+        ),
+    );
+    perf::log_elapsed_with_details("scan_adapters", started_at, || {
+        format!(
+            "claude_sessions={} codex_sessions={} openclaw_sessions={}",
+            claude_probe.sessions.len(),
+            codex_probe.sessions.len(),
+            openclaw_probe.sessions.len()
+        )
+    });
+    (claude_probe, codex_probe, openclaw_probe)
+}
+
+fn scan_adapters_blocking() -> (
     claude_adapter::ClaudeSnapshot,
     codex_adapter::CodexSnapshot,
     openclaw_adapter::OpenClawSnapshot,
@@ -487,10 +605,14 @@ fn make_adapter_health(
     }
 }
 
-fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
+fn collect_probe_scan_from_snapshots(
+    include_placeholder_runs: bool,
+    claude_probe: claude_adapter::ClaudeSnapshot,
+    codex_probe: codex_adapter::CodexSnapshot,
+    openclaw_probe: openclaw_adapter::OpenClawSnapshot,
+) -> ProbeScanResult {
     let started_at = Instant::now();
     let now = Utc::now().to_rfc3339();
-    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters();
     let mut runs: Vec<RunRecord> = Vec::new();
 
     if claude_probe.sessions.is_empty() {
@@ -654,6 +776,30 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
         )
     });
     result
+}
+
+fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
+    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters_blocking();
+    collect_probe_scan_from_snapshots(
+        include_placeholder_runs,
+        claude_probe,
+        codex_probe,
+        openclaw_probe,
+    )
+}
+
+async fn collect_probe_scan_isolated(include_placeholder_runs: bool) -> ProbeScanResult {
+    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters_isolated().await;
+    collect_probe_scan_from_snapshots(
+        include_placeholder_runs,
+        claude_probe,
+        codex_probe,
+        openclaw_probe,
+    )
+}
+
+pub async fn collect_history_runs() -> Vec<RunRecord> {
+    collect_probe_scan_isolated(false).await.runs
 }
 
 fn detect_local_ip() -> Option<String> {
@@ -1322,12 +1468,12 @@ fn history_range(from: chrono::DateTime<Utc>, to: chrono::DateTime<Utc>) -> Hist
     }
 }
 
-pub fn build_usage_history(
+pub fn build_usage_history_from_runs(
     pricing: &PricingStore,
+    mut runs: Vec<RunRecord>,
     from: chrono::DateTime<Utc>,
     to: chrono::DateTime<Utc>,
 ) -> UsageHistoryPayload {
-    let mut runs = collect_probe_scan(false).runs;
     for run in &mut runs {
         normalize_run_token_totals(run);
     }
@@ -1346,12 +1492,12 @@ pub fn build_usage_history(
     }
 }
 
-pub fn build_commit_history(
+pub fn build_commit_history_from_runs(
     pricing: &PricingStore,
+    mut runs: Vec<RunRecord>,
     from: chrono::DateTime<Utc>,
     to: chrono::DateTime<Utc>,
 ) -> CommitHistoryPayload {
-    let mut runs = collect_probe_scan(false).runs;
     for run in &mut runs {
         normalize_run_token_totals(run);
     }
@@ -1449,6 +1595,8 @@ pub fn tool_key(tool: &ToolKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
     use crate::{
         state::AppState,
         workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore},
@@ -2079,6 +2227,33 @@ mod tests {
         assert!(ids.contains(&"probe-codex-new"));
         assert!(ids.contains(&"ingest-codex-existing"));
         assert!(ids.contains(&"ingest-codex-later"));
+    }
+
+    #[tokio::test]
+    async fn run_probe_task_returns_fallback_on_panic() {
+        let result = run_probe_task(
+            "panic-test",
+            || -> String { panic!("boom") },
+            |reason| reason,
+        )
+        .await;
+
+        assert!(result.contains("probe panicked"));
+    }
+
+    #[tokio::test]
+    async fn run_probe_task_returns_fallback_on_timeout() {
+        let result = run_probe_task(
+            "timeout-test",
+            || {
+                std::thread::sleep(ADAPTER_PROBE_TIMEOUT + Duration::from_millis(20));
+                "late".to_string()
+            },
+            |reason| reason,
+        )
+        .await;
+
+        assert!(result.contains("timed out"));
     }
 }
 

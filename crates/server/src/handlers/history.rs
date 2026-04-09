@@ -8,7 +8,7 @@ use octomonitor_core::{CommitHistoryPayload, UsageHistoryPayload};
 use serde::Deserialize;
 
 use crate::{
-    probe::{build_commit_history, build_usage_history},
+    probe::{build_commit_history_from_runs, build_usage_history_from_runs, collect_history_runs},
     state::AppState,
 };
 
@@ -52,10 +52,13 @@ pub async fn get_usage_history(
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<UsageHistoryPayload>, StatusCode> {
     let (from, to) = parse_history_range(&query)?;
+    let runs = collect_history_runs().await;
     let pricing = state.pricing.clone();
-    let payload = tokio::task::spawn_blocking(move || build_usage_history(&pricing, from, to))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let payload = tokio::task::spawn_blocking(move || {
+        build_usage_history_from_runs(&pricing, runs, from, to)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(payload))
 }
@@ -65,10 +68,13 @@ pub async fn get_commit_history(
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<CommitHistoryPayload>, StatusCode> {
     let (from, to) = parse_history_range(&query)?;
+    let runs = collect_history_runs().await;
     let pricing = state.pricing.clone();
-    let payload = tokio::task::spawn_blocking(move || build_commit_history(&pricing, from, to))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let payload = tokio::task::spawn_blocking(move || {
+        build_commit_history_from_runs(&pricing, runs, from, to)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(payload))
 }
