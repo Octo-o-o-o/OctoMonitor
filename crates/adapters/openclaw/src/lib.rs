@@ -1,14 +1,15 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     fs,
-    io::{BufRead, BufReader},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 pub use octomonitor_adapter_common::{
-    mask_value, probe_file, resolve_home_dir, run_command_probe, AdapterDescriptor,
-    CommandProbeResult, FileProbeResult,
+    mask_value, probe_file, read_jsonl_delta, resolve_home_dir, run_command_probe,
+    AdapterDescriptor, CommandProbeResult, FileProbeResult, JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -85,6 +86,33 @@ pub struct OpenClawSnapshot {
     pub file_probes: Vec<FileProbeResult>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct OpenClawProbeCache {
+    session_lists: HashMap<String, CachedSessionsFile>,
+    transcript_files: HashMap<String, CachedOpenClawTranscript>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedSessionsFile {
+    size_bytes: u64,
+    modified_at: Option<SystemTime>,
+    sessions: Vec<OpenClawSession>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CachedOpenClawTranscript {
+    cursor: JsonlCursor,
+    state: OpenClawTranscriptState,
+}
+
+#[derive(Debug, Clone, Default)]
+struct OpenClawTranscriptState {
+    first_question: Option<String>,
+    last_question: Option<String>,
+    message_count: u64,
+    error_message: Option<String>,
+}
+
 fn openclaw_root() -> PathBuf {
     resolve_home_dir(".openclaw")
 }
@@ -100,7 +128,9 @@ fn recent_session_hint(sessions_dir: &Path) -> Option<String> {
         if !meta.is_file() {
             continue;
         }
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
             newest = Some((modified, name));
@@ -128,19 +158,17 @@ fn derive_origin(
     // Also check session-level label (e.g. "Cron: AI Daily Brief")
     let session_label = session_val.get("label").and_then(|v| v.as_str());
 
-    let provider = origin_provider_raw
-        .map(|p| p.to_string())
-        .or_else(|| {
-            [
-                (":cron:", "cron"),
-                (":telegram:", "telegram"),
-                (":weixin:", "wechat"),
-                (":wechat:", "wechat"),
-            ]
-            .iter()
-            .find(|(pattern, _)| session_key.contains(pattern))
-            .map(|(_, name)| name.to_string())
-        });
+    let provider = origin_provider_raw.map(|p| p.to_string()).or_else(|| {
+        [
+            (":cron:", "cron"),
+            (":telegram:", "telegram"),
+            (":weixin:", "wechat"),
+            (":wechat:", "wechat"),
+        ]
+        .iter()
+        .find(|(pattern, _)| session_key.contains(pattern))
+        .map(|(_, name)| name.to_string())
+    });
 
     // Build human-readable label
     let label = match provider.as_deref() {
@@ -178,7 +206,7 @@ fn derive_origin(
                 Some(capitalize(other))
             }
         }
-        None => None
+        None => None,
     };
 
     (label, provider)
@@ -235,37 +263,39 @@ fn scan_cron_jobs_inner(root: &Path) -> Option<Vec<OpenClawCronJob>> {
     let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let jobs = val.get("jobs").and_then(|j| j.as_array())?;
 
-    Some(jobs.iter()
-        .filter_map(|j| {
-            let id = j.get("id")?.as_str()?.to_string();
-            let name = j.get("name")?.as_str()?.to_string();
-            let enabled = j.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-            let schedule = j.get("schedule")?;
-            let expr = schedule.get("expr")?.as_str()?.to_string();
-            let tz = schedule
-                .get("tz")
-                .and_then(|v| v.as_str())
-                .unwrap_or("UTC")
-                .to_string();
-            let agent_id = j
-                .get("payload")
-                .and_then(|p| p.get("agentId"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
+    Some(
+        jobs.iter()
+            .filter_map(|j| {
+                let id = j.get("id")?.as_str()?.to_string();
+                let name = j.get("name")?.as_str()?.to_string();
+                let enabled = j.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                let schedule = j.get("schedule")?;
+                let expr = schedule.get("expr")?.as_str()?.to_string();
+                let tz = schedule
+                    .get("tz")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("UTC")
+                    .to_string();
+                let agent_id = j
+                    .get("payload")
+                    .and_then(|p| p.get("agentId"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
 
-            let schedule_human = cron_to_human(&expr, &tz);
+                let schedule_human = cron_to_human(&expr, &tz);
 
-            Some(OpenClawCronJob {
-                id,
-                name,
-                enabled,
-                agent_id,
-                schedule_expr: expr,
-                schedule_tz: tz,
-                schedule_human,
+                Some(OpenClawCronJob {
+                    id,
+                    name,
+                    enabled,
+                    agent_id,
+                    schedule_expr: expr,
+                    schedule_tz: tz,
+                    schedule_human,
+                })
             })
-        })
-        .collect())
+            .collect(),
+    )
 }
 
 fn load_agent_name_map(root: &Path) -> std::collections::HashMap<String, String> {
@@ -288,7 +318,10 @@ fn load_agent_name_map_inner(root: &Path) -> Option<std::collections::HashMap<St
     Some(map)
 }
 
-fn scan_agent_sessions(root: &Path) -> Vec<OpenClawSession> {
+fn scan_agent_sessions(
+    root: &Path,
+    cache: Option<&mut OpenClawProbeCache>,
+) -> Vec<OpenClawSession> {
     let agents_dir = root.join("agents");
     if !agents_dir.is_dir() {
         return vec![];
@@ -296,6 +329,8 @@ fn scan_agent_sessions(root: &Path) -> Vec<OpenClawSession> {
 
     let name_map = load_agent_name_map(root);
     let mut sessions = Vec::new();
+    let mut cache = cache;
+    let mut seen_session_lists = HashSet::new();
 
     if let Ok(agents) = fs::read_dir(&agents_dir) {
         for agent_entry in agents.flatten() {
@@ -309,10 +344,16 @@ fn scan_agent_sessions(root: &Path) -> Vec<OpenClawSession> {
             if !sessions_json.exists() {
                 continue;
             }
+            seen_session_lists.insert(sessions_json.display().to_string());
 
-            if let Some(agent_sessions) =
-                parse_sessions_json(&sessions_json, &agent_name, &display_name)
-            {
+            let agent_sessions = match cache.as_mut() {
+                Some(cache) => {
+                    let cache = &mut **cache;
+                    load_cached_agent_sessions(cache, &sessions_json, &agent_name, &display_name)
+                }
+                None => parse_sessions_json_base(&sessions_json, &agent_name, &display_name),
+            };
+            if let Some(agent_sessions) = agent_sessions {
                 sessions.extend(agent_sessions);
             }
         }
@@ -320,72 +361,69 @@ fn scan_agent_sessions(root: &Path) -> Vec<OpenClawSession> {
 
     // Sort by updated_at descending
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    if let Some(cache) = cache {
+        let live_transcripts = sessions
+            .iter()
+            .filter_map(|session| session.transcript_path.clone())
+            .collect::<HashSet<_>>();
+        cache
+            .session_lists
+            .retain(|path, _| seen_session_lists.contains(path));
+        cache
+            .transcript_files
+            .retain(|path, _| live_transcripts.contains(path));
+    }
     sessions
 }
 
-fn extract_questions_from_jsonl(
-    path: &Path,
-) -> (Option<String>, Option<String>, u64, Option<String>) {
-    let file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return (None, None, 0, None),
+fn file_signature(path: &Path) -> Option<(u64, Option<SystemTime>)> {
+    let metadata = fs::metadata(path).ok()?;
+    Some((metadata.len(), metadata.modified().ok()))
+}
+
+fn apply_openclaw_transcript_line(state: &mut OpenClawTranscriptState, line: &str) {
+    let val: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => return,
     };
-    let reader = BufReader::new(file);
-    let mut first_question: Option<String> = None;
-    let mut last_question: Option<String> = None;
-    let mut message_count: u64 = 0;
-    let mut error_message: Option<String> = None;
-
-    for line in reader.lines().map_while(Result::ok) {
-        let val: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let entry_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-        if entry_type == "message" {
-            if let Some(msg) = val.get("message") {
-                let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                if role == "user" {
-                    if let Some(text) = extract_text_content(msg) {
-                        // Skip system-injected, heartbeat, and spawn contract messages
-                        if text.starts_with("[cron:")
-                            || text.starts_with("[[")
-                            || text.starts_with("Read HEARTBEAT")
-                            || text.starts_with("<system")
-                            || text.starts_with("<command")
-                            || text.contains("HEARTBEAT.md")
-                            || text.contains("# OpenClaw Worker Spawn Contract")
-                            || text.starts_with("A new session was started via")
-                            || (text.len() > 5 && text.starts_with('[') && text.contains("GMT"))
-                            || text.starts_with("Conversation info (untrusted")
-                        {
-                            continue;
-                        }
-                        message_count += 1;
-                        let truncated: String = text.chars().take(200).collect();
-                        if first_question.is_none() {
-                            first_question = Some(truncated.clone());
-                        }
-                        last_question = Some(truncated);
-                    }
-                } else if role == "assistant" {
-                    if let Some(text) = extract_text_content(msg) {
-                        let lower = text.to_lowercase();
-                        if lower.contains("error")
-                            || lower.contains("failed")
-                            || text.contains("无法")
-                        {
-                            error_message = Some(text.chars().take(300).collect());
-                        }
-                    }
-                }
+    let entry_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if entry_type != "message" {
+        return;
+    }
+    let Some(msg) = val.get("message") else {
+        return;
+    };
+    let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+    if role == "user" {
+        if let Some(text) = extract_text_content(msg) {
+            if text.starts_with("[cron:")
+                || text.starts_with("[[")
+                || text.starts_with("Read HEARTBEAT")
+                || text.starts_with("<system")
+                || text.starts_with("<command")
+                || text.contains("HEARTBEAT.md")
+                || text.contains("# OpenClaw Worker Spawn Contract")
+                || text.starts_with("A new session was started via")
+                || (text.len() > 5 && text.starts_with('[') && text.contains("GMT"))
+                || text.starts_with("Conversation info (untrusted")
+            {
+                return;
+            }
+            state.message_count += 1;
+            let truncated: String = text.chars().take(200).collect();
+            if state.first_question.is_none() {
+                state.first_question = Some(truncated.clone());
+            }
+            state.last_question = Some(truncated);
+        }
+    } else if role == "assistant" {
+        if let Some(text) = extract_text_content(msg) {
+            let lower = text.to_lowercase();
+            if lower.contains("error") || lower.contains("failed") || text.contains("无法") {
+                state.error_message = Some(text.chars().take(300).collect());
             }
         }
     }
-
-    (first_question, last_question, message_count, error_message)
 }
 
 fn extract_text_content(msg: &serde_json::Value) -> Option<String> {
@@ -410,7 +448,7 @@ fn extract_text_content(msg: &serde_json::Value) -> Option<String> {
     None
 }
 
-fn parse_sessions_json(
+fn parse_sessions_json_base(
     path: &Path,
     agent_name: &str,
     agent_display_name: &Option<String>,
@@ -487,10 +525,6 @@ fn parse_sessions_json(
             .get("sessionFile")
             .and_then(|v| v.as_str())
             .map(PathBuf::from);
-        let (first_question, last_question, message_count, error_message) = session_file
-            .as_ref()
-            .map(|p| extract_questions_from_jsonl(p))
-            .unwrap_or((None, None, 0, None));
 
         let (origin_label, origin_provider) = derive_origin(session_key, session_val);
 
@@ -507,10 +541,10 @@ fn parse_sessions_json(
             started_at,
             updated_at,
             context_tokens,
-            first_question,
-            last_question,
-            message_count,
-            error_message,
+            first_question: None,
+            last_question: None,
+            message_count: 0,
+            error_message: None,
             input_tokens,
             output_tokens,
             total_tokens,
@@ -526,7 +560,74 @@ fn parse_sessions_json(
     Some(result)
 }
 
-pub fn probe() -> OpenClawSnapshot {
+fn update_cached_openclaw_transcript(
+    cached: &mut CachedOpenClawTranscript,
+    path: &Path,
+) -> (Option<String>, Option<String>, u64, Option<String>) {
+    let Ok(delta) = read_jsonl_delta(path, &mut cached.cursor) else {
+        return (None, None, 0, None);
+    };
+    if delta.reset {
+        cached.state = OpenClawTranscriptState::default();
+    }
+    for line in delta.lines {
+        apply_openclaw_transcript_line(&mut cached.state, &line);
+    }
+    (
+        cached.state.first_question.clone(),
+        cached.state.last_question.clone(),
+        cached.state.message_count,
+        cached.state.error_message.clone(),
+    )
+}
+
+fn load_cached_agent_sessions(
+    cache: &mut OpenClawProbeCache,
+    sessions_json: &Path,
+    agent_name: &str,
+    agent_display_name: &Option<String>,
+) -> Option<Vec<OpenClawSession>> {
+    let cache_key = sessions_json.display().to_string();
+    let signature = file_signature(sessions_json)?;
+    let base_sessions = match cache.session_lists.get(&cache_key) {
+        Some(cached) if cached.size_bytes == signature.0 && cached.modified_at == signature.1 => {
+            cached.sessions.clone()
+        }
+        _ => {
+            let sessions = parse_sessions_json_base(sessions_json, agent_name, agent_display_name)?;
+            cache.session_lists.insert(
+                cache_key,
+                CachedSessionsFile {
+                    size_bytes: signature.0,
+                    modified_at: signature.1,
+                    sessions: sessions.clone(),
+                },
+            );
+            sessions
+        }
+    };
+
+    Some(
+        base_sessions
+            .into_iter()
+            .map(|mut session| {
+                if let Some(path) = session.transcript_path.as_deref() {
+                    let transcript_key = path.to_string();
+                    let cached = cache.transcript_files.entry(transcript_key).or_default();
+                    let (first_question, last_question, message_count, error_message) =
+                        update_cached_openclaw_transcript(cached, Path::new(path));
+                    session.first_question = first_question;
+                    session.last_question = last_question;
+                    session.message_count = message_count;
+                    session.error_message = error_message;
+                }
+                session
+            })
+            .collect(),
+    )
+}
+
+pub fn probe_with_cache(cache: &mut OpenClawProbeCache) -> OpenClawSnapshot {
     let root = openclaw_root();
     let sessions_dir = root.join("agents");
     let state_file = root.join("state.json");
@@ -538,7 +639,7 @@ pub fn probe() -> OpenClawSnapshot {
     let state_probe = probe_file(&state_file);
 
     // Scan real agent sessions
-    let sessions = scan_agent_sessions(&root);
+    let sessions = scan_agent_sessions(&root, Some(cache));
     let cron_jobs = scan_cron_jobs(&root);
 
     OpenClawSnapshot {
@@ -560,9 +661,15 @@ pub fn probe() -> OpenClawSnapshot {
     }
 }
 
+pub fn probe() -> OpenClawSnapshot {
+    let mut cache = OpenClawProbeCache::default();
+    probe_with_cache(&mut cache)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -609,12 +716,49 @@ mod tests {
         )
         .expect("sessions.json should be written");
 
-        let parsed = parse_sessions_json(&sessions_path, "coordinator", &None)
+        let parsed = parse_sessions_json_base(&sessions_path, "coordinator", &None)
             .expect("sessions.json should parse");
 
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].session_id, "real-session");
 
         fs::remove_dir_all(&temp_dir).expect("temp dir should be removed");
+    }
+
+    #[test]
+    fn cached_transcript_updates_only_new_jsonl_lines() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let transcript = temp_dir.path().join("session.jsonl");
+        std::fs::write(
+            &transcript,
+            "{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":\"first question\"}}\n",
+        )
+        .expect("initial transcript");
+
+        let mut cached = CachedOpenClawTranscript::default();
+        let first = update_cached_openclaw_transcript(&mut cached, &transcript);
+        assert_eq!(first.0.as_deref(), Some("first question"));
+        assert_eq!(first.2, 1);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .expect("append transcript");
+        writeln!(
+            file,
+            "{{\"type\":\"message\",\"message\":{{\"role\":\"assistant\",\"content\":\"failed to run\"}}}}"
+        )
+        .expect("append assistant");
+        writeln!(
+            file,
+            "{{\"type\":\"message\",\"message\":{{\"role\":\"user\",\"content\":\"second question\"}}}}"
+        )
+        .expect("append user");
+
+        let second = update_cached_openclaw_transcript(&mut cached, &transcript);
+        assert_eq!(second.0.as_deref(), Some("first question"));
+        assert_eq!(second.1.as_deref(), Some("second question"));
+        assert_eq!(second.2, 2);
+        assert_eq!(second.3.as_deref(), Some("failed to run"));
     }
 }

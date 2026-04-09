@@ -2558,6 +2558,7 @@ dependencies = [
  "octomonitor-adapter-common",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
