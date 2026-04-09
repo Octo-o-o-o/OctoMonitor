@@ -1,6 +1,6 @@
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc,
+    Arc, Mutex as StdMutex,
 };
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 
@@ -21,6 +21,7 @@ pub struct AppState {
     pub derive_wake: Arc<Notify>,
     pub derive_dirty: Arc<AtomicBool>,
     pub revision: Arc<AtomicU64>,
+    pub claude_probe_cache: Arc<StdMutex<octomonitor_claude_adapter::ClaudeProbeCache>>,
     pub pricing: PricingStore,
     pub workflow_coordinator: Arc<Mutex<WorkflowCoordinator>>,
 }
@@ -41,6 +42,9 @@ impl AppState {
             derive_wake: Arc::new(Notify::new()),
             derive_dirty: Arc::new(AtomicBool::new(false)),
             revision: Arc::new(AtomicU64::new(0)),
+            claude_probe_cache: Arc::new(StdMutex::new(
+                octomonitor_claude_adapter::ClaudeProbeCache::default(),
+            )),
             pricing,
             workflow_coordinator: Arc::new(Mutex::new(workflow_coordinator)),
         }

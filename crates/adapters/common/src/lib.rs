@@ -4,6 +4,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    io::{self, BufRead, BufReader, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -33,6 +34,17 @@ pub struct FileProbeResult {
     pub exists: bool,
     pub size_bytes: Option<u64>,
     pub modified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct JsonlCursor {
+    pub offset: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsonlDelta {
+    pub lines: Vec<String>,
+    pub reset: bool,
 }
 
 pub fn run_command_probe(cmd: &str, args: &[&str]) -> CommandProbeResult {
@@ -76,6 +88,34 @@ pub fn probe_file(path: &Path) -> FileProbeResult {
     }
 }
 
+pub fn read_jsonl_delta(path: &Path, cursor: &mut JsonlCursor) -> io::Result<JsonlDelta> {
+    let mut file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    let mut reset = false;
+    if metadata.len() < cursor.offset {
+        cursor.offset = 0;
+        reset = true;
+    }
+
+    file.seek(SeekFrom::Start(cursor.offset))?;
+    let mut reader = BufReader::new(file);
+    let mut lines = Vec::new();
+    loop {
+        let mut line = String::new();
+        let bytes = reader.read_line(&mut line)?;
+        if bytes == 0 {
+            break;
+        }
+        while line.ends_with('\n') || line.ends_with('\r') {
+            line.pop();
+        }
+        lines.push(line);
+    }
+    cursor.offset = reader.stream_position()?;
+
+    Ok(JsonlDelta { lines, reset })
+}
+
 /// Mask a sensitive value, showing only the first and last 4 characters.
 /// Values shorter than `min_visible` are fully masked.
 pub fn mask_value(value: &str, min_visible: usize) -> String {
@@ -110,4 +150,31 @@ fn home_dir() -> Option<PathBuf> {
         .or_else(|| env::var_os("USERPROFILE"))
         .or_else(home_drive_path)
         .map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_jsonl_delta_reads_only_new_lines_and_resets_on_truncate() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("session.jsonl");
+        std::fs::write(&path, "{\"a\":1}\n{\"a\":2}\n").expect("initial file");
+
+        let mut cursor = JsonlCursor::default();
+        let first = read_jsonl_delta(&path, &mut cursor).expect("first read");
+        assert!(!first.reset);
+        assert_eq!(first.lines.len(), 2);
+
+        std::fs::write(&path, "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n").expect("append file");
+        let second = read_jsonl_delta(&path, &mut cursor).expect("second read");
+        assert!(!second.reset);
+        assert_eq!(second.lines, vec![r#"{"a":3}"#]);
+
+        std::fs::write(&path, "{\"b\":1}\n").expect("truncate file");
+        let third = read_jsonl_delta(&path, &mut cursor).expect("third read");
+        assert!(third.reset);
+        assert_eq!(third.lines, vec![r#"{"b":1}"#]);
+    }
 }

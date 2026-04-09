@@ -1,14 +1,14 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     env, fs,
-    io::{BufRead, BufReader},
     path::{Path, PathBuf},
 };
 
 pub use octomonitor_adapter_common::{
-    mask_value, probe_file, resolve_home_dir, run_command_probe, AdapterDescriptor,
-    CommandProbeResult, FileProbeResult,
+    mask_value, probe_file, read_jsonl_delta, resolve_home_dir, run_command_probe,
+    AdapterDescriptor, CommandProbeResult, FileProbeResult, JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -85,6 +85,35 @@ pub struct ClaudeSnapshot {
     pub file_probes: Vec<FileProbeResult>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ClaudeProbeCache {
+    session_files: HashMap<String, CachedClaudeSession>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CachedClaudeSession {
+    cursor: JsonlCursor,
+    state: ClaudeSessionState,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ClaudeSessionState {
+    session_id: Option<String>,
+    model: Option<String>,
+    first_timestamp: Option<String>,
+    last_timestamp: Option<String>,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+    total_cost_usd: f64,
+    message_count: u64,
+    first_question: Option<String>,
+    last_question: Option<String>,
+    completed_active_elapsed_ms: i64,
+    pending_user_ts: Option<chrono::DateTime<chrono::FixedOffset>>,
+}
+
 fn mask_secret(value: &str) -> String {
     mask_value(value, 8)
 }
@@ -117,13 +146,17 @@ fn project_name_from_path(path: &str) -> String {
         .to_string()
 }
 
-fn scan_sessions(config_dir: &Path) -> Vec<ClaudeSession> {
+fn scan_sessions(
+    config_dir: &Path,
+    mut cache: Option<&mut ClaudeProbeCache>,
+) -> Vec<ClaudeSession> {
     let projects_dir = config_dir.join("projects");
     if !projects_dir.is_dir() {
         return vec![];
     }
 
     let mut sessions = Vec::new();
+    let mut seen_paths = HashSet::new();
 
     let entries = match fs::read_dir(&projects_dir) {
         Ok(e) => e,
@@ -147,11 +180,27 @@ fn scan_sessions(config_dir: &Path) -> Vec<ClaudeSession> {
                 if path.extension().is_none_or(|ext| ext != "jsonl") {
                     continue;
                 }
-                if let Some(session) = parse_claude_session(&path, &workspace_path, &project_name) {
+                let cache_key = path.display().to_string();
+                let session = match cache.as_mut() {
+                    Some(cache) => {
+                        let cache = &mut **cache;
+                        let entry = cache.session_files.entry(cache_key.clone()).or_default();
+                        update_cached_claude_session(entry, &path, &workspace_path, &project_name)
+                    }
+                    None => parse_claude_session(&path, &workspace_path, &project_name),
+                };
+                if let Some(session) = session {
+                    seen_paths.insert(cache_key);
                     sessions.push(session);
                 }
             }
         }
+    }
+
+    if let Some(cache) = cache {
+        cache
+            .session_files
+            .retain(|path, _| seen_paths.contains(path));
     }
 
     // Sort by last_activity_at descending
@@ -181,158 +230,160 @@ fn parse_claude_session(
     workspace_path: &str,
     project_name: &str,
 ) -> Option<ClaudeSession> {
-    let file = fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
+    let mut cached = CachedClaudeSession::default();
+    update_cached_claude_session(&mut cached, path, workspace_path, project_name)
+}
 
-    let mut session_id: Option<String> = None;
-    let mut model: Option<String> = None;
-    let mut first_timestamp: Option<String> = None;
-    let mut last_timestamp: Option<String> = None;
-    let mut input_tokens: u64 = 0;
-    let mut output_tokens: u64 = 0;
-    let mut cache_read_tokens: u64 = 0;
-    let mut cache_write_tokens: u64 = 0;
-    let mut total_cost_usd: f64 = 0.0;
-    let mut message_count: u64 = 0;
-    let mut first_question: Option<String> = None;
-    let mut last_question: Option<String> = None;
-    // Track active working time: sum of (user_msg → assistant_response) intervals
-    let mut active_elapsed_ms: i64 = 0;
-    let mut pending_user_ts: Option<chrono::DateTime<chrono::FixedOffset>> = None;
+fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
+    let val: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
 
-    for line in reader.lines().map_while(Result::ok) {
-        let val: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        if session_id.is_none() {
-            if let Some(sid) = val.get("sessionId").and_then(|v| v.as_str()) {
-                session_id = Some(sid.to_string());
-            }
+    if state.session_id.is_none() {
+        if let Some(sid) = val.get("sessionId").and_then(|v| v.as_str()) {
+            state.session_id = Some(sid.to_string());
         }
+    }
 
-        let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
-        if let Some(ts) = val.get("timestamp").and_then(|v| v.as_str()) {
-            if first_timestamp.is_none() {
-                first_timestamp = Some(ts.to_string());
-            }
-            last_timestamp = Some(ts.to_string());
+    if let Some(ts) = val.get("timestamp").and_then(|v| v.as_str()) {
+        if state.first_timestamp.is_none() {
+            state.first_timestamp = Some(ts.to_string());
         }
+        state.last_timestamp = Some(ts.to_string());
+    }
 
-        // Parse current line timestamp for active-time tracking
-        let line_dt = val
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
+    let line_dt = val
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
 
-        if msg_type == "user" {
-            // Record user message timestamp to start an active interval
-            if let Some(dt) = line_dt {
-                pending_user_ts = Some(dt);
-            }
-            // Extract user message text
-            if let Some(t) = val.get("message").and_then(extract_text_from_content) {
-                // Skip system-injected messages
-                if t.starts_with("<local-command-caveat>")
-                    || t.starts_with("<system-reminder>")
-                    || t.starts_with("<command-name>")
-                    || t.starts_with("<task-notification>")
-                {
-                    continue;
-                }
-                let truncated: String = t.chars().take(200).collect();
-                message_count += 1;
-                if first_question.is_none() {
-                    first_question = Some(truncated.clone());
-                }
-                last_question = Some(truncated);
-            }
+    if msg_type == "user" {
+        if let Some(dt) = line_dt {
+            state.pending_user_ts = Some(dt);
         }
-
-        if msg_type == "assistant" {
-            // Close an active interval: user_msg → assistant_response
-            if let (Some(user_dt), Some(asst_dt)) = (pending_user_ts.take(), line_dt) {
-                let interval = (asst_dt - user_dt).num_milliseconds().max(0);
-                active_elapsed_ms += interval;
-            }
-            // Extract model
-            if let Some(m) = val
-                .get("message")
-                .and_then(|msg| msg.get("model").and_then(|v| v.as_str()).map(String::from))
+        if let Some(t) = val.get("message").and_then(extract_text_from_content) {
+            if t.starts_with("<local-command-caveat>")
+                || t.starts_with("<system-reminder>")
+                || t.starts_with("<command-name>")
+                || t.starts_with("<task-notification>")
             {
-                model = Some(m);
+                return;
             }
-            // Extract usage from assistant messages
-            if let Some(usage) = val.get("message").and_then(|msg| msg.get("usage")) {
-                input_tokens += usage
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                output_tokens += usage
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                cache_read_tokens += usage
-                    .get("cache_read_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                cache_write_tokens += usage
-                    .get("cache_creation_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+            let truncated: String = t.chars().take(200).collect();
+            state.message_count += 1;
+            if state.first_question.is_none() {
+                state.first_question = Some(truncated.clone());
             }
-            // Extract cost
-            if let Some(cost) = val.get("costUSD").and_then(|v| v.as_f64()) {
-                total_cost_usd += cost;
-            }
+            state.last_question = Some(truncated);
         }
     }
 
-    // If there's a pending user message without a response (still active), count up to now
-    if let Some(user_dt) = pending_user_ts {
-        let now = chrono::Utc::now().fixed_offset();
-        let interval = (now - user_dt).num_milliseconds().max(0);
-        active_elapsed_ms += interval;
+    if msg_type == "assistant" {
+        if let (Some(user_dt), Some(asst_dt)) = (state.pending_user_ts.take(), line_dt) {
+            let interval = (asst_dt - user_dt).num_milliseconds().max(0);
+            state.completed_active_elapsed_ms += interval;
+        }
+        if let Some(m) = val
+            .get("message")
+            .and_then(|msg| msg.get("model").and_then(|v| v.as_str()).map(String::from))
+        {
+            state.model = Some(m);
+        }
+        if let Some(usage) = val.get("message").and_then(|msg| msg.get("usage")) {
+            state.input_tokens += usage
+                .get("input_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            state.output_tokens += usage
+                .get("output_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            state.cache_read_tokens += usage
+                .get("cache_read_input_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            state.cache_write_tokens += usage
+                .get("cache_creation_input_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+        }
+        if let Some(cost) = val.get("costUSD").and_then(|v| v.as_f64()) {
+            state.total_cost_usd += cost;
+        }
     }
+}
 
-    let sid = session_id.unwrap_or_else(|| {
-        // Derive from filename
+fn build_claude_session(
+    state: &ClaudeSessionState,
+    path: &Path,
+    workspace_path: &str,
+    project_name: &str,
+) -> Option<ClaudeSession> {
+    let sid = state.session_id.clone().unwrap_or_else(|| {
         path.file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".into())
     });
-
-    let total_tokens = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens;
-
-    // Use file timestamps as fallback
+    let total_tokens = state.input_tokens
+        + state.output_tokens
+        + state.cache_read_tokens
+        + state.cache_write_tokens;
     let file_modified = fs::metadata(path)
         .ok()
         .and_then(|m| m.modified().ok())
         .map(|t| chrono::DateTime::<Utc>::from(t).to_rfc3339());
-
     let fallback_ts = file_modified.unwrap_or_default();
+    let active_elapsed_ms = state.completed_active_elapsed_ms
+        + state
+            .pending_user_ts
+            .map(|user_dt| {
+                let now = chrono::Utc::now().fixed_offset();
+                (now - user_dt).num_milliseconds().max(0)
+            })
+            .unwrap_or(0);
+
     Some(ClaudeSession {
         session_id: sid,
         project_path: workspace_path.to_string(),
         project_name: project_name.to_string(),
         transcript_path: path.display().to_string(),
-        model,
-        started_at: first_timestamp.unwrap_or_else(|| fallback_ts.clone()),
-        last_activity_at: last_timestamp.unwrap_or(fallback_ts),
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
+        model: state.model.clone(),
+        started_at: state
+            .first_timestamp
+            .clone()
+            .unwrap_or_else(|| fallback_ts.clone()),
+        last_activity_at: state.last_timestamp.clone().unwrap_or(fallback_ts),
+        input_tokens: state.input_tokens,
+        output_tokens: state.output_tokens,
+        cache_read_tokens: state.cache_read_tokens,
+        cache_write_tokens: state.cache_write_tokens,
         total_tokens,
-        cost_usd: (total_cost_usd > 0.0).then_some(total_cost_usd),
-        message_count,
-        first_question,
-        last_question,
+        cost_usd: (state.total_cost_usd > 0.0).then_some(state.total_cost_usd),
+        message_count: state.message_count,
+        first_question: state.first_question.clone(),
+        last_question: state.last_question.clone(),
         active_elapsed_ms,
         workflow_hint: read_workflow_context(workspace_path),
     })
+}
+
+fn update_cached_claude_session(
+    cached: &mut CachedClaudeSession,
+    path: &Path,
+    workspace_path: &str,
+    project_name: &str,
+) -> Option<ClaudeSession> {
+    let delta = read_jsonl_delta(path, &mut cached.cursor).ok()?;
+    if delta.reset {
+        cached.state = ClaudeSessionState::default();
+    }
+    for line in delta.lines {
+        apply_claude_line(&mut cached.state, &line);
+    }
+    build_claude_session(&cached.state, path, workspace_path, project_name)
 }
 
 fn read_workflow_context(workspace_path: &str) -> Option<WorkflowContextFile> {
@@ -371,7 +422,7 @@ fn read_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {
     })
 }
 
-pub fn probe() -> ClaudeSnapshot {
+pub fn probe_with_cache(cache: &mut ClaudeProbeCache) -> ClaudeSnapshot {
     let config_dir = claude_config_dir();
     let projects_dir = config_dir.join("projects");
 
@@ -390,7 +441,7 @@ pub fn probe() -> ClaudeSnapshot {
     let active_session_hint = find_recent_session(&config_dir);
 
     // Scan real sessions
-    let sessions = scan_sessions(&config_dir);
+    let sessions = scan_sessions(&config_dir, Some(cache));
 
     // Read HUD usage cache for quota
     let quota = read_hud_usage_cache(&config_dir);
@@ -408,6 +459,11 @@ pub fn probe() -> ClaudeSnapshot {
         command_probes: vec![version_probe],
         file_probes: vec![config_probe, projects_probe],
     }
+}
+
+pub fn probe() -> ClaudeSnapshot {
+    let mut cache = ClaudeProbeCache::default();
+    probe_with_cache(&mut cache)
 }
 
 fn find_recent_session(config_dir: &Path) -> Option<String> {
@@ -429,6 +485,8 @@ fn find_recent_session(config_dir: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
 
     #[test]
@@ -458,5 +516,88 @@ mod tests {
             "/Users/dev/WorkSpace/OctoMonitor"
         );
         assert_eq!(decode_project_folder("plain-name"), "plain-name");
+    }
+
+    #[test]
+    fn cached_session_updates_only_with_new_jsonl_lines() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let transcript = temp_dir.path().join("session.jsonl");
+        std::fs::write(
+            &transcript,
+            concat!(
+                "{\"sessionId\":\"s1\",\"type\":\"user\",\"timestamp\":\"2026-04-01T00:00:00Z\",\"message\":{\"content\":\"hello\"}}\n",
+                "{\"type\":\"assistant\",\"timestamp\":\"2026-04-01T00:00:05Z\",\"message\":{\"model\":\"claude-3.7\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1}},\"costUSD\":0.5}\n"
+            ),
+        )
+        .expect("initial transcript");
+
+        let workspace_path = temp_dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace_path).expect("workspace dir");
+        let workspace = workspace_path.display().to_string();
+        let mut cached = CachedClaudeSession::default();
+
+        let first = update_cached_claude_session(&mut cached, &transcript, &workspace, "workspace")
+            .expect("first parse");
+        assert_eq!(first.message_count, 1);
+        assert_eq!(first.total_tokens, 18);
+        assert_eq!(first.active_elapsed_ms, 5_000);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .expect("append transcript");
+        writeln!(
+            file,
+            "{{\"type\":\"user\",\"timestamp\":\"2026-04-01T00:00:10Z\",\"message\":{{\"content\":\"follow up\"}}}}"
+        )
+        .expect("append user");
+        writeln!(
+            file,
+            "{{\"type\":\"assistant\",\"timestamp\":\"2026-04-01T00:00:14Z\",\"message\":{{\"model\":\"claude-3.7\",\"usage\":{{\"input_tokens\":7,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}},\"costUSD\":0.25}}"
+        )
+        .expect("append assistant");
+
+        let second =
+            update_cached_claude_session(&mut cached, &transcript, &workspace, "workspace")
+                .expect("second parse");
+        assert_eq!(second.message_count, 2);
+        assert_eq!(second.first_question.as_deref(), Some("hello"));
+        assert_eq!(second.last_question.as_deref(), Some("follow up"));
+        assert_eq!(second.total_tokens, 28);
+        assert_eq!(second.cost_usd, Some(0.75));
+        assert_eq!(second.active_elapsed_ms, 9_000);
+    }
+
+    #[test]
+    fn cached_session_resets_after_truncate() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let transcript = temp_dir.path().join("session.jsonl");
+        std::fs::write(
+            &transcript,
+            concat!(
+                "{\"sessionId\":\"s1\",\"type\":\"user\",\"timestamp\":\"2026-04-01T00:00:00Z\",\"message\":{\"content\":\"hello\"}}\n",
+                "{\"type\":\"assistant\",\"timestamp\":\"2026-04-01T00:00:05Z\",\"message\":{\"model\":\"claude-3.7\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1}},\"costUSD\":0.5}\n"
+            ),
+        )
+        .expect("initial transcript");
+
+        let workspace = temp_dir.path().display().to_string();
+        let mut cached = CachedClaudeSession::default();
+        update_cached_claude_session(&mut cached, &transcript, &workspace, "workspace")
+            .expect("first parse");
+
+        std::fs::write(
+            &transcript,
+            "{\"sessionId\":\"s2\",\"type\":\"assistant\",\"timestamp\":\"2026-04-02T00:00:02Z\",\"message\":{\"model\":\"claude-3.7\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}},\"costUSD\":0.1}\n",
+        )
+        .expect("truncate transcript");
+
+        let reset = update_cached_claude_session(&mut cached, &transcript, &workspace, "workspace")
+            .expect("reset parse");
+        assert_eq!(reset.session_id, "s2");
+        assert_eq!(reset.message_count, 0);
+        assert_eq!(reset.total_tokens, 3);
+        assert_eq!(reset.cost_usd, Some(0.1));
+        assert!(reset.first_question.is_none());
     }
 }

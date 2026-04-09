@@ -225,7 +225,7 @@ async fn try_commit_refreshed_payload(
 
 async fn refresh_bootstrap_once(state: &AppState) {
     let started_at = Instant::now();
-    let scanned = collect_probe_scan_isolated(true).await;
+    let scanned = collect_probe_scan_isolated(state, true).await;
 
     let mut attempts = 0usize;
     loop {
@@ -504,14 +504,24 @@ pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
     payload
 }
 
-async fn scan_adapters_isolated() -> (
+async fn scan_adapters_isolated(
+    state: &AppState,
+) -> (
     claude_adapter::ClaudeSnapshot,
     codex_adapter::CodexSnapshot,
     openclaw_adapter::OpenClawSnapshot,
 ) {
     let started_at = Instant::now();
+    let claude_cache = state.claude_probe_cache.clone();
     let (claude_probe, codex_probe, openclaw_probe) = tokio::join!(
-        run_probe_task("claude", claude_adapter::probe, failed_claude_snapshot),
+        run_probe_task(
+            "claude",
+            move || match claude_cache.try_lock() {
+                Ok(mut cache) => claude_adapter::probe_with_cache(&mut cache),
+                Err(_) => failed_claude_snapshot("probe cache busy after previous timeout".into()),
+            },
+            failed_claude_snapshot
+        ),
         run_probe_task("codex", codex_adapter::probe, failed_codex_snapshot),
         run_probe_task(
             "openclaw",
@@ -788,8 +798,11 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
     )
 }
 
-async fn collect_probe_scan_isolated(include_placeholder_runs: bool) -> ProbeScanResult {
-    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters_isolated().await;
+async fn collect_probe_scan_isolated(
+    state: &AppState,
+    include_placeholder_runs: bool,
+) -> ProbeScanResult {
+    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters_isolated(state).await;
     collect_probe_scan_from_snapshots(
         include_placeholder_runs,
         claude_probe,
@@ -798,8 +811,8 @@ async fn collect_probe_scan_isolated(include_placeholder_runs: bool) -> ProbeSca
     )
 }
 
-pub async fn collect_history_runs() -> Vec<RunRecord> {
-    collect_probe_scan_isolated(false).await.runs
+pub async fn collect_history_runs(state: &AppState) -> Vec<RunRecord> {
+    collect_probe_scan_isolated(state, false).await.runs
 }
 
 fn detect_local_ip() -> Option<String> {
