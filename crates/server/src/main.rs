@@ -2,12 +2,15 @@ mod commits;
 mod config;
 mod handlers;
 mod network;
+mod perf;
 mod platform;
 mod pricing;
 mod probe;
 mod remote_access;
 mod state;
 mod static_files;
+#[cfg(test)]
+mod test_support;
 mod watcher;
 mod workflows;
 
@@ -51,67 +54,18 @@ fn local_allowed_origins() -> Vec<HeaderValue> {
 fn build_cors_layer() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(local_allowed_origins())
-        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::PUT, Method::DELETE])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::PUT,
+            Method::DELETE,
+        ])
         .allow_headers([header::CONTENT_TYPE, header::ACCEPT])
 }
 
-fn apply_saved_config(initial: &mut octomonitor_core::BootstrapPayload) -> bool {
-    let Some(saved) = load_config() else {
-        return false;
-    };
-    if let Some(v) = saved.companion_enabled {
-        initial.config.companion_enabled = v;
-    }
-    let Some(days) = saved.history_days else {
-        return false;
-    };
-    let clamped = days.clamp(1, 180);
-    let needs_migration =
-        saved.version.unwrap_or(0) < SNAPSHOT_WINDOW_MIGRATION_VERSION && clamped == 7;
-    if needs_migration {
-        initial.config.history_days = 30;
-    } else {
-        initial.config.history_days = clamped;
-    }
-    needs_migration
-}
-
-fn parse_bind_ip(raw: Option<&str>) -> anyhow::Result<IpAddr> {
-    raw.unwrap_or("127.0.0.1")
-        .parse::<IpAddr>()
-        .map_err(|e| anyhow::anyhow!("Invalid OCTOMONITOR_BIND_ADDR: {e}"))
-}
-
-fn resolve_bind_addr() -> anyhow::Result<SocketAddr> {
-    let bind_ip = parse_bind_ip(std::env::var("OCTOMONITOR_BIND_ADDR").ok().as_deref())?;
-    Ok(SocketAddr::from((bind_ip, SERVER_PORT)))
-}
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_env_filter("info").init();
-
-    let pricing = PricingStore::new();
-    pricing.spawn_refresh();
-
-    let mut initial = empty_bootstrap();
-    let migrated = apply_saved_config(&mut initial);
-    if migrated {
-        save_config(&initial.config);
-    }
-
-    let wf_store = workflows::store::WorkflowStore::new(
-        workflows::store::WorkflowStore::default_base_dir(),
-    )
-    .expect("Failed to initialize workflow store");
-    let wf_coordinator = workflows::coordinator::WorkflowCoordinator::new(wf_store);
-
-    // Load workflow summaries into bootstrap
-    initial.workflow_runs = wf_coordinator.get_summary_list();
-
-    let state = AppState::new(initial, pricing, wf_coordinator);
-
-    let app = Router::new()
+pub(crate) fn build_app(state: AppState) -> Router {
+    Router::new()
         .route("/api/bootstrap", get(bootstrap::get_bootstrap))
         .route("/api/health", get(bootstrap::health))
         .route("/api/history/usage", get(history::get_usage_history))
@@ -156,7 +110,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/ingest/claude/hook", post(ingest::ingest_claude_hook))
         .route("/api/ingest/codex/hook", post(ingest::ingest_codex_hook))
         .route("/api/stream", get(stream::stream))
-        // Workflow routes
         .route("/api/workflows", get(wf::list_defs).post(wf::create_def))
         .route(
             "/api/workflows/{id}",
@@ -204,8 +157,66 @@ async fn main() -> anyhow::Result<()> {
             post(wf::approve_step),
         )
         .layer(build_cors_layer())
-        .with_state(state.clone())
-        .fallback(static_files::static_handler);
+        .with_state(state)
+        .fallback(static_files::static_handler)
+}
+
+fn apply_saved_config(initial: &mut octomonitor_core::BootstrapPayload) -> bool {
+    let Some(saved) = load_config() else {
+        return false;
+    };
+    if let Some(v) = saved.companion_enabled {
+        initial.config.companion_enabled = v;
+    }
+    let Some(days) = saved.history_days else {
+        return false;
+    };
+    let clamped = days.clamp(1, 180);
+    let needs_migration =
+        saved.version.unwrap_or(0) < SNAPSHOT_WINDOW_MIGRATION_VERSION && clamped == 7;
+    if needs_migration {
+        initial.config.history_days = 30;
+    } else {
+        initial.config.history_days = clamped;
+    }
+    needs_migration
+}
+
+fn parse_bind_ip(raw: Option<&str>) -> anyhow::Result<IpAddr> {
+    raw.unwrap_or("127.0.0.1")
+        .parse::<IpAddr>()
+        .map_err(|e| anyhow::anyhow!("Invalid OCTOMONITOR_BIND_ADDR: {e}"))
+}
+
+fn resolve_bind_addr() -> anyhow::Result<SocketAddr> {
+    let bind_ip = parse_bind_ip(std::env::var("OCTOMONITOR_BIND_ADDR").ok().as_deref())?;
+    Ok(SocketAddr::from((bind_ip, SERVER_PORT)))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt().with_env_filter("info").init();
+
+    let pricing = PricingStore::new();
+    pricing.spawn_refresh();
+
+    let mut initial = empty_bootstrap();
+    let migrated = apply_saved_config(&mut initial);
+    if migrated {
+        save_config(&initial.config);
+    }
+
+    let wf_store =
+        workflows::store::WorkflowStore::new(workflows::store::WorkflowStore::default_base_dir())
+            .expect("Failed to initialize workflow store");
+    let wf_coordinator = workflows::coordinator::WorkflowCoordinator::new(wf_store);
+
+    // Load workflow summaries into bootstrap
+    initial.workflow_runs = wf_coordinator.get_summary_list();
+
+    let state = AppState::new(initial, pricing, wf_coordinator);
+
+    let app = build_app(state.clone());
 
     let addr = resolve_bind_addr()?;
     let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {

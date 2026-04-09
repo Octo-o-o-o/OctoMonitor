@@ -75,7 +75,7 @@ pub fn spawn_fs_watcher(state: AppState) {
                             "FS change detected ({} events), waking probe",
                             events.len()
                         );
-                        state.wake_probe();
+                        state.wake_probe_with_reason("fs_watcher");
                     }
                 }
                 Ok(Err(err)) => {

@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, OnceLock},
+    time::Instant,
 };
 
 use chrono::{DateTime, Utc};
@@ -11,6 +12,7 @@ use octomonitor_core::{
     SourceConfidence, ToolKind, VcsContext,
 };
 
+use crate::perf;
 use crate::pricing::PricingStore;
 
 const PRE_COMMIT_GRACE_MS: i64 = 20 * 60 * 1000;
@@ -95,9 +97,7 @@ pub fn discover_vcs_context(path: &str) -> Option<VcsContext> {
         )),
         &git_dir,
     );
-    let is_git_dir = common_dir
-        .file_name()
-        .is_some_and(|name| name == ".git");
+    let is_git_dir = common_dir.file_name().is_some_and(|name| name == ".git");
     let repo_root = if is_git_dir {
         common_dir
             .parent()
@@ -157,6 +157,7 @@ pub fn build_commit_records(
     pricing: &PricingStore,
     history_cutoff: DateTime<Utc>,
 ) -> Vec<CommitRecord> {
+    let started_at = Instant::now();
     let mut repo_runs: HashMap<String, Vec<&RunRecord>> = HashMap::new();
     let mut repo_contexts: HashMap<String, VcsContext> = HashMap::new();
     let run_index = runs
@@ -171,12 +172,10 @@ pub fn build_commit_records(
         repo_contexts
             .entry(vcs.repo_id.clone())
             .or_insert_with(|| vcs.clone());
-        repo_runs
-            .entry(vcs.repo_id.clone())
-            .or_default()
-            .push(run);
+        repo_runs.entry(vcs.repo_id.clone()).or_default().push(run);
     }
 
+    let repo_count = repo_contexts.len();
     let mut out = Vec::new();
 
     for (repo_id, repo_vcs) in repo_contexts {
@@ -330,6 +329,14 @@ pub fn build_commit_records(
     }
 
     out.sort_by(|a, b| b.committed_at.cmp(&a.committed_at));
+    perf::log_elapsed_with_details("build_commit_records", started_at, || {
+        format!(
+            "runs={} repos={} commits={}",
+            runs.len(),
+            repo_count,
+            out.len()
+        )
+    });
     out
 }
 
@@ -544,7 +551,9 @@ fn allocate_proportionally(total: u64, weights: &[f64]) -> Vec<u64> {
 
 fn primary_worktree(commit: &ScannedCommit) -> (Option<String>, Option<String>) {
     fn sole_element(set: &BTreeSet<String>) -> Option<String> {
-        (set.len() == 1).then(|| set.iter().next().cloned()).flatten()
+        (set.len() == 1)
+            .then(|| set.iter().next().cloned())
+            .flatten()
     }
     (
         sole_element(&commit.worktree_ids),

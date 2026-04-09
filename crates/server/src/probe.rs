@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::UdpSocket;
+use std::time::Instant;
 
 use chrono::Utc;
 use octomonitor_claude_adapter as claude_adapter;
@@ -12,6 +13,7 @@ use octomonitor_core::{
 use octomonitor_openclaw_adapter as openclaw_adapter;
 
 use crate::commits::{build_commit_records, hydrate_run_vcs};
+use crate::perf;
 use crate::platform::last_path_component;
 use crate::pricing::PricingStore;
 use crate::state::AppState;
@@ -70,6 +72,7 @@ pub fn empty_bootstrap() -> BootstrapPayload {
 }
 
 async fn refresh_bootstrap_once(state: &AppState) {
+    let started_at = Instant::now();
     let preserved = state.bootstrap.read().await.clone();
     let pricing = state.pricing.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -81,16 +84,17 @@ async fn refresh_bootstrap_once(state: &AppState) {
 
     match result {
         Ok(mut refreshed) => {
-            refreshed.workflow_runs = state
-                .workflow_coordinator
-                .lock()
-                .await
-                .get_summary_list();
+            refreshed.workflow_runs = state.workflow_coordinator.lock().await.get_summary_list();
+            perf::log_bootstrap_payload("refresh_bootstrap_once", &refreshed);
             *state.bootstrap.write().await = refreshed;
             state.signal_change();
+            perf::log_elapsed("refresh_bootstrap_once", started_at);
         }
         Err(e) => {
             tracing::error!("Probe thread panicked: {e}; will retry next cycle");
+            perf::log_elapsed_with_details("refresh_bootstrap_once", started_at, || {
+                format!("status=join_error error={e}")
+            });
         }
     }
 }
@@ -122,6 +126,7 @@ fn merge_runtime_state(
     previous: &BootstrapPayload,
     pricing: &PricingStore,
 ) {
+    let started_at = Instant::now();
     target.config = previous.config.clone();
 
     let mut run_map: HashMap<String, RunRecord> = target
@@ -169,6 +174,13 @@ fn merge_runtime_state(
     target.recent_completions = completions;
 
     rebuild_derived(target, pricing);
+    perf::log_elapsed_with_details("merge_runtime_state", started_at, || {
+        format!(
+            "runs={} completions={}",
+            target.runs.len(),
+            target.recent_completions.len()
+        )
+    });
 }
 
 fn same_underlying_run(a: &RunRecord, b: &RunRecord) -> bool {
@@ -247,6 +259,7 @@ fn apply_history_window(payload: &mut BootstrapPayload) {
 }
 
 pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
+    let started_at = Instant::now();
     let mut payload = empty_bootstrap();
     let scanned = collect_probe_scan(true);
     payload.runs = scanned.runs;
@@ -256,6 +269,15 @@ pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
     rebuild_derived(&mut payload, pricing);
     payload.config.local_ip = detect_local_ip();
     payload.generated_at = scanned.generated_at;
+    perf::log_bootstrap_payload("build_bootstrap", &payload);
+    perf::log_elapsed_with_details("build_bootstrap", started_at, || {
+        format!(
+            "runs={} commits={} usage_buckets={}",
+            payload.runs.len(),
+            payload.commits.len(),
+            payload.usage_buckets.len()
+        )
+    });
     payload
 }
 
@@ -264,6 +286,7 @@ fn scan_adapters() -> (
     codex_adapter::CodexSnapshot,
     openclaw_adapter::OpenClawSnapshot,
 ) {
+    let started_at = Instant::now();
     let (claude_probe, codex_probe, openclaw_probe) = std::thread::scope(|s| {
         let h1 = s.spawn(claude_adapter::probe);
         let h2 = s.spawn(codex_adapter::probe);
@@ -281,6 +304,14 @@ fn scan_adapters() -> (
                 tracing::error!("openclaw probe panicked: {e:?}");
                 openclaw_adapter::probe()
             }),
+        )
+    });
+    perf::log_elapsed_with_details("scan_adapters", started_at, || {
+        format!(
+            "claude_sessions={} codex_sessions={} openclaw_sessions={}",
+            claude_probe.sessions.len(),
+            codex_probe.sessions.len(),
+            openclaw_probe.sessions.len()
         )
     });
     (claude_probe, codex_probe, openclaw_probe)
@@ -326,6 +357,7 @@ fn make_adapter_health(
 }
 
 fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
+    let started_at = Instant::now();
     let now = Utc::now().to_rfc3339();
     let (claude_probe, codex_probe, openclaw_probe) = scan_adapters();
     let mut runs: Vec<RunRecord> = Vec::new();
@@ -335,7 +367,12 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
             runs.push(build_probe_run_from_claude(&claude_probe));
         }
     } else {
-        runs.extend(claude_probe.sessions.iter().map(|s| build_run_from_claude_session(s, &claude_probe)));
+        runs.extend(
+            claude_probe
+                .sessions
+                .iter()
+                .map(|s| build_run_from_claude_session(s, &claude_probe)),
+        );
     }
 
     if codex_probe.sessions.is_empty() {
@@ -343,7 +380,12 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
             runs.push(build_probe_run_from_codex(&codex_probe));
         }
     } else {
-        runs.extend(codex_probe.sessions.iter().map(|s| build_run_from_codex_session(s, &codex_probe)));
+        runs.extend(
+            codex_probe
+                .sessions
+                .iter()
+                .map(|s| build_run_from_codex_session(s, &codex_probe)),
+        );
     }
 
     if openclaw_probe.sessions.is_empty() {
@@ -351,7 +393,12 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
             runs.push(build_probe_run_from_openclaw(&openclaw_probe));
         }
     } else {
-        runs.extend(openclaw_probe.sessions.iter().map(|s| build_run_from_openclaw_session(s, &openclaw_probe)));
+        runs.extend(
+            openclaw_probe
+                .sessions
+                .iter()
+                .map(|s| build_run_from_openclaw_session(s, &openclaw_probe)),
+        );
     }
 
     dedupe_runs(&mut runs);
@@ -405,9 +452,21 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
         "sessions-scan+probe"
     };
 
-    let claude_error = claude_probe.command_probes.iter().find(|p| !p.success).and_then(|p| p.error.clone());
-    let codex_error = codex_probe.command_probes.iter().find(|p| !p.success).and_then(|p| p.error.clone());
-    let openclaw_error = openclaw_probe.command_probes.iter().find(|p| !p.success).and_then(|p| p.error.clone());
+    let claude_error = claude_probe
+        .command_probes
+        .iter()
+        .find(|p| !p.success)
+        .and_then(|p| p.error.clone());
+    let codex_error = codex_probe
+        .command_probes
+        .iter()
+        .find(|p| !p.success)
+        .and_then(|p| p.error.clone());
+    let openclaw_error = openclaw_probe
+        .command_probes
+        .iter()
+        .find(|p| !p.success)
+        .and_then(|p| p.error.clone());
 
     let adapter_health = vec![
         make_adapter_health(
@@ -447,13 +506,23 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
         })
         .collect();
 
-    ProbeScanResult {
+    let result = ProbeScanResult {
         generated_at: now,
         runs,
         identities,
         adapter_health,
         pending_crons,
-    }
+    };
+    perf::log_elapsed_with_details("collect_probe_scan", started_at, || {
+        format!(
+            "runs={} identities={} adapter_health={} pending_crons={}",
+            result.runs.len(),
+            result.identities.len(),
+            result.adapter_health.len(),
+            result.pending_crons.len()
+        )
+    });
+    result
 }
 
 fn detect_local_ip() -> Option<String> {
@@ -547,13 +616,16 @@ fn build_run_from_claude_session(
         vcs: crate::commits::discover_vcs_context(&session.project_path),
         origin_label: None,
         origin_provider: None,
-        workflow_hint: session.workflow_hint.as_ref().map(|wh| octomonitor_core::WorkflowHint {
-            workflow_id: wh.workflow_id.clone(),
-            step_id: wh.step_id.clone(),
-            parent_step_id: wh.parent_step_id.clone(),
-            artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
-            updated_at: wh.updated_at.clone(),
-        }),
+        workflow_hint: session
+            .workflow_hint
+            .as_ref()
+            .map(|wh| octomonitor_core::WorkflowHint {
+                workflow_id: wh.workflow_id.clone(),
+                step_id: wh.step_id.clone(),
+                parent_step_id: wh.parent_step_id.clone(),
+                artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
+                updated_at: wh.updated_at.clone(),
+            }),
     }
 }
 
@@ -669,13 +741,16 @@ fn build_run_from_codex_session(
             .and_then(crate::commits::discover_vcs_context),
         origin_label: None,
         origin_provider: None,
-        workflow_hint: session.workflow_hint.as_ref().map(|wh| octomonitor_core::WorkflowHint {
-            workflow_id: wh.workflow_id.clone(),
-            step_id: wh.step_id.clone(),
-            parent_step_id: wh.parent_step_id.clone(),
-            artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
-            updated_at: wh.updated_at.clone(),
-        }),
+        workflow_hint: session
+            .workflow_hint
+            .as_ref()
+            .map(|wh| octomonitor_core::WorkflowHint {
+                workflow_id: wh.workflow_id.clone(),
+                step_id: wh.step_id.clone(),
+                parent_step_id: wh.parent_step_id.clone(),
+                artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
+                updated_at: wh.updated_at.clone(),
+            }),
     }
 }
 
@@ -1186,6 +1261,7 @@ pub fn build_commit_history(
 }
 
 pub fn rebuild_derived(payload: &mut BootstrapPayload, pricing: &PricingStore) {
+    let started_at = Instant::now();
     apply_history_window(payload);
     for run in &mut payload.runs {
         normalize_run_token_totals(run);
@@ -1199,6 +1275,15 @@ pub fn rebuild_derived(payload: &mut BootstrapPayload, pricing: &PricingStore) {
         .iter()
         .filter_map(build_attention_from_run)
         .collect();
+    perf::log_elapsed_with_details("rebuild_derived", started_at, || {
+        format!(
+            "runs={} usage_buckets={} commits={} attentions={}",
+            payload.runs.len(),
+            payload.usage_buckets.len(),
+            payload.commits.len(),
+            payload.attentions.len()
+        )
+    });
 }
 
 pub fn build_attention_from_run(run: &RunRecord) -> Option<AttentionItem> {

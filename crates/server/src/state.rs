@@ -4,6 +4,7 @@ use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 use octomonitor_companion::{PairingRecord, ViewerSession};
 use octomonitor_core::BootstrapPayload;
 
+use crate::perf;
 use crate::pricing::PricingStore;
 use crate::workflows::coordinator::WorkflowCoordinator;
 
@@ -41,6 +42,11 @@ impl AppState {
     }
 
     pub fn wake_probe(&self) {
+        self.wake_probe_with_reason("unspecified");
+    }
+
+    pub fn wake_probe_with_reason(&self, reason: &'static str) {
+        perf::log_probe_wake(reason);
         self.probe_wake.notify_one();
     }
 

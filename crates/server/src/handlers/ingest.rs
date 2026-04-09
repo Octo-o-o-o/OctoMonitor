@@ -6,6 +6,7 @@ use octomonitor_core::{
 };
 use serde::Deserialize;
 
+use crate::perf;
 use crate::platform::last_path_component;
 use crate::probe::{elapsed_from_timestamps, rebuild_derived, shorten_path};
 use crate::state::AppState;
@@ -155,7 +156,8 @@ pub async fn ingest_claude_statusline(
         origin_provider: None,
         workflow_hint: None,
     };
-    upsert_runtime_run(&state, run).await;
+    perf::log_ingest_event("claude_statusline", &run.id);
+    upsert_runtime_run(&state, run, "ingest_claude_statusline").await;
     Json(serde_json::json!({"ok": true}))
 }
 
@@ -225,7 +227,8 @@ pub async fn ingest_claude_hook(
         workflow_hint: wf_hint.clone(),
     };
     let run_id = run.id.clone();
-    upsert_runtime_run(&state, run).await;
+    perf::log_ingest_event("claude_hook", &run_id);
+    upsert_runtime_run(&state, run, "ingest_claude_hook").await;
     if let Some(hint) = wf_hint {
         notify_coordinator(&state, &run_id, &hint).await;
     }
@@ -305,14 +308,15 @@ pub async fn ingest_codex_hook(
         workflow_hint: wf_hint.clone(),
     };
     let run_id = run.id.clone();
-    upsert_runtime_run(&state, run).await;
+    perf::log_ingest_event("codex_hook", &run_id);
+    upsert_runtime_run(&state, run, "ingest_codex_hook").await;
     if let Some(hint) = wf_hint {
         notify_coordinator(&state, &run_id, &hint).await;
     }
     Json(serde_json::json!({"ok": true}))
 }
 
-async fn upsert_runtime_run(state: &AppState, mut run: RunRecord) {
+async fn upsert_runtime_run(state: &AppState, mut run: RunRecord, wake_reason: &'static str) {
     let mut payload = state.bootstrap.write().await;
     if let Some(existing) = payload.runs.iter_mut().find(|item| item.id == run.id) {
         run.started_at = existing.started_at.clone();
@@ -325,7 +329,7 @@ async fn upsert_runtime_run(state: &AppState, mut run: RunRecord) {
     payload.generated_at = Utc::now().to_rfc3339();
     drop(payload);
     state.signal_change();
-    state.wake_probe();
+    state.wake_probe_with_reason(wake_reason);
 }
 
 /// When an ingest event carries workflow hints, attempt to auto-link the run to the matching step.

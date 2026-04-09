@@ -30,7 +30,7 @@ pub async fn patch_config(
     let config = payload.config.clone();
     drop(payload);
     if history_changed {
-        state.wake_probe();
+        state.wake_probe_with_reason("config_patch");
     }
     state.signal_change();
     Json(config)

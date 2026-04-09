@@ -29,6 +29,7 @@ octomonitor-openclaw-adapter = { path = "../adapters/openclaw" }
 
 [dev-dependencies]
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
 
 [[bin]]
 name = "octomonitor-server"
