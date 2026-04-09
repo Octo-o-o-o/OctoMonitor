@@ -4,10 +4,9 @@ use std::{
 };
 
 use axum::{
-    body::{to_bytes, Body},
-    http::{Request, Response, StatusCode},
+    body::Body,
+    http::{Request, Response},
 };
-use serde::de::DeserializeOwned;
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
@@ -48,19 +47,6 @@ impl ServerTestHarness {
             .oneshot(request)
             .await
             .expect("request should succeed")
-    }
-
-    pub(crate) async fn request_json<T: DeserializeOwned>(
-        &self,
-        request: Request<Body>,
-    ) -> (StatusCode, T) {
-        let response = self.request(request).await;
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body bytes");
-        let value = serde_json::from_slice(&body).expect("json body");
-        (status, value)
     }
 }
 

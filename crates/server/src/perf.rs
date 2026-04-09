@@ -16,19 +16,6 @@ fn perf_logging_enabled() -> bool {
     })
 }
 
-pub fn log_elapsed(operation: &'static str, started_at: Instant) {
-    if !perf_logging_enabled() {
-        return;
-    }
-
-    tracing::info!(
-        target: "octomonitor::perf",
-        operation,
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
-        "perf span complete"
-    );
-}
-
 pub fn log_elapsed_with_details(
     operation: &'static str,
     started_at: Instant,

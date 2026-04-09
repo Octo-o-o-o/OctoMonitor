@@ -62,10 +62,6 @@ impl AppState {
         let _ = self.notify.send(());
     }
 
-    pub fn wake_probe(&self) {
-        self.wake_probe_with_reason("unspecified");
-    }
-
     pub fn wake_probe_with_reason(&self, reason: &'static str) {
         perf::log_probe_wake(reason);
         self.probe_wake.notify_one();
