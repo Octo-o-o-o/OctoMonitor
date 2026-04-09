@@ -36,6 +36,7 @@ pub async fn patch_config(
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
     let config = payload.config.clone();
+    state.bump_revision();
     drop(payload);
     if history_changed {
         state.wake_probe_with_reason("config_patch");

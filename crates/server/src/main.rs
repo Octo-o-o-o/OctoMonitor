@@ -29,7 +29,7 @@ use handlers::{
     pairing, remote, stream, workflows as wf,
 };
 use pricing::PricingStore;
-use probe::{empty_bootstrap, spawn_probe_refresh};
+use probe::{empty_bootstrap, spawn_derive_refresh, spawn_probe_refresh};
 use remote_access::spawn_remote_server;
 use state::AppState;
 
@@ -235,6 +235,7 @@ async fn main() -> anyhow::Result<()> {
     let open_browser = std::env::var("OCTOMONITOR_NO_OPEN").is_err();
     tracing::info!("OctoMonitor server listening on http://{}", addr);
     spawn_probe_refresh(state.clone());
+    spawn_derive_refresh(state.clone());
     watcher::spawn_fs_watcher(state.clone());
     spawn_remote_server(state.clone());
     if open_browser {

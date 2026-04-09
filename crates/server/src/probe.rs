@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::UdpSocket;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use octomonitor_claude_adapter as claude_adapter;
@@ -20,12 +20,17 @@ use crate::state::AppState;
 
 const PROBE_ACTIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const PROBE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+#[cfg(test)]
+const DERIVE_DEBOUNCE: Duration = Duration::from_millis(20);
+#[cfg(not(test))]
+const DERIVE_DEBOUNCE: Duration = Duration::from_millis(250);
 const MAX_BOOTSTRAP_RUNS: usize = 1_500;
 const MAX_BOOTSTRAP_COMMITS: usize = 2_000;
 const MAX_HISTORY_USAGE_RUNS: usize = 20_000;
 const MAX_HISTORY_COMMITS: usize = 5_000;
 const MAX_HISTORY_LINKED_RUNS: usize = 20_000;
 
+#[derive(Clone)]
 struct ProbeScanResult {
     generated_at: String,
     runs: Vec<RunRecord>,
@@ -71,28 +76,140 @@ pub fn empty_bootstrap() -> BootstrapPayload {
     payload
 }
 
+fn bootstrap_from_scan(scanned: ProbeScanResult) -> BootstrapPayload {
+    let mut payload = empty_bootstrap();
+    payload.generated_at = scanned.generated_at;
+    payload.runs = scanned.runs;
+    payload.identities = scanned.identities;
+    payload.adapter_health = scanned.adapter_health;
+    payload.pending_crons = scanned.pending_crons;
+    payload
+}
+
+fn replace_derived_sections(target: &mut BootstrapPayload, derived: BootstrapPayload) {
+    let BootstrapPayload {
+        generated_at,
+        runs,
+        attentions,
+        usage_buckets,
+        commits,
+        recent_completions,
+        ..
+    } = derived;
+    target.generated_at = generated_at;
+    target.runs = runs;
+    target.attentions = attentions;
+    target.usage_buckets = usage_buckets;
+    target.commits = commits;
+    target.recent_completions = recent_completions;
+}
+
+async fn try_commit_refreshed_payload(
+    state: &AppState,
+    refreshed: BootstrapPayload,
+    expected_revision: u64,
+) -> bool {
+    let mut payload = state.bootstrap.write().await;
+    if state.current_revision() != expected_revision {
+        return false;
+    }
+    *payload = refreshed;
+    state.bump_revision();
+    drop(payload);
+    state.signal_change();
+    true
+}
+
 async fn refresh_bootstrap_once(state: &AppState) {
     let started_at = Instant::now();
-    let preserved = state.bootstrap.read().await.clone();
+    let scan_result = tokio::task::spawn_blocking(|| collect_probe_scan(true)).await;
+
+    let scanned = match scan_result {
+        Ok(scanned) => scanned,
+        Err(e) => {
+            tracing::error!("Probe scan thread panicked: {e}; will retry next cycle");
+            perf::log_elapsed_with_details("refresh_bootstrap_once", started_at, || {
+                format!("status=scan_join_error error={e}")
+            });
+            return;
+        }
+    };
+
+    let mut attempts = 0usize;
+    loop {
+        attempts += 1;
+        let (expected_revision, preserved) = state.snapshot_bootstrap().await;
+        let pricing = state.pricing.clone();
+        let scanned_for_merge = scanned.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut refreshed = bootstrap_from_scan(scanned_for_merge);
+            merge_runtime_state(&mut refreshed, &preserved, &pricing);
+            refreshed
+        })
+        .await;
+
+        match result {
+            Ok(mut refreshed) => {
+                refreshed.workflow_runs =
+                    state.workflow_coordinator.lock().await.get_summary_list();
+                perf::log_bootstrap_payload("refresh_bootstrap_once", &refreshed);
+                if try_commit_refreshed_payload(state, refreshed, expected_revision).await {
+                    perf::log_elapsed_with_details("refresh_bootstrap_once", started_at, || {
+                        format!("status=applied attempts={attempts}")
+                    });
+                    return;
+                }
+            }
+            Err(e) => {
+                tracing::error!("Probe merge thread panicked: {e}; will retry next cycle");
+                perf::log_elapsed_with_details("refresh_bootstrap_once", started_at, || {
+                    format!("status=merge_join_error attempts={attempts} error={e}")
+                });
+                return;
+            }
+        }
+    }
+}
+
+async fn refresh_derived_once(state: &AppState) {
+    let started_at = Instant::now();
+    let (expected_revision, snapshot) = state.snapshot_bootstrap().await;
     let pricing = state.pricing.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let mut fresh = build_bootstrap(&pricing);
-        merge_runtime_state(&mut fresh, &preserved, &pricing);
-        fresh
+        let mut derived = snapshot;
+        rebuild_derived(&mut derived, &pricing);
+        derived.generated_at = Utc::now().to_rfc3339();
+        derived
     })
     .await;
 
     match result {
-        Ok(mut refreshed) => {
-            refreshed.workflow_runs = state.workflow_coordinator.lock().await.get_summary_list();
-            perf::log_bootstrap_payload("refresh_bootstrap_once", &refreshed);
-            *state.bootstrap.write().await = refreshed;
+        Ok(derived) => {
+            if state.current_revision() != expected_revision {
+                perf::log_elapsed_with_details("refresh_derived_once", started_at, || {
+                    format!("status=stale revision={expected_revision}")
+                });
+                return;
+            }
+
+            let mut payload = state.bootstrap.write().await;
+            if state.current_revision() != expected_revision {
+                perf::log_elapsed_with_details("refresh_derived_once", started_at, || {
+                    format!("status=stale_after_lock revision={expected_revision}")
+                });
+                return;
+            }
+
+            replace_derived_sections(&mut payload, derived);
+            drop(payload);
             state.signal_change();
-            perf::log_elapsed("refresh_bootstrap_once", started_at);
+            perf::log_elapsed_with_details("refresh_derived_once", started_at, || {
+                format!("status=applied revision={expected_revision}")
+            });
         }
         Err(e) => {
-            tracing::error!("Probe thread panicked: {e}; will retry next cycle");
-            perf::log_elapsed_with_details("refresh_bootstrap_once", started_at, || {
+            tracing::error!("Derived refresh thread panicked: {e}; will retry on next dirty run");
+            perf::log_elapsed_with_details("refresh_derived_once", started_at, || {
                 format!("status=join_error error={e}")
             });
         }
@@ -115,6 +232,26 @@ pub fn spawn_probe_refresh(state: AppState) {
             }
 
             refresh_bootstrap_once(&state).await;
+        }
+    });
+}
+
+pub fn spawn_derive_refresh(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            state.derive_wake.notified().await;
+            tokio::time::sleep(DERIVE_DEBOUNCE).await;
+            if !state.take_derive_dirty() {
+                continue;
+            }
+
+            loop {
+                refresh_derived_once(&state).await;
+                if !state.take_derive_dirty() {
+                    break;
+                }
+                tokio::time::sleep(DERIVE_DEBOUNCE).await;
+            }
         }
     });
 }
@@ -260,15 +397,9 @@ fn apply_history_window(payload: &mut BootstrapPayload) {
 
 pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
     let started_at = Instant::now();
-    let mut payload = empty_bootstrap();
     let scanned = collect_probe_scan(true);
-    payload.runs = scanned.runs;
-    payload.identities = scanned.identities;
-    payload.adapter_health = scanned.adapter_health;
-    payload.pending_crons = scanned.pending_crons;
+    let mut payload = bootstrap_from_scan(scanned);
     rebuild_derived(&mut payload, pricing);
-    payload.config.local_ip = detect_local_ip();
-    payload.generated_at = scanned.generated_at;
     perf::log_bootstrap_payload("build_bootstrap", &payload);
     perf::log_elapsed_with_details("build_bootstrap", started_at, || {
         format!(
@@ -1318,10 +1449,23 @@ pub fn tool_key(tool: &ToolKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        state::AppState,
+        workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore},
+    };
     use octomonitor_core::CompletionRecord;
 
     fn pricing_store() -> PricingStore {
         PricingStore::new()
+    }
+
+    fn test_state() -> AppState {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let store = WorkflowStore::new(temp_dir.path().join("workflows")).expect("workflow store");
+        let coordinator = WorkflowCoordinator::new(store);
+        let mut bootstrap = empty_bootstrap();
+        bootstrap.workflow_runs = coordinator.get_summary_list();
+        AppState::new(bootstrap, PricingStore::new(), coordinator)
     }
 
     fn run(
@@ -1409,6 +1553,16 @@ mod tests {
                 local_ip: None,
             },
             workflow_runs: Vec::new(),
+        }
+    }
+
+    fn scan_with_runs(runs: Vec<RunRecord>) -> ProbeScanResult {
+        ProbeScanResult {
+            generated_at: Utc::now().to_rfc3339(),
+            runs,
+            identities: Vec::new(),
+            adapter_health: Vec::new(),
+            pending_crons: Vec::new(),
         }
     }
 
@@ -1864,6 +2018,67 @@ mod tests {
         );
         assert_eq!(classify_openclaw_session_state(&failed), RunState::Error);
         assert_eq!(classify_openclaw_session_state(&done), RunState::Completed);
+    }
+
+    #[tokio::test]
+    async fn refreshed_probe_payload_reuses_scan_after_revision_conflict() {
+        let pricing = pricing_store();
+        let state = test_state();
+        let now = Utc::now();
+
+        {
+            let mut payload = state.bootstrap.write().await;
+            payload.runs.push(run(
+                "ingest-codex-existing",
+                ToolKind::Codex,
+                RunState::Active,
+                &(now - chrono::Duration::minutes(20)).to_rfc3339(),
+                &(now - chrono::Duration::minutes(5)).to_rfc3339(),
+            ));
+            state.bump_revision();
+        }
+
+        let (stale_revision, stale_snapshot) = state.snapshot_bootstrap().await;
+        let scanned = scan_with_runs(vec![run(
+            "probe-codex-new",
+            ToolKind::Codex,
+            RunState::Completed,
+            &(now - chrono::Duration::minutes(15)).to_rfc3339(),
+            &(now - chrono::Duration::minutes(1)).to_rfc3339(),
+        )]);
+
+        {
+            let mut payload = state.bootstrap.write().await;
+            payload.runs.push(run(
+                "ingest-codex-later",
+                ToolKind::Codex,
+                RunState::Active,
+                &(now - chrono::Duration::minutes(10)).to_rfc3339(),
+                &now.to_rfc3339(),
+            ));
+            state.bump_revision();
+        }
+
+        let mut stale_refresh = bootstrap_from_scan(scanned.clone());
+        merge_runtime_state(&mut stale_refresh, &stale_snapshot, &pricing);
+        stale_refresh.workflow_runs = Vec::new();
+        assert!(!try_commit_refreshed_payload(&state, stale_refresh, stale_revision).await);
+
+        let (fresh_revision, latest_snapshot) = state.snapshot_bootstrap().await;
+        let mut refreshed = bootstrap_from_scan(scanned);
+        merge_runtime_state(&mut refreshed, &latest_snapshot, &pricing);
+        refreshed.workflow_runs = Vec::new();
+        assert!(try_commit_refreshed_payload(&state, refreshed, fresh_revision).await);
+
+        let payload = state.bootstrap.read().await;
+        let ids = payload
+            .runs
+            .iter()
+            .map(|run| run.id.as_str())
+            .collect::<Vec<_>>();
+        assert!(ids.contains(&"probe-codex-new"));
+        assert!(ids.contains(&"ingest-codex-existing"));
+        assert!(ids.contains(&"ingest-codex-later"));
     }
 }
 

@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
 use tokio::sync::{broadcast, Mutex, Notify, RwLock};
 
 use octomonitor_companion::{PairingRecord, ViewerSession};
@@ -15,6 +18,9 @@ pub struct AppState {
     pub viewer_sessions: Arc<RwLock<Vec<ViewerSession>>>,
     pub notify: broadcast::Sender<()>,
     pub probe_wake: Arc<Notify>,
+    pub derive_wake: Arc<Notify>,
+    pub derive_dirty: Arc<AtomicBool>,
+    pub revision: Arc<AtomicU64>,
     pub pricing: PricingStore,
     pub workflow_coordinator: Arc<Mutex<WorkflowCoordinator>>,
 }
@@ -32,6 +38,9 @@ impl AppState {
             viewer_sessions: Arc::new(RwLock::new(Vec::new())),
             notify,
             probe_wake: Arc::new(Notify::new()),
+            derive_wake: Arc::new(Notify::new()),
+            derive_dirty: Arc::new(AtomicBool::new(false)),
+            revision: Arc::new(AtomicU64::new(0)),
             pricing,
             workflow_coordinator: Arc::new(Mutex::new(workflow_coordinator)),
         }
@@ -48,6 +57,29 @@ impl AppState {
     pub fn wake_probe_with_reason(&self, reason: &'static str) {
         perf::log_probe_wake(reason);
         self.probe_wake.notify_one();
+    }
+
+    pub fn current_revision(&self) -> u64 {
+        self.revision.load(Ordering::SeqCst)
+    }
+
+    pub fn bump_revision(&self) -> u64 {
+        self.revision.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub async fn snapshot_bootstrap(&self) -> (u64, BootstrapPayload) {
+        let payload = self.bootstrap.read().await;
+        let revision = self.current_revision();
+        (revision, payload.clone())
+    }
+
+    pub fn mark_derive_dirty(&self) {
+        self.derive_dirty.store(true, Ordering::SeqCst);
+        self.derive_wake.notify_one();
+    }
+
+    pub fn take_derive_dirty(&self) -> bool {
+        self.derive_dirty.swap(false, Ordering::SeqCst)
     }
 
     pub async fn clear_remote_access_state(&self) {

@@ -38,6 +38,7 @@ pub async fn patch_remote_access(
             payload.config.companion_enabled = previous_enabled;
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
+        state.bump_revision();
         drop(payload);
 
         if !enabled {
