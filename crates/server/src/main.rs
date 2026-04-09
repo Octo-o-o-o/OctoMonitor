@@ -203,7 +203,9 @@ async fn main() -> anyhow::Result<()> {
     let mut initial = empty_bootstrap();
     let migrated = apply_saved_config(&mut initial);
     if migrated {
-        save_config(&initial.config);
+        if let Err(error) = save_config(&initial.config) {
+            tracing::warn!("Failed to persist migrated config: {error}");
+        }
     }
 
     let wf_store =

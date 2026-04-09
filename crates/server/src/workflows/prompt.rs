@@ -1,7 +1,7 @@
 use octomonitor_core::workflow::{StepRun, WorkflowRun};
 use octomonitor_core::RunRecord;
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 const MAX_FILE_CHARS: usize = 8000;
 const MAX_PROMPT_CHARS: usize = 32000;
@@ -93,21 +93,7 @@ fn replace_file_inclusions(template: &str, working_dir: &str) -> String {
         let after_tag = &remaining[start + 7..]; // skip "{{file:"
         if let Some(end) = after_tag.find("}}") {
             let file_path = &after_tag[..end];
-            let full_path = Path::new(working_dir).join(file_path);
-            let content = match fs::read_to_string(&full_path) {
-                Ok(content) => {
-                    if content.len() > MAX_FILE_CHARS {
-                        format!(
-                            "{}\n[file truncated at {} chars]",
-                            &content[..MAX_FILE_CHARS],
-                            MAX_FILE_CHARS
-                        )
-                    } else {
-                        content
-                    }
-                }
-                Err(_) => format!("[file not found: {file_path}]"),
-            };
+            let content = read_included_file(working_dir, file_path);
             result.push_str(&content);
             remaining = &after_tag[end + 2..]; // skip "}}"
         } else {
@@ -120,11 +106,75 @@ fn replace_file_inclusions(template: &str, working_dir: &str) -> String {
     result
 }
 
+fn read_included_file(working_dir: &str, file_path: &str) -> String {
+    let resolved = match resolve_included_file(working_dir, file_path) {
+        Ok(path) => path,
+        Err(FileIncludeError::NotFound) => return format!("[file not found: {file_path}]"),
+        Err(FileIncludeError::AbsolutePath) => {
+            return "[file access denied: absolute path not allowed]".into();
+        }
+        Err(FileIncludeError::ParentTraversal) => {
+            return "[file access denied: parent traversal not allowed]".into();
+        }
+        Err(FileIncludeError::OutsideWorkingDir | FileIncludeError::WorkingDirUnavailable) => {
+            return "[file access denied: outside working directory]".into();
+        }
+    };
+
+    match fs::read_to_string(&resolved) {
+        Ok(content) => {
+            if content.len() > MAX_FILE_CHARS {
+                format!(
+                    "{}\n[file truncated at {} chars]",
+                    &content[..MAX_FILE_CHARS],
+                    MAX_FILE_CHARS
+                )
+            } else {
+                content
+            }
+        }
+        Err(_) => format!("[file not found: {file_path}]"),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileIncludeError {
+    NotFound,
+    AbsolutePath,
+    ParentTraversal,
+    OutsideWorkingDir,
+    WorkingDirUnavailable,
+}
+
+fn resolve_included_file(working_dir: &str, file_path: &str) -> Result<PathBuf, FileIncludeError> {
+    let requested = Path::new(file_path);
+    if requested.is_absolute() {
+        return Err(FileIncludeError::AbsolutePath);
+    }
+    if requested
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(FileIncludeError::ParentTraversal);
+    }
+
+    let working_dir =
+        fs::canonicalize(working_dir).map_err(|_| FileIncludeError::WorkingDirUnavailable)?;
+    let resolved =
+        fs::canonicalize(working_dir.join(requested)).map_err(|_| FileIncludeError::NotFound)?;
+    if !resolved.starts_with(&working_dir) {
+        return Err(FileIncludeError::OutsideWorkingDir);
+    }
+
+    Ok(resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use octomonitor_core::workflow::*;
     use octomonitor_core::ToolKind;
+    use tempfile::tempdir;
 
     fn mock_run() -> WorkflowRun {
         WorkflowRun {
@@ -220,14 +270,98 @@ mod tests {
     fn renders_missing_file_gracefully() {
         let run = mock_run();
         let step = &run.steps[1];
+        let workdir = tempdir().unwrap();
         let result = render_prompt(
             "Content: {{file:nonexistent.md}}",
             step,
             &run,
-            "/tmp/test",
+            workdir.path().to_str().unwrap(),
             &[],
         );
         assert_eq!(result, "Content: [file not found: nonexistent.md]");
+    }
+
+    #[test]
+    fn renders_existing_file_from_working_dir() {
+        let run = mock_run();
+        let step = &run.steps[1];
+        let workdir = tempdir().unwrap();
+        std::fs::write(workdir.path().join("notes.md"), "hello from workflow").unwrap();
+
+        let result = render_prompt(
+            "Content: {{file:notes.md}}",
+            step,
+            &run,
+            workdir.path().to_str().unwrap(),
+            &[],
+        );
+
+        assert_eq!(result, "Content: hello from workflow");
+    }
+
+    #[test]
+    fn rejects_absolute_file_includes() {
+        let run = mock_run();
+        let step = &run.steps[1];
+        let workdir = tempdir().unwrap();
+        let result = render_prompt(
+            "Content: {{file:/etc/passwd}}",
+            step,
+            &run,
+            workdir.path().to_str().unwrap(),
+            &[],
+        );
+        assert_eq!(
+            result,
+            "Content: [file access denied: absolute path not allowed]"
+        );
+    }
+
+    #[test]
+    fn rejects_parent_directory_escape() {
+        let run = mock_run();
+        let step = &run.steps[1];
+        let workdir = tempdir().unwrap();
+        std::fs::write(workdir.path().join("inside.md"), "safe").unwrap();
+        let result = render_prompt(
+            "Content: {{file:../outside.md}}",
+            step,
+            &run,
+            workdir.path().to_str().unwrap(),
+            &[],
+        );
+        assert_eq!(
+            result,
+            "Content: [file access denied: parent traversal not allowed]"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_escape() {
+        let run = mock_run();
+        let step = &run.steps[1];
+        let workdir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "secret").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.md"),
+            workdir.path().join("linked.md"),
+        )
+        .unwrap();
+
+        let result = render_prompt(
+            "Content: {{file:linked.md}}",
+            step,
+            &run,
+            workdir.path().to_str().unwrap(),
+            &[],
+        );
+
+        assert_eq!(
+            result,
+            "Content: [file access denied: outside working directory]"
+        );
     }
 
     #[test]

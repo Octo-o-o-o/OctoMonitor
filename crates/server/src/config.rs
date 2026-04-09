@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::platform::home_relative_path;
 
+const CONFIG_DIR_OVERRIDE_ENV: &str = "OCTOMONITOR_CONFIG_DIR";
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigPatch {
@@ -12,6 +14,9 @@ pub struct ConfigPatch {
 }
 
 pub fn config_path() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os(CONFIG_DIR_OVERRIDE_ENV) {
+        return std::path::PathBuf::from(path).join("config.json");
+    }
     home_relative_path(".octomonitor").join("config.json")
 }
 
@@ -21,24 +26,17 @@ pub fn load_config() -> Option<ConfigPatch> {
     serde_json::from_str(&content).ok()
 }
 
-pub fn save_config(config: &AppConfig) {
+pub fn save_config(config: &AppConfig) -> std::io::Result<()> {
     let path = config_path();
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)?;
     }
     let patch = ConfigPatch {
         version: Some(2),
         companion_enabled: Some(config.companion_enabled),
         history_days: Some(config.history_days),
     };
-    let json = match serde_json::to_string_pretty(&patch) {
-        Ok(json) => json,
-        Err(e) => {
-            tracing::warn!("Failed to serialize config: {e}");
-            return;
-        }
-    };
-    if let Err(e) = std::fs::write(&path, json) {
-        tracing::warn!("Failed to save config to {}: {e}", path.display());
-    }
+    let json = serde_json::to_string_pretty(&patch)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    std::fs::write(&path, json)
 }

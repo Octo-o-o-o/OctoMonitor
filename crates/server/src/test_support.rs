@@ -1,7 +1,13 @@
-use axum::{
-    body::Body,
-    http::{Request, Response},
+use std::{
+    path::Path,
+    sync::{Mutex, MutexGuard, OnceLock},
 };
+
+use axum::{
+    body::{to_bytes, Body},
+    http::{Request, Response, StatusCode},
+};
+use serde::de::DeserializeOwned;
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
@@ -42,6 +48,42 @@ impl ServerTestHarness {
             .oneshot(request)
             .await
             .expect("request should succeed")
+    }
+
+    pub(crate) async fn request_json<T: DeserializeOwned>(
+        &self,
+        request: Request<Body>,
+    ) -> (StatusCode, T) {
+        let response = self.request(request).await;
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let value = serde_json::from_slice(&body).expect("json body");
+        (status, value)
+    }
+}
+
+fn config_dir_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+pub(crate) struct ConfigDirGuard {
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl ConfigDirGuard {
+    pub(crate) fn set(path: &Path) -> Self {
+        let guard = config_dir_lock().lock().expect("config dir lock");
+        std::env::set_var("OCTOMONITOR_CONFIG_DIR", path);
+        Self { _guard: guard }
+    }
+}
+
+impl Drop for ConfigDirGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("OCTOMONITOR_CONFIG_DIR");
     }
 }
 
