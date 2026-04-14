@@ -109,15 +109,21 @@ fn tool_mode(tool: &str) -> &'static str {
         "claude" => "statusline+hooks",
         "codex" => "app-server+hooks",
         "openclaw" => "gateway+status",
+        "hermes" => "gateway+sessions",
         _ => "custom",
     }
 }
 
 pub fn detect_tools() -> Vec<ToolCapability> {
     [
-        ("claude", "Claude CLI", "local hook/statusline install possible"),
+        (
+            "claude",
+            "Claude CLI",
+            "local hook/statusline install possible",
+        ),
         ("codex", "Codex CLI", "app-server/hook path available"),
         ("openclaw", "OpenClaw CLI", "gateway-first path available"),
+        ("hermes", "Hermes Agent CLI", "gateway/sessions path available"),
     ]
     .into_iter()
     .map(|(name, label, capability)| {
@@ -143,7 +149,7 @@ pub fn doctor_report() -> Vec<String> {
         "No database configured — expected for local-first mode".to_string(),
         "Companion access disabled by default until config changes".to_string(),
         "Sandbox manifest mode only — no tool config files are modified automatically".to_string(),
-        format!("Detected {detected}/3 monitored CLIs on current PATH"),
+        format!("Detected {detected}/4 monitored CLIs on current PATH"),
         format!("Installer sandbox path: {}", integration_root().display()),
     ];
     checks.extend(tools.into_iter().map(|tool| {
@@ -287,9 +293,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detect_tools_returns_three() {
+    fn detect_tools_returns_four() {
         let tools = detect_tools();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
     }
 
     #[test]
