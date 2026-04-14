@@ -24,12 +24,27 @@ fn watch_dirs() -> Vec<PathBuf> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| home.join(".hermes"));
 
-    vec![
+    let mut dirs = vec![
         claude_base.join("projects"),
         codex_base.join("sessions"),
         openclaw_base.join("agents"),
+        // Default Hermes sessions
         hermes_base.join("sessions"),
-    ]
+    ];
+
+    // Hermes profiles: each profile has its own sessions dir
+    let hermes_profiles = hermes_base.join("profiles");
+    if hermes_profiles.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&hermes_profiles) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    dirs.push(entry.path().join("sessions"));
+                }
+            }
+        }
+    }
+
+    dirs
 }
 
 /// Spawn a background task that watches adapter session directories and wakes
