@@ -114,6 +114,11 @@ struct OpenClawTranscriptState {
 }
 
 fn openclaw_root() -> PathBuf {
+    if let Ok(custom) = std::env::var("OPENCLAW_HOME") {
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
+        }
+    }
     resolve_home_dir(".openclaw")
 }
 

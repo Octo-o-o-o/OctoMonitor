@@ -107,6 +107,11 @@ struct CachedSessionsFile {
 // ---------------------------------------------------------------------------
 
 fn hermes_root() -> PathBuf {
+    if let Ok(custom) = std::env::var("HERMES_HOME") {
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
+        }
+    }
     resolve_home_dir(".hermes")
 }
 
@@ -127,7 +132,7 @@ fn discover_instances(root: &Path) -> Vec<(String, PathBuf)> {
     if profiles_dir.is_dir() {
         if let Ok(entries) = fs::read_dir(&profiles_dir) {
             for entry in entries.flatten() {
-                if entry.path().is_dir() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
                     let name = entry.file_name().to_string_lossy().to_string();
                     instances.push((name, entry.path()));
                 }
@@ -144,7 +149,6 @@ fn discover_instances(root: &Path) -> Vec<(String, PathBuf)> {
 
 fn check_gateway_status(home: &Path) -> (bool, Option<String>, Vec<String>) {
     let pid_file = home.join("gateway.pid");
-    let pid_exists = pid_file.exists();
 
     let state_file = home.join("gateway_state.json");
     let (state, platforms) = match fs::read_to_string(&state_file) {
@@ -166,14 +170,31 @@ fn check_gateway_status(home: &Path) -> (bool, Option<String>, Vec<String>) {
         Err(_) => (None, vec![]),
     };
 
-    // Running = PID file exists and state is not explicitly "stopped" or "startup_failed"
-    let running = pid_exists
+    // Running = PID file exists, process is alive, and state is not explicitly stopped
+    let pid_alive = fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .map(|pid| is_process_alive(pid))
+        .unwrap_or(false);
+
+    let running = pid_alive
         && !matches!(
             state.as_deref(),
             Some("stopped") | Some("startup_failed")
         );
 
     (running, state, platforms)
+}
+
+/// Check if a process with the given PID is still alive via `kill -0`.
+fn is_process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -233,11 +254,14 @@ fn parse_sessions_json(
     let mut result = Vec::new();
 
     for (session_key, entry) in obj {
-        let session_id = entry
+        let Some(session_id) = entry
             .get("session_id")
             .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())?
-            .to_string();
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let session_id = session_id.to_string();
 
         let created_at = entry.get("created_at").and_then(|v| v.as_str()).map(String::from);
         let updated_at = entry.get("updated_at").and_then(|v| v.as_str()).map(String::from);
@@ -735,7 +759,9 @@ mod tests {
     #[test]
     fn gateway_status_detects_running() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        fs::write(temp_dir.path().join("gateway.pid"), "12345").expect("pid");
+        // Use our own PID so the liveness check passes
+        let own_pid = std::process::id();
+        fs::write(temp_dir.path().join("gateway.pid"), own_pid.to_string()).expect("pid");
         fs::write(
             temp_dir.path().join("gateway_state.json"),
             r#"{"gateway_state": "running", "platforms": {"telegram": {"status": "connected"}}}"#,
@@ -746,6 +772,21 @@ mod tests {
         assert!(running);
         assert_eq!(state.as_deref(), Some("running"));
         assert_eq!(platforms, vec!["telegram"]);
+    }
+
+    #[test]
+    fn gateway_status_stale_pid_is_not_running() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        // Use a PID that almost certainly doesn't exist
+        fs::write(temp_dir.path().join("gateway.pid"), "99999999").expect("pid");
+        fs::write(
+            temp_dir.path().join("gateway_state.json"),
+            r#"{"gateway_state": "running"}"#,
+        )
+        .expect("state");
+
+        let (running, _, _) = check_gateway_status(temp_dir.path());
+        assert!(!running, "stale PID file should not report running");
     }
 
     #[test]

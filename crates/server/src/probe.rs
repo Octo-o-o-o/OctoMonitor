@@ -1317,7 +1317,16 @@ fn build_run_from_hermes_session(
     session: &hermes_adapter::HermesSession,
     probe: &hermes_adapter::HermesSnapshot,
 ) -> RunRecord {
-    let workspace = format!("~/.hermes");
+    let workspace = probe
+        .instances
+        .iter()
+        .find(|inst| inst.profile_name == session.profile_name)
+        .map(|inst| inst.home_dir.clone())
+        .unwrap_or_else(|| {
+            crate::platform::home_relative_path(".hermes")
+                .display()
+                .to_string()
+        });
 
     let started_at = session.started_at.clone().unwrap_or_default();
     let last_activity_at = session.updated_at.clone().unwrap_or_default();
@@ -1413,14 +1422,7 @@ fn classify_hermes_session_state(session: &hermes_adapter::HermesSession) -> Run
     let updated_at = session
         .updated_at
         .as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .or_else(|| {
-            session
-                .updated_at
-                .as_deref()
-                .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").ok())
-                .map(|ndt| ndt.and_utc().fixed_offset())
-        });
+        .and_then(|s| parse_flexible_datetime(s));
 
     match updated_at {
         Some(dt) => {
@@ -1662,12 +1664,27 @@ fn build_probe_run_from_hermes(probe: &hermes_adapter::HermesSnapshot) -> RunRec
 }
 
 pub fn elapsed_from_timestamps(start: &str, end: &str) -> i64 {
-    let start_dt = chrono::DateTime::parse_from_rfc3339(start).ok();
-    let end_dt = chrono::DateTime::parse_from_rfc3339(end).ok();
+    let start_dt = parse_flexible_datetime(start);
+    let end_dt = parse_flexible_datetime(end);
     match (start_dt, end_dt) {
         (Some(s), Some(e)) => (e - s).num_milliseconds().max(0),
         _ => 0,
     }
+}
+
+/// Parse a datetime string flexibly: try RFC3339 first, then bare ISO 8601
+/// without timezone (treated as local time).
+fn parse_flexible_datetime(s: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_rfc3339(s).ok().or_else(|| {
+        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
+            .ok()
+            .map(|ndt| {
+                ndt.and_local_timezone(chrono::Local)
+                    .latest()
+                    .unwrap_or_else(|| ndt.and_utc().with_timezone(&chrono::Local))
+                    .fixed_offset()
+            })
+    })
 }
 
 fn normalized_total_tokens(
