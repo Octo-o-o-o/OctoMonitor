@@ -86,6 +86,7 @@ export function buildVisibleRunsBySource(
     claude: [],
     codex: [],
     openClaw: [],
+    hermes: [],
   }
 
   for (const run of runs) {

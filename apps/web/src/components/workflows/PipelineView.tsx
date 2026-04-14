@@ -11,6 +11,7 @@ const toolLabels: Record<string, { short: string; cls: string }> = {
   claude: { short: 'CC', cls: 'wf-tool-claude' },
   codex: { short: 'CX', cls: 'wf-tool-codex' },
   openClaw: { short: 'OC', cls: 'wf-tool-openclaw' },
+  hermes: { short: 'HM', cls: 'wf-tool-hermes' },
 }
 
 const stateClasses: Record<string, string> = {

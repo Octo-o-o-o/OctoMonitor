@@ -315,6 +315,7 @@
 .wf-tool-claude { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
 .wf-tool-codex { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
 .wf-tool-openclaw { background: color-mix(in srgb, var(--accent, #62a9ff) 15%, transparent); color: var(--accent, #62a9ff); }
+.wf-tool-hermes { background: color-mix(in srgb, var(--hermes-accent) 15%, transparent); color: var(--hermes-accent); }
 
 .wf-step-kind {
   font-size: 9px;

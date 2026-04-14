@@ -12,7 +12,7 @@ const columnLayoutLabels: Record<ColumnLayout, string> = {
   fixed: 'Fixed (Equal)', adaptive: 'Adaptive',
 }
 const panelLabels: Record<ToolKind, string> = {
-  claude: 'Claude Code', codex: 'Codex', openClaw: 'OpenClaw',
+  claude: 'Claude Code', codex: 'Codex', openClaw: 'OpenClaw', hermes: 'Hermes',
 }
 const agentDisplayFormats: AgentDisplayFormat[] = ['id', 'name', 'id:name']
 const agentDisplayExamples: Record<AgentDisplayFormat, string> = {

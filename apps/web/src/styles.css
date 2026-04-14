@@ -85,6 +85,8 @@
   --codex-accent-rgb: 64, 211, 157;
   --openclaw-accent: #62a9ff;
   --openclaw-accent-rgb: 98, 169, 255;
+  --hermes-accent: #a78bfa;
+  --hermes-accent-rgb: 167, 139, 250;
   /* State colors (solid) */
   --state-running-bg: #40d39d;
   --state-running-text: #08101f;
@@ -223,6 +225,8 @@
   --codex-accent-rgb: 115, 115, 115;
   --openclaw-accent: #a3a3a3;
   --openclaw-accent-rgb: 163, 163, 163;
+  --hermes-accent: #d4d4d4;
+  --hermes-accent-rgb: 212, 212, 212;
   /* State colors → grayscale with pattern differentiation */
   --state-running-bg: #1c1c1c;
   --state-running-text: #fdfcf8;
@@ -275,6 +279,8 @@
   --codex-accent-rgb: 140, 140, 140;
   --openclaw-accent: #525252;
   --openclaw-accent-rgb: 82, 82, 82;
+  --hermes-accent: #3f3f3f;
+  --hermes-accent-rgb: 63, 63, 63;
   /* State colors → grayscale with pattern differentiation */
   --state-running-bg: #e8e6e3;
   --state-running-text: #121212;
@@ -896,6 +902,7 @@ input, textarea, select { font: inherit; }
 .mobile-source-tab.active.accent-claude { border-color: color-mix(in srgb, var(--claude-accent) 35%, var(--shell-border)); color: var(--claude-accent); }
 .mobile-source-tab.active.accent-codex { border-color: color-mix(in srgb, var(--codex-accent) 35%, var(--shell-border)); color: var(--codex-accent); }
 .mobile-source-tab.active.accent-openclaw { border-color: color-mix(in srgb, var(--openclaw-accent) 35%, var(--shell-border)); color: var(--openclaw-accent); }
+.mobile-source-tab.active.accent-hermes { border-color: color-mix(in srgb, var(--hermes-accent) 35%, var(--shell-border)); color: var(--hermes-accent); }
 
 /* Desktop source columns */
 .source-columns-desktop {
@@ -960,6 +967,9 @@ input, textarea, select { font: inherit; }
 .accent-openclaw .source-header {
   background: linear-gradient(rgba(var(--openclaw-accent-rgb), 0.14), rgba(var(--openclaw-accent-rgb), 0.06)), var(--shell-glass-strong);
 }
+.accent-hermes .source-header {
+  background: linear-gradient(rgba(var(--hermes-accent-rgb), 0.14), rgba(var(--hermes-accent-rgb), 0.06)), var(--shell-glass-strong);
+}
 
 .source-top-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .source-name-row { display: flex; align-items: center; gap: 10px; }
@@ -973,6 +983,7 @@ input, textarea, select { font: inherit; }
 .accent-claude .source-name { color: var(--claude-accent); }
 .accent-codex .source-name { color: var(--codex-accent); }
 .accent-openclaw .source-name { color: var(--openclaw-accent); }
+.accent-hermes .source-name { color: var(--hermes-accent); }
 .source-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.04); }
 .source-dot.online { background: var(--accent); }
 .source-dot.offline { background: var(--danger); }
@@ -1620,9 +1631,13 @@ input, textarea, select { font: inherit; }
 .accent-openclaw .usage-source-header {
   background: linear-gradient(rgba(var(--openclaw-accent-rgb), 0.14), rgba(var(--openclaw-accent-rgb), 0.06)), var(--shell-glass-strong);
 }
+.accent-hermes .usage-source-header {
+  background: linear-gradient(rgba(var(--hermes-accent-rgb), 0.14), rgba(var(--hermes-accent-rgb), 0.06)), var(--shell-glass-strong);
+}
 .accent-claude .usage-source-name { color: var(--claude-accent); }
 .accent-codex .usage-source-name { color: var(--codex-accent); }
 .accent-openclaw .usage-source-name { color: var(--openclaw-accent); }
+.accent-hermes .usage-source-name { color: var(--hermes-accent); }
 .usage-source-tag-type { font-size: var(--font-size-xs); font-weight: 500; color: var(--muted); }
 .usage-source-totals {
   padding: 8px var(--card-pad);
@@ -1746,6 +1761,7 @@ input, textarea, select { font: inherit; }
 .accent-claude-left { border-left: 3px solid var(--claude-accent); }
 .accent-codex-left { border-left: 3px solid var(--codex-accent); }
 .accent-openclaw-left { border-left: 3px solid var(--openclaw-accent); }
+.accent-hermes-left { border-left: 3px solid var(--hermes-accent); }
 .usage-all-info { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .usage-all-tag {
   min-width: 0;
@@ -1760,6 +1776,7 @@ input, textarea, select { font: inherit; }
 .accent-claude-left .usage-all-source { color: var(--claude-accent); }
 .accent-codex-left .usage-all-source { color: var(--codex-accent); }
 .accent-openclaw-left .usage-all-source { color: var(--openclaw-accent); }
+.accent-hermes-left .usage-all-source { color: var(--hermes-accent); }
 .usage-all-numbers { display: flex; flex-shrink: 0; flex-direction: column; align-items: flex-end; gap: 2px; }
 .usage-all-tokens { font-size: var(--font-size-2xl); font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-all-cost { font-size: var(--font-size-sm); color: var(--muted); }
@@ -3380,6 +3397,8 @@ input, textarea, select { font: inherit; }
   --codex-accent-rgb: 0, 0, 0;
   --openclaw-accent: var(--eink-black);
   --openclaw-accent-rgb: 0, 0, 0;
+  --hermes-accent: var(--eink-black);
+  --hermes-accent-rgb: 0, 0, 0;
 
   /* State colors: grayscale only */
   --state-running-bg: var(--eink-black);
@@ -3539,15 +3558,18 @@ input, textarea, select { font: inherit; }
 /* Source headers: differentiate by border pattern, NOT background color */
 [data-theme="eink"] .accent-claude .source-header,
 [data-theme="eink"] .accent-codex .source-header,
-[data-theme="eink"] .accent-openclaw .source-header { background: #fff; }
+[data-theme="eink"] .accent-openclaw .source-header,
+[data-theme="eink"] .accent-hermes .source-header { background: #fff; }
 [data-theme="eink"] .accent-claude .source-header { border-bottom: 3px solid #000; }
 [data-theme="eink"] .accent-codex .source-header { border-bottom: 3px dashed #000; }
 [data-theme="eink"] .accent-openclaw .source-header { border-bottom: 3px dotted #000; }
+[data-theme="eink"] .accent-hermes .source-header { border-bottom: 3px double #000; }
 
 /* Source names: differentiate by typography */
 [data-theme="eink"] .accent-claude .source-name { color: #000; font-weight: 900; }
 [data-theme="eink"] .accent-codex .source-name { color: #000; font-weight: 900; font-style: italic; }
 [data-theme="eink"] .accent-openclaw .source-name { color: #000; font-weight: 900; text-decoration: underline; }
+[data-theme="eink"] .accent-hermes .source-name { color: #000; font-weight: 900; text-decoration: overline; }
 
 /* Online/offline: filled vs hollow (Kindle pattern) */
 [data-theme="eink"] .source-dot.online { background: #000; }
@@ -3638,10 +3660,12 @@ input, textarea, select { font: inherit; }
 /* Source cards: border-style differentiation */
 [data-theme="eink"] .accent-claude .usage-source-header,
 [data-theme="eink"] .accent-codex .usage-source-header,
-[data-theme="eink"] .accent-openclaw .usage-source-header { background: var(--eink-gray-7); }
+[data-theme="eink"] .accent-openclaw .usage-source-header,
+[data-theme="eink"] .accent-hermes .usage-source-header { background: var(--eink-gray-7); }
 [data-theme="eink"] .accent-claude .usage-source-name { color: #000; }
 [data-theme="eink"] .accent-codex .usage-source-name { color: #000; font-style: italic; }
 [data-theme="eink"] .accent-openclaw .usage-source-name { color: #000; text-decoration: underline; }
+[data-theme="eink"] .accent-hermes .usage-source-name { color: #000; text-decoration: overline; }
 [data-theme="eink"] .usage-source-card { border: 2px solid #000; }
 [data-theme="eink"] .usage-item-bar { background: var(--eink-gray-6); }
 [data-theme="eink"] .usage-item-fill { background: #000 !important; }
@@ -3652,9 +3676,11 @@ input, textarea, select { font: inherit; }
 [data-theme="eink"] .accent-claude-left { border-left: 4px solid #000; }
 [data-theme="eink"] .accent-codex-left { border-left: 4px dashed #000; }
 [data-theme="eink"] .accent-openclaw-left { border-left: 4px dotted #000; }
+[data-theme="eink"] .accent-hermes-left { border-left: 4px double #000; }
 [data-theme="eink"] .accent-claude-left .usage-all-source { color: #000; }
 [data-theme="eink"] .accent-codex-left .usage-all-source { color: #000; font-style: italic; }
 [data-theme="eink"] .accent-openclaw-left .usage-all-source { color: #000; text-decoration: underline; }
+[data-theme="eink"] .accent-hermes-left .usage-all-source { color: #000; text-decoration: overline; }
 
 /* === Setup View === */
 [data-theme="eink"] .settings-card,
@@ -3703,6 +3729,7 @@ input, textarea, select { font: inherit; }
 [data-theme="eink"] .mobile-source-tab.active.accent-claude { border-bottom-color: #000; color: #000; }
 [data-theme="eink"] .mobile-source-tab.active.accent-codex { border-bottom-color: #000; color: #000; font-style: italic; }
 [data-theme="eink"] .mobile-source-tab.active.accent-openclaw { border-bottom-color: #000; color: #000; text-decoration: underline; }
+[data-theme="eink"] .mobile-source-tab.active.accent-hermes { border-bottom-color: #000; color: #000; text-decoration: overline; }
 
 /* === Progressive enhancement: real monochrome displays === */
 @media (monochrome) {
@@ -4367,6 +4394,12 @@ input, textarea, select { font: inherit; }
 .commit-link-tool.tool-openclaw {
   border-color: color-mix(in srgb, var(--openclaw-accent) 38%, var(--border));
   background: color-mix(in srgb, var(--openclaw-accent) 10%, var(--surface));
+}
+
+.commit-category-pill.tool-hermes,
+.commit-link-tool.tool-hermes {
+  border-color: color-mix(in srgb, var(--hermes-accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--hermes-accent) 10%, var(--surface));
 }
 
 .commit-sessions-toggle {

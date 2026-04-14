@@ -23,6 +23,7 @@ const toolColorMap: Record<string, string> = {
   claude: 'var(--claude-accent)',
   codex: 'var(--codex-accent)',
   openClaw: 'var(--openclaw-accent)',
+  hermes: 'var(--hermes-accent)',
 }
 
 function stateLabel(state: string, t: (key: any) => string): string {

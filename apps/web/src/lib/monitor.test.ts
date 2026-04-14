@@ -67,6 +67,7 @@ const defaultFilterRules: FilterRules = {
   claude: { mode: 'off', patterns: [] },
   codex: { mode: 'off', patterns: [] },
   openClaw: { mode: 'off', patterns: [] },
+  hermes: { mode: 'off', patterns: [] },
 }
 
 describe('monitor visibility selectors', () => {

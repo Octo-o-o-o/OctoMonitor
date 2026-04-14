@@ -90,11 +90,11 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
         </div>
         <div className="wf-panel-body">
           <div className="wf-detail-header">
-            <span className={`wf-tool-icon ${step.tool === 'claude' ? 'wf-tool-claude' : step.tool === 'codex' ? 'wf-tool-codex' : 'wf-tool-openclaw'}`}>
-              {step.tool === 'claude' ? 'CC' : step.tool === 'codex' ? 'CX' : 'OC'}
+            <span className={`wf-tool-icon ${step.tool === 'claude' ? 'wf-tool-claude' : step.tool === 'codex' ? 'wf-tool-codex' : step.tool === 'hermes' ? 'wf-tool-hermes' : 'wf-tool-openclaw'}`}>
+              {step.tool === 'claude' ? 'CC' : step.tool === 'codex' ? 'CX' : step.tool === 'hermes' ? 'HM' : 'OC'}
             </span>
             <span className="wf-detail-tool-name">
-              {step.tool === 'claude' ? 'Claude Code' : step.tool === 'codex' ? 'Codex' : 'OpenClaw'}
+              {step.tool === 'claude' ? 'Claude Code' : step.tool === 'codex' ? 'Codex' : step.tool === 'hermes' ? 'Hermes' : 'OpenClaw'}
             </span>
             <span className={`wf-step-kind ${isObserve ? 'observe' : 'launch'}`}>
               {isObserve ? `\u{1F441} ${t('wf.stepObserve')}` : `\u{1F680} ${t('wf.stepLaunch')}`}

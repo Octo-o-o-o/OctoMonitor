@@ -4,7 +4,7 @@ import { useI18n } from '../../../lib/i18n'
 import type { ToolKind } from '../../../lib/types'
 
 const panelLabels: Record<ToolKind, string> = {
-  claude: 'Claude Code', codex: 'Codex', openClaw: 'OpenClaw',
+  claude: 'Claude Code', codex: 'Codex', openClaw: 'OpenClaw', hermes: 'Hermes',
 }
 
 export function FilterSection() {
@@ -40,9 +40,9 @@ export function FilterSection() {
       <div className="settings-cards-1">
         <p className="settings-hint">{t('settings.filterRulesHint')}</p>
         <div className="filter-rules-list">
-          {(['claude', 'codex', 'openClaw'] as ToolKind[]).map((tool) => {
+          {(['claude', 'codex', 'openClaw', 'hermes'] as ToolKind[]).map((tool) => {
             const filter = filterRules[tool]
-            const isProject = tool !== 'openClaw'
+            const isProject = tool !== 'openClaw' && tool !== 'hermes'
             const placeholder = isProject
               ? t('settings.filterPlaceholder.project')
               : t('settings.filterPlaceholder.agent')

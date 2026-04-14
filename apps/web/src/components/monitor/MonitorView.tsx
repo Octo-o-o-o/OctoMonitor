@@ -13,6 +13,7 @@ const sourceAccents: Record<ToolKind, string> = {
   claude: 'accent-claude',
   codex: 'accent-codex',
   openClaw: 'accent-openclaw',
+  hermes: 'accent-hermes',
 }
 
 const stateStyles: Record<string, { badge: string; row: string }> = {
@@ -538,7 +539,7 @@ export function MonitorView() {
 
   const sessionsBySource = useMemo(() => {
     if (!data) {
-      return { claude: [], codex: [], openClaw: [] } satisfies Record<ToolKind, RunRecord[]>
+      return { claude: [], codex: [], openClaw: [], hermes: [] } satisfies Record<ToolKind, RunRecord[]>
     }
     return buildVisibleRunsBySource(data.runs, filterRules, monitorPeriod)
   }, [data, monitorPeriod, filterRules])
@@ -570,6 +571,7 @@ export function MonitorView() {
     claude: sessionsBySource.claude.length,
     codex: sessionsBySource.codex.length,
     openClaw: sessionsBySource.openClaw.length,
+    hermes: sessionsBySource.hermes.length,
   }
 
   const effectiveMobileSource = visiblePanels.includes(mobileSource)
@@ -605,7 +607,7 @@ export function MonitorView() {
               <SourceColumn
                 tool={effectiveMobileSource}
                 runs={sessionsBySource[effectiveMobileSource]}
-                crons={effectiveMobileSource === 'openClaw' ? data.pendingCrons : undefined}
+                crons={effectiveMobileSource === 'openClaw' || effectiveMobileSource === 'hermes' ? data.pendingCrons : undefined}
                 showEmptyState={hasVisibleRuns}
               />
             </div>
@@ -620,7 +622,7 @@ export function MonitorView() {
                 key={tool}
                 tool={tool}
                 runs={sessionsBySource[tool]}
-                crons={tool === 'openClaw' ? data.pendingCrons : undefined}
+                crons={tool === 'openClaw' || tool === 'hermes' ? data.pendingCrons : undefined}
                 showEmptyState={hasVisibleRuns}
               />
             ))}

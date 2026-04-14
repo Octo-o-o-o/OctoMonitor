@@ -33,7 +33,7 @@ describe('frontend preferences', () => {
     expect(settings.uiDensity).toBe('compact')
     expect(settings.showFingerprints).toBe(false)
     expect(settings.notificationsEnabled).toBe(false)
-    expect(settings.panelConfig.map((entry) => entry.tool)).toEqual(['codex', 'claude', 'openClaw'])
+    expect(settings.panelConfig.map((entry) => entry.tool)).toEqual(['codex', 'claude', 'openClaw', 'hermes'])
     expect(settings.filterRules.codex.patterns).toEqual(['octo'])
     expect(settings.filterRules.claude.mode).toBe('off')
   })

@@ -13,16 +13,18 @@ import { UsageSkeleton } from './Skeleton'
 import type { ToolKind, UsageHistoryPayload } from '../../lib/types'
 import { DateRangePicker } from './DateRangePicker'
 
-const sourceOrder: ToolKind[] = ['claude', 'codex', 'openClaw']
+const sourceOrder: ToolKind[] = ['claude', 'codex', 'openClaw', 'hermes']
 import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
 
 function accentClass(tool: ToolKind): string {
-  return tool === 'openClaw' ? 'openclaw' : tool
+  if (tool === 'openClaw') return 'openclaw'
+  return tool
 }
 const sourceTagLabels: Record<ToolKind, string> = {
   claude: 'Project',
   codex: 'Project',
   openClaw: 'Agent',
+  hermes: 'Profile',
 }
 const historyPresets = ['7d', '30d', '90d', '180d'] as const
 
@@ -30,6 +32,7 @@ const barColors: Record<ToolKind, string> = {
   claude: 'var(--warn)',
   codex: 'var(--accent)',
   openClaw: 'var(--openclaw-accent)',
+  hermes: 'var(--hermes-accent)',
 }
 
 interface GroupedUsage {
@@ -112,6 +115,7 @@ export function UsageView() {
       claude: { tool: 'claude', totalTokens: 0, totalCost: 0, items: [] },
       codex: { tool: 'codex', totalTokens: 0, totalCost: 0, items: [] },
       openClaw: { tool: 'openClaw', totalTokens: 0, totalCost: 0, items: [] },
+      hermes: { tool: 'hermes', totalTokens: 0, totalCost: 0, items: [] },
     }
 
     const tagMap: Record<string, Record<string, { tokens: number; cost: number }>> = {}

@@ -52,12 +52,14 @@ export const defaultPanelConfig: PanelEntry[] = [
   { tool: 'claude', enabled: true },
   { tool: 'codex', enabled: true },
   { tool: 'openClaw', enabled: true },
+  { tool: 'hermes', enabled: true },
 ]
 
 export const defaultFilterRules: FilterRules = {
   claude: { mode: 'off', patterns: [] },
   codex: { mode: 'off', patterns: [] },
   openClaw: { mode: 'off', patterns: [] },
+  hermes: { mode: 'off', patterns: [] },
 }
 
 export const defaultSettings: FrontendSettings = {
