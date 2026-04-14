@@ -1328,16 +1328,36 @@ fn build_run_from_hermes_session(
                 .to_string()
         });
 
-    let started_at = session.started_at.clone().unwrap_or_default();
-    let last_activity_at = session.updated_at.clone().unwrap_or_default();
+    // Normalize timestamps to RFC3339 so run_overlaps_range (strict RFC3339)
+    // doesn't silently drop Hermes sessions from usage/commit history views.
+    let started_at = session
+        .started_at
+        .as_deref()
+        .and_then(parse_flexible_datetime)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default();
+    let last_activity_at = session
+        .updated_at
+        .as_deref()
+        .and_then(parse_flexible_datetime)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default();
     let elapsed = elapsed_from_timestamps(&started_at, &last_activity_at);
 
     let state = classify_hermes_session_state(session);
 
+    // Use per-instance gateway status, not the aggregate OR across all profiles
+    let instance_gw = probe
+        .instances
+        .iter()
+        .find(|i| i.profile_name == session.profile_name)
+        .map(|i| i.gateway_running)
+        .unwrap_or(probe.gateway_running);
+
     RunRecord {
         id: format!("hermes-{}-{}", session.profile_name, session.session_id),
         tool: ToolKind::Hermes,
-        source_mode: if probe.gateway_running {
+        source_mode: if instance_gw {
             "hermes_gateway".into()
         } else {
             "hermes_sessions".into()
@@ -1355,7 +1375,7 @@ fn build_run_from_hermes_session(
         agent_display_name: session.display_name.clone(),
         account_alias: Some("local-probe".into()),
         auth_mode: Some(
-            if probe.gateway_running {
+            if instance_gw {
                 "gateway"
             } else {
                 "sessions-scan"
@@ -1446,7 +1466,7 @@ struct ProbeRunParams {
     source_mode: String,
     project_name: &'static str,
     workspace_path: String,
-    workspace_short: &'static str,
+    workspace_short: String,
     provider: &'static str,
     auth_mode: &'static str,
     auth_verified: bool,
@@ -1520,7 +1540,7 @@ fn build_probe_run_from_claude(probe: &claude_adapter::ClaudeSnapshot) -> RunRec
             .config_dir
             .clone()
             .unwrap_or_else(|| "~/.claude".into()),
-        workspace_short: "~/.claude",
+        workspace_short: "~/.claude".into(),
         provider: "claude",
         auth_mode: if probe.cli_available {
             "configured"
@@ -1557,7 +1577,7 @@ fn build_probe_run_from_codex(probe: &codex_adapter::CodexSnapshot) -> RunRecord
             .config_dir
             .clone()
             .unwrap_or_else(|| "~/.codex".into()),
-        workspace_short: "~/.codex",
+        workspace_short: "~/.codex".into(),
         provider: "openai",
         auth_mode: if probe.cli_available {
             "configured"
@@ -1598,7 +1618,7 @@ fn build_probe_run_from_openclaw(probe: &openclaw_adapter::OpenClawSnapshot) -> 
             .workspace_dir
             .clone()
             .unwrap_or_else(|| "~/.openclaw".into()),
-        workspace_short: "~/.openclaw",
+        workspace_short: "~/.openclaw".into(),
         provider: "openclaw",
         auth_mode: if probe.gateway_status_ok {
             "gateway"
@@ -1626,6 +1646,16 @@ fn build_probe_run_from_openclaw(probe: &openclaw_adapter::OpenClawSnapshot) -> 
 }
 
 fn build_probe_run_from_hermes(probe: &hermes_adapter::HermesSnapshot) -> RunRecord {
+    let resolved_home = probe
+        .instances
+        .first()
+        .map(|i| i.home_dir.clone())
+        .unwrap_or_else(|| {
+            crate::platform::home_relative_path(".hermes")
+                .display()
+                .to_string()
+        });
+    let short = shorten_path(&resolved_home);
     build_probe_placeholder_run(ProbeRunParams {
         id: "hermes-probe-run",
         tool: ToolKind::Hermes,
@@ -1635,8 +1665,8 @@ fn build_probe_run_from_hermes(probe: &hermes_adapter::HermesSnapshot) -> RunRec
             "hermes_sessions".into()
         },
         project_name: "Hermes",
-        workspace_path: "~/.hermes".into(),
-        workspace_short: "~/.hermes",
+        workspace_path: resolved_home,
+        workspace_short: short,
         provider: "hermes",
         auth_mode: if probe.gateway_running {
             "gateway"

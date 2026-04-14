@@ -114,9 +114,13 @@ struct OpenClawTranscriptState {
 }
 
 fn openclaw_root() -> PathBuf {
-    if let Ok(custom) = std::env::var("OPENCLAW_HOME") {
-        if !custom.is_empty() {
-            return PathBuf::from(custom);
+    // OPENCLAW_STATE_DIR is the official env var for state directory override.
+    // OPENCLAW_HOME is a common alias used in community scripts.
+    for var in ["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"] {
+        if let Ok(custom) = std::env::var(var) {
+            if !custom.is_empty() {
+                return PathBuf::from(custom);
+            }
         }
     }
     resolve_home_dir(".openclaw")

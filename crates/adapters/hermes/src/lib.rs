@@ -363,11 +363,14 @@ fn read_default_model(home: &Path) -> Option<String> {
     let mut in_model = false;
     for line in contents.lines() {
         let trimmed = line.trim();
-        if trimmed == "model:" || trimmed.starts_with("model:") {
-            // Check if inline: "model:\n  default: xxx"
-            if trimmed == "model:" {
-                in_model = true;
-                continue;
+        if trimmed == "model:" {
+            in_model = true;
+            continue;
+        } else if let Some(rest) = trimmed.strip_prefix("model:") {
+            // Inline form: "model: anthropic/claude-opus-4.6"
+            let model = rest.trim().trim_matches('"').trim_matches('\'');
+            if !model.is_empty() {
+                return Some(model.to_string());
             }
         }
         if in_model {
@@ -484,7 +487,8 @@ fn scan_cron_jobs_inner(home: &Path, profile_name: &str) -> Option<Vec<HermesCro
                     .get("cron")
                     .and_then(|v| v.as_str())
                     .or_else(|| j.get("schedule_display").and_then(|v| v.as_str()))
-                    .unwrap_or("")
+                    .or_else(|| schedule.get("kind").and_then(|v| v.as_str()))
+                    .unwrap_or("unknown")
                     .to_string();
                 let tz = schedule
                     .get("timezone")
