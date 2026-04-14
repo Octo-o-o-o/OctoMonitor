@@ -311,15 +311,13 @@ pub async fn approve_step(
     State(state): State<AppState>,
 ) -> Result<Json<WorkflowRun>, StatusCode> {
     let coord = state.workflow_coordinator.lock().await;
-    let run = coord
-        .approve_step(&path.id, &path.step_id)
-        .map_err(|e| {
-            if e.to_string().contains("TrackingOnly") {
-                StatusCode::FORBIDDEN
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-        })?;
+    let run = coord.approve_step(&path.id, &path.step_id).map_err(|e| {
+        if e.to_string().contains("TrackingOnly") {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
     state.signal_change();
 
     // If approved, spawn the launcher in background
@@ -377,7 +375,11 @@ async fn execute_launch_step(state: AppState, run_id: &str, step_id: &str) {
             Some(s) => s,
             None => return,
         };
-        let def_step = run.definition_snapshot.steps.iter().find(|d| d.id == step.step_id);
+        let def_step = run
+            .definition_snapshot
+            .steps
+            .iter()
+            .find(|d| d.id == step.step_id);
         let launch_spec = def_step.and_then(|d| d.launch.as_ref());
         let req = LaunchRequest {
             tool: step.tool.clone(),
@@ -439,8 +441,7 @@ pub async fn get_candidates(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let payload = state.bootstrap.read().await;
-    let candidates =
-        crate::workflows::link_resolver::resolve_candidates(step, &run, &payload.runs);
+    let candidates = crate::workflows::link_resolver::resolve_candidates(step, &run, &payload.runs);
     Ok(Json(candidates))
 }
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use octomonitor_core::workflow::{
-    summarize_run, WorkflowDef, WorkflowRun, WorkflowRunSummary, WorkflowRunState,
+    summarize_run, WorkflowDef, WorkflowRun, WorkflowRunState, WorkflowRunSummary,
 };
 
 use crate::platform::home_dir;

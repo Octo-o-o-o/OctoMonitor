@@ -32,7 +32,10 @@ impl WorkflowCoordinator {
                     WorkflowRunState::Running
                         | WorkflowRunState::WaitingInput
                         | WorkflowRunState::WaitingApproval
-                ) && self.store.load_run(&s.id).is_ok_and(|r| r.working_dir == working_dir)
+                ) && self
+                    .store
+                    .load_run(&s.id)
+                    .is_ok_and(|r| r.working_dir == working_dir)
             });
             if has_active {
                 bail!("Another active workflow run already exists in this workspace");
@@ -157,7 +160,11 @@ impl WorkflowCoordinator {
             }
 
             // Validate CompletionPolicy: check required_artifacts are present
-            let def_step = run.definition_snapshot.steps.iter().find(|s| s.id == step.step_id);
+            let def_step = run
+                .definition_snapshot
+                .steps
+                .iter()
+                .find(|s| s.id == step.step_id);
             if let Some(def) = def_step {
                 let artifact_paths: Vec<&str> = step
                     .artifacts
@@ -166,7 +173,10 @@ impl WorkflowCoordinator {
                     .collect();
                 for required in &def.completion.required_artifacts {
                     if !artifact_paths.iter().any(|p| p.contains(required.as_str())) {
-                        bail!("Required artifact '{}' not found in step artifacts", required);
+                        bail!(
+                            "Required artifact '{}' not found in step artifacts",
+                            required
+                        );
                     }
                 }
             }
@@ -240,7 +250,12 @@ impl WorkflowCoordinator {
             bail!("Only failed steps can be retried");
         }
 
-        step.state = advance_step_state(&step.kind.clone(), &run.execution_mode, step.order, &run.definition_snapshot);
+        step.state = advance_step_state(
+            &step.kind.clone(),
+            &run.execution_mode,
+            step.order,
+            &run.definition_snapshot,
+        );
         step.error = None;
         step.completion_source = None;
         step.completed_at = None;
@@ -271,11 +286,7 @@ impl WorkflowCoordinator {
         Ok(run)
     }
 
-    pub fn change_mode(
-        &self,
-        run_id: &str,
-        mode: WorkflowExecutionMode,
-    ) -> Result<WorkflowRun> {
+    pub fn change_mode(&self, run_id: &str, mode: WorkflowExecutionMode) -> Result<WorkflowRun> {
         let mut run = self.store.load_run(run_id)?;
         run.execution_mode = mode;
         run.updated_at = Utc::now().to_rfc3339();
@@ -329,21 +340,14 @@ impl WorkflowCoordinator {
             .and_then(|d| d.prompt_template.as_deref())
             .unwrap_or("");
 
-        let rendered = super::prompt::render_prompt(
-            template,
-            step,
-            &run,
-            &run.working_dir,
-            monitor_runs,
-        );
+        let rendered =
+            super::prompt::render_prompt(template, step, &run, &run.working_dir, monitor_runs);
 
         let launch = def_step.and_then(|d| d.launch.as_ref());
 
         Ok(LaunchPreview {
             rendered_prompt: rendered.clone(),
-            input_artifacts: def_step
-                .map(|d| d.inputs.clone())
-                .unwrap_or_default(),
+            input_artifacts: def_step.map(|d| d.inputs.clone()).unwrap_or_default(),
             model: launch.and_then(|l| l.model.clone()),
             allowed_tools: launch.map(|l| l.allowed_tools.clone()).unwrap_or_default(),
             estimated_prompt_chars: rendered.len(),
@@ -366,7 +370,10 @@ impl WorkflowCoordinator {
             bail!("Only launch steps can be approved");
         }
         if step.state != StepRunState::WaitingApproval && step.state != StepRunState::Ready {
-            bail!("Step is not in an approvable state (current: {:?})", step.state);
+            bail!(
+                "Step is not in an approvable state (current: {:?})",
+                step.state
+            );
         }
 
         step.state = StepRunState::Running;
@@ -386,7 +393,12 @@ impl WorkflowCoordinator {
             .iter_mut()
             .find(|s| s.state == StepRunState::Pending)
         {
-            next.state = advance_step_state(&next.kind, &run.execution_mode, next.order, &run.definition_snapshot);
+            next.state = advance_step_state(
+                &next.kind,
+                &run.execution_mode,
+                next.order,
+                &run.definition_snapshot,
+            );
             next.started_at = Some(now.to_string());
         }
     }
@@ -423,12 +435,9 @@ fn advance_step_state(
 }
 
 fn derive_run_state(steps: &[StepRun]) -> WorkflowRunState {
-    let all_done = steps.iter().all(|s| {
-        matches!(
-            s.state,
-            StepRunState::Completed | StepRunState::Skipped
-        )
-    });
+    let all_done = steps
+        .iter()
+        .all(|s| matches!(s.state, StepRunState::Completed | StepRunState::Skipped));
     if all_done {
         return WorkflowRunState::Completed;
     }
@@ -444,10 +453,7 @@ fn derive_run_state(steps: &[StepRun]) -> WorkflowRunState {
         return WorkflowRunState::WaitingApproval;
     }
 
-    if steps
-        .iter()
-        .any(|s| s.state == StepRunState::WaitingLink)
-    {
+    if steps.iter().any(|s| s.state == StepRunState::WaitingLink) {
         return WorkflowRunState::WaitingInput;
     }
 

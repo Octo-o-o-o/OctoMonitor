@@ -2543,6 +2543,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "octomonitor-hermes-adapter"
+version = "0.1.5"
+dependencies = [
+ "chrono",
+ "octomonitor-adapter-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "octomonitor-installer"
 version = "0.1.5"
 dependencies = [
@@ -2575,6 +2586,7 @@ dependencies = [
  "octomonitor-codex-adapter",
  "octomonitor-companion",
  "octomonitor-core",
+ "octomonitor-hermes-adapter",
  "octomonitor-installer",
  "octomonitor-openclaw-adapter",
  "open",

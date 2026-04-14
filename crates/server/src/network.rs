@@ -51,7 +51,13 @@ pub fn detect_advertised_addresses(port: u16) -> Vec<AdvertisedAddress> {
                     .and_then(|rest| rest.split_whitespace().next())
                     .and_then(|text| text.parse::<Ipv4Addr>().ok());
                 if let Some(ip) = ip {
-                    push_address(&mut seen, &mut addresses, port, &current_iface, IpAddr::V4(ip));
+                    push_address(
+                        &mut seen,
+                        &mut addresses,
+                        port,
+                        &current_iface,
+                        IpAddr::V4(ip),
+                    );
                 }
             }
         }

@@ -149,7 +149,12 @@ async fn main() -> Result<()> {
                 Ok(())
             }
 
-            WorkflowAction::Create { file, run, dir, mode } => {
+            WorkflowAction::Create {
+                file,
+                run,
+                dir,
+                mode,
+            } => {
                 let json_str = read_input(&file)?;
                 let def: Value = serde_json::from_str(&json_str)
                     .context("Invalid JSON in workflow definition file")?;
@@ -237,7 +242,11 @@ async fn main() -> Result<()> {
                 let runs: Vec<WorkflowRunSummary> = res.json().await?;
                 let filtered: Vec<_> = if let Some(ref st) = state {
                     runs.into_iter()
-                        .filter(|r| format!("{:?}", r.state).to_lowercase().contains(&st.to_lowercase()))
+                        .filter(|r| {
+                            format!("{:?}", r.state)
+                                .to_lowercase()
+                                .contains(&st.to_lowercase())
+                        })
                         .collect()
                 } else {
                     runs
@@ -245,7 +254,10 @@ async fn main() -> Result<()> {
                 if filtered.is_empty() {
                     println!("No workflow runs found.");
                 } else {
-                    println!("{:<24} {:<24} {:<14} {:<10} {}", "RUN ID", "WORKFLOW", "STATE", "MODE", "PROGRESS");
+                    println!(
+                        "{:<24} {:<24} {:<14} {:<10} {}",
+                        "RUN ID", "WORKFLOW", "STATE", "MODE", "PROGRESS"
+                    );
                     for r in &filtered {
                         println!(
                             "{:<24} {:<24} {:<14} {:<10} {}",
@@ -274,8 +286,10 @@ async fn main() -> Result<()> {
                 println!("Mode:     {:?}", run.execution_mode);
                 println!("Dir:      {}", run.working_dir);
                 println!();
-                println!("{:<8} {:<4} {:<20} {:<8} {:<8} {:<14} {}",
-                    "STEP", "ORD", "LABEL", "TOOL", "KIND", "STATE", "LINKED");
+                println!(
+                    "{:<8} {:<4} {:<20} {:<8} {:<8} {:<14} {}",
+                    "STEP", "ORD", "LABEL", "TOOL", "KIND", "STATE", "LINKED"
+                );
                 for s in &run.steps {
                     println!(
                         "{:<8} {:<4} {:<20} {:<8} {:<8} {:<14} {}",
@@ -291,13 +305,23 @@ async fn main() -> Result<()> {
                 Ok(())
             }
 
-            WorkflowAction::Step { run_id, step_id, action } => {
+            WorkflowAction::Step {
+                run_id,
+                step_id,
+                action,
+            } => {
                 let valid = ["approve", "complete", "skip", "retry", "fail"];
                 if !valid.contains(&action.as_str()) {
-                    bail!("Unknown step action '{}'. Use: {}", action, valid.join(", "));
+                    bail!(
+                        "Unknown step action '{}'. Use: {}",
+                        action,
+                        valid.join(", ")
+                    );
                 }
                 let res = client
-                    .post(format!("{base}/api/workflow-runs/{run_id}/steps/{step_id}/{action}"))
+                    .post(format!(
+                        "{base}/api/workflow-runs/{run_id}/steps/{step_id}/{action}"
+                    ))
                     .send()
                     .await?;
                 if res.status().is_success() {
@@ -310,14 +334,20 @@ async fn main() -> Result<()> {
                 Ok(())
             }
 
-            WorkflowAction::Link { run_id, step_id, monitor_run_id } => {
+            WorkflowAction::Link {
+                run_id,
+                step_id,
+                monitor_run_id,
+            } => {
                 let body = serde_json::json!({
                     "runId": monitor_run_id,
                     "confidence": "explicit",
                     "matchedBy": "cli-manual",
                 });
                 let res = client
-                    .post(format!("{base}/api/workflow-runs/{run_id}/steps/{step_id}/link"))
+                    .post(format!(
+                        "{base}/api/workflow-runs/{run_id}/steps/{step_id}/link"
+                    ))
                     .json(&body)
                     .send()
                     .await?;
@@ -331,7 +361,9 @@ async fn main() -> Result<()> {
 
             WorkflowAction::Preview { run_id, step_id } => {
                 let res = client
-                    .get(format!("{base}/api/workflow-runs/{run_id}/steps/{step_id}/preview"))
+                    .get(format!(
+                        "{base}/api/workflow-runs/{run_id}/steps/{step_id}/preview"
+                    ))
                     .send()
                     .await?;
                 if !res.status().is_success() {
@@ -375,8 +407,7 @@ async fn start_run(
     for s in &run.steps {
         println!(
             "  {} [{}] {:?} {:?} → {:?}",
-            s.step_id, s.label,
-            s.tool, s.kind, s.state,
+            s.step_id, s.label, s.tool, s.kind, s.state,
         );
     }
     Ok(())
@@ -465,6 +496,8 @@ fn print_template() {
     eprintln!("#");
     eprintln!("# Usage:");
     eprintln!("#   octomonitor workflow create -f workflow.json");
-    eprintln!("#   octomonitor workflow create -f workflow.json --run --dir /project --mode assisted");
+    eprintln!(
+        "#   octomonitor workflow create -f workflow.json --run --dir /project --mode assisted"
+    );
     eprintln!("#   octomonitor workflow template > my-workflow.json  # then edit and create");
 }

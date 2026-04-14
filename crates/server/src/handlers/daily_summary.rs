@@ -22,15 +22,26 @@ pub async fn generate_daily_summary(
     Json(input): Json<GenerateRequest>,
 ) -> Result<Json<GenerateResponse>, StatusCode> {
     let (cmd, args) = match input.mode.as_str() {
-        "claude" => ("claude", vec![
-            "-p".to_string(), input.prompt.clone(),
-            "--output-format".to_string(), "text".to_string(),
-            "--max-budget-usd".to_string(), "0.50".to_string(),
-        ]),
-        "codex" => ("codex", vec![
-            "exec".to_string(), input.prompt.clone(),
-            "-a".to_string(), "never".to_string(),
-        ]),
+        "claude" => (
+            "claude",
+            vec![
+                "-p".to_string(),
+                input.prompt.clone(),
+                "--output-format".to_string(),
+                "text".to_string(),
+                "--max-budget-usd".to_string(),
+                "0.50".to_string(),
+            ],
+        ),
+        "codex" => (
+            "codex",
+            vec![
+                "exec".to_string(),
+                input.prompt.clone(),
+                "-a".to_string(),
+                "never".to_string(),
+            ],
+        ),
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
@@ -47,7 +58,10 @@ pub async fn generate_daily_summary(
     )
     .await
     .map_err(|_| {
-        tracing::warn!("daily summary generation timed out after {:?}", GENERATE_TIMEOUT);
+        tracing::warn!(
+            "daily summary generation timed out after {:?}",
+            GENERATE_TIMEOUT
+        );
         StatusCode::GATEWAY_TIMEOUT
     })?
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
