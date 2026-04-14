@@ -16,12 +16,19 @@ fn watch_dirs() -> Vec<PathBuf> {
     let codex_base = std::env::var("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| home.join(".codex"));
-    let openclaw_base = home.join(".openclaw");
+    let openclaw_base = std::env::var("OPENCLAW_STATE_DIR")
+        .or_else(|_| std::env::var("OPENCLAW_HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".openclaw"));
+    let hermes_base = std::env::var("HERMES_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join(".hermes"));
 
     vec![
         claude_base.join("projects"),
         codex_base.join("sessions"),
         openclaw_base.join("agents"),
+        hermes_base.join("sessions"),
     ]
 }
 
