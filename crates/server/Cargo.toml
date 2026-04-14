@@ -26,6 +26,7 @@ octomonitor-companion = { path = "../companion" }
 octomonitor-claude-adapter = { path = "../adapters/claude" }
 octomonitor-codex-adapter = { path = "../adapters/codex" }
 octomonitor-openclaw-adapter = { path = "../adapters/openclaw" }
+octomonitor-hermes-adapter = { path = "../adapters/hermes" }
 
 [dev-dependencies]
 tempfile = "3"

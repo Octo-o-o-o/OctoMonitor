@@ -3,11 +3,7 @@ use octomonitor_core::{RunRecord, WorkflowHint};
 
 /// Attempt strong (automatic) resolution from a workflow hint attached to a run.
 /// Returns a `LinkedRunRef` if the hint matches the given step.
-pub fn resolve_strong(
-    run: &RunRecord,
-    step: &StepRun,
-    workflow_id: &str,
-) -> Option<LinkedRunRef> {
+pub fn resolve_strong(run: &RunRecord, step: &StepRun, workflow_id: &str) -> Option<LinkedRunRef> {
     let hint = run.workflow_hint.as_ref()?;
 
     // Explicit match: workflowId + stepId both present and match
@@ -145,6 +141,7 @@ impl ToolLabel for RunRecord {
             octomonitor_core::ToolKind::Claude => "claude",
             octomonitor_core::ToolKind::Codex => "codex",
             octomonitor_core::ToolKind::OpenClaw => "openclaw",
+            octomonitor_core::ToolKind::Hermes => "hermes",
         }
     }
 }

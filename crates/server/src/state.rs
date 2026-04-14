@@ -24,6 +24,7 @@ pub struct AppState {
     pub claude_probe_cache: Arc<StdMutex<octomonitor_claude_adapter::ClaudeProbeCache>>,
     pub codex_probe_cache: Arc<StdMutex<octomonitor_codex_adapter::CodexProbeCache>>,
     pub openclaw_probe_cache: Arc<StdMutex<octomonitor_openclaw_adapter::OpenClawProbeCache>>,
+    pub hermes_probe_cache: Arc<StdMutex<octomonitor_hermes_adapter::HermesProbeCache>>,
     pub pricing: PricingStore,
     pub workflow_coordinator: Arc<Mutex<WorkflowCoordinator>>,
 }
@@ -52,6 +53,9 @@ impl AppState {
             )),
             openclaw_probe_cache: Arc::new(StdMutex::new(
                 octomonitor_openclaw_adapter::OpenClawProbeCache::default(),
+            )),
+            hermes_probe_cache: Arc::new(StdMutex::new(
+                octomonitor_hermes_adapter::HermesProbeCache::default(),
             )),
             pricing,
             workflow_coordinator: Arc::new(Mutex::new(workflow_coordinator)),

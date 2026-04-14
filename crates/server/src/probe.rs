@@ -10,6 +10,7 @@ use octomonitor_core::{
     HistoryRange, IdentityState, MoneyValue, PendingCron, QuotaValue, RunRecord, RunState,
     SourceConfidence, SourceInfo, TokenUsage, ToolKind, UsageBucket, UsageHistoryPayload,
 };
+use octomonitor_hermes_adapter as hermes_adapter;
 use octomonitor_openclaw_adapter as openclaw_adapter;
 
 use crate::commits::{build_commit_records, hydrate_run_vcs};
@@ -145,6 +146,25 @@ fn failed_openclaw_snapshot(reason: String) -> openclaw_adapter::OpenClawSnapsho
         cron_jobs: Vec::new(),
         command_probes: vec![openclaw_adapter::CommandProbeResult {
             command: "openclaw probe".into(),
+            success: false,
+            stdout_snippet: None,
+            error: Some(reason),
+        }],
+        file_probes: Vec::new(),
+    }
+}
+
+fn failed_hermes_snapshot(reason: String) -> hermes_adapter::HermesSnapshot {
+    hermes_adapter::HermesSnapshot {
+        probed_at: Utc::now().to_rfc3339(),
+        cli_available: false,
+        gateway_running: false,
+        cli_version: None,
+        instances: Vec::new(),
+        sessions: Vec::new(),
+        cron_jobs: Vec::new(),
+        command_probes: vec![hermes_adapter::CommandProbeResult {
+            command: "hermes probe".into(),
             success: false,
             stdout_snippet: None,
             error: Some(reason),
@@ -510,12 +530,14 @@ async fn scan_adapters_isolated(
     claude_adapter::ClaudeSnapshot,
     codex_adapter::CodexSnapshot,
     openclaw_adapter::OpenClawSnapshot,
+    hermes_adapter::HermesSnapshot,
 ) {
     let started_at = Instant::now();
     let claude_cache = state.claude_probe_cache.clone();
     let codex_cache = state.codex_probe_cache.clone();
     let openclaw_cache = state.openclaw_probe_cache.clone();
-    let (claude_probe, codex_probe, openclaw_probe) = tokio::join!(
+    let hermes_cache = state.hermes_probe_cache.clone();
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = tokio::join!(
         run_probe_task(
             "claude",
             move || match claude_cache.try_lock() {
@@ -542,28 +564,41 @@ async fn scan_adapters_isolated(
             },
             failed_openclaw_snapshot
         ),
+        run_probe_task(
+            "hermes",
+            move || match hermes_cache.try_lock() {
+                Ok(mut cache) => hermes_adapter::probe_with_cache(&mut cache),
+                Err(_) => {
+                    failed_hermes_snapshot("probe cache busy after previous timeout".into())
+                }
+            },
+            failed_hermes_snapshot
+        ),
     );
     perf::log_elapsed_with_details("scan_adapters", started_at, || {
         format!(
-            "claude_sessions={} codex_sessions={} openclaw_sessions={}",
+            "claude_sessions={} codex_sessions={} openclaw_sessions={} hermes_sessions={}",
             claude_probe.sessions.len(),
             codex_probe.sessions.len(),
-            openclaw_probe.sessions.len()
+            openclaw_probe.sessions.len(),
+            hermes_probe.sessions.len()
         )
     });
-    (claude_probe, codex_probe, openclaw_probe)
+    (claude_probe, codex_probe, openclaw_probe, hermes_probe)
 }
 
 fn scan_adapters_blocking() -> (
     claude_adapter::ClaudeSnapshot,
     codex_adapter::CodexSnapshot,
     openclaw_adapter::OpenClawSnapshot,
+    hermes_adapter::HermesSnapshot,
 ) {
     let started_at = Instant::now();
-    let (claude_probe, codex_probe, openclaw_probe) = std::thread::scope(|s| {
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = std::thread::scope(|s| {
         let h1 = s.spawn(claude_adapter::probe);
         let h2 = s.spawn(codex_adapter::probe);
         let h3 = s.spawn(openclaw_adapter::probe);
+        let h4 = s.spawn(hermes_adapter::probe);
         (
             h1.join().unwrap_or_else(|e| {
                 tracing::error!("claude probe panicked: {e:?}");
@@ -577,17 +612,22 @@ fn scan_adapters_blocking() -> (
                 tracing::error!("openclaw probe panicked: {e:?}");
                 openclaw_adapter::probe()
             }),
+            h4.join().unwrap_or_else(|e| {
+                tracing::error!("hermes probe panicked: {e:?}");
+                hermes_adapter::probe()
+            }),
         )
     });
     perf::log_elapsed_with_details("scan_adapters", started_at, || {
         format!(
-            "claude_sessions={} codex_sessions={} openclaw_sessions={}",
+            "claude_sessions={} codex_sessions={} openclaw_sessions={} hermes_sessions={}",
             claude_probe.sessions.len(),
             codex_probe.sessions.len(),
-            openclaw_probe.sessions.len()
+            openclaw_probe.sessions.len(),
+            hermes_probe.sessions.len()
         )
     });
-    (claude_probe, codex_probe, openclaw_probe)
+    (claude_probe, codex_probe, openclaw_probe, hermes_probe)
 }
 
 fn make_identity(
@@ -634,6 +674,7 @@ fn collect_probe_scan_from_snapshots(
     claude_probe: claude_adapter::ClaudeSnapshot,
     codex_probe: codex_adapter::CodexSnapshot,
     openclaw_probe: openclaw_adapter::OpenClawSnapshot,
+    hermes_probe: hermes_adapter::HermesSnapshot,
 ) -> ProbeScanResult {
     let started_at = Instant::now();
     let now = Utc::now().to_rfc3339();
@@ -678,6 +719,19 @@ fn collect_probe_scan_from_snapshots(
         );
     }
 
+    if hermes_probe.sessions.is_empty() {
+        if include_placeholder_runs {
+            runs.push(build_probe_run_from_hermes(&hermes_probe));
+        }
+    } else {
+        runs.extend(
+            hermes_probe
+                .sessions
+                .iter()
+                .map(|s| build_run_from_hermes_session(s, &hermes_probe)),
+        );
+    }
+
     dedupe_runs(&mut runs);
 
     let claude_auth = if claude_probe.cli_available {
@@ -691,6 +745,11 @@ fn collect_probe_scan_from_snapshots(
         "unavailable"
     };
     let openclaw_auth = if openclaw_probe.gateway_status_ok {
+        "gateway"
+    } else {
+        "sessions-scan"
+    };
+    let hermes_auth = if hermes_probe.gateway_running {
         "gateway"
     } else {
         "sessions-scan"
@@ -721,6 +780,14 @@ fn collect_probe_scan_from_snapshots(
             openclaw_probe.sessions_dir_exists || openclaw_probe.state_file_exists,
             SourceConfidence::Official,
         ),
+        make_identity(
+            ToolKind::Hermes,
+            hermes_auth,
+            "hermes",
+            hermes_probe.cli_available,
+            !hermes_probe.instances.is_empty(),
+            SourceConfidence::Live,
+        ),
     ];
 
     let openclaw_mode = if openclaw_probe.gateway_status_ok {
@@ -744,6 +811,17 @@ fn collect_probe_scan_from_snapshots(
         .iter()
         .find(|p| !p.success)
         .and_then(|p| p.error.clone());
+    let hermes_error = hermes_probe
+        .command_probes
+        .iter()
+        .find(|p| !p.success)
+        .and_then(|p| p.error.clone());
+
+    let hermes_mode = if hermes_probe.gateway_running {
+        "gateway+sessions+probe"
+    } else {
+        "sessions-scan+probe"
+    };
 
     let adapter_health = vec![
         make_adapter_health(
@@ -767,9 +845,16 @@ fn collect_probe_scan_from_snapshots(
             &now,
             openclaw_error,
         ),
+        make_adapter_health(
+            ToolKind::Hermes,
+            hermes_mode,
+            hermes_probe.cli_available || !hermes_probe.instances.is_empty(),
+            &now,
+            hermes_error,
+        ),
     ];
 
-    let pending_crons = openclaw_probe
+    let mut pending_crons: Vec<PendingCron> = openclaw_probe
         .cron_jobs
         .iter()
         .filter(|j| j.enabled)
@@ -782,6 +867,21 @@ fn collect_probe_scan_from_snapshots(
             schedule_human: j.schedule_human.clone(),
         })
         .collect();
+
+    pending_crons.extend(
+        hermes_probe
+            .cron_jobs
+            .iter()
+            .filter(|j| j.enabled)
+            .map(|j| PendingCron {
+                id: format!("hermes-{}-{}", j.profile_name, j.id),
+                name: j.name.clone(),
+                agent_id: Some(j.profile_name.clone()),
+                schedule_expr: j.schedule_expr.clone(),
+                schedule_tz: j.schedule_tz.clone(),
+                schedule_human: j.schedule_human.clone(),
+            }),
+    );
 
     let result = ProbeScanResult {
         generated_at: now,
@@ -803,12 +903,13 @@ fn collect_probe_scan_from_snapshots(
 }
 
 fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
-    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters_blocking();
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = scan_adapters_blocking();
     collect_probe_scan_from_snapshots(
         include_placeholder_runs,
         claude_probe,
         codex_probe,
         openclaw_probe,
+        hermes_probe,
     )
 }
 
@@ -816,12 +917,14 @@ async fn collect_probe_scan_isolated(
     state: &AppState,
     include_placeholder_runs: bool,
 ) -> ProbeScanResult {
-    let (claude_probe, codex_probe, openclaw_probe) = scan_adapters_isolated(state).await;
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) =
+        scan_adapters_isolated(state).await;
     collect_probe_scan_from_snapshots(
         include_placeholder_runs,
         claude_probe,
         codex_probe,
         openclaw_probe,
+        hermes_probe,
     )
 }
 
@@ -1210,7 +1313,131 @@ fn build_run_from_openclaw_session(
     }
 }
 
-/// Fields that vary between the three probe-only placeholder runs.
+fn build_run_from_hermes_session(
+    session: &hermes_adapter::HermesSession,
+    probe: &hermes_adapter::HermesSnapshot,
+) -> RunRecord {
+    let workspace = format!("~/.hermes");
+
+    let started_at = session.started_at.clone().unwrap_or_default();
+    let last_activity_at = session.updated_at.clone().unwrap_or_default();
+    let elapsed = elapsed_from_timestamps(&started_at, &last_activity_at);
+
+    let state = classify_hermes_session_state(session);
+
+    RunRecord {
+        id: format!("hermes-{}-{}", session.profile_name, session.session_id),
+        tool: ToolKind::Hermes,
+        source_mode: if probe.gateway_running {
+            "hermes_gateway".into()
+        } else {
+            "hermes_sessions".into()
+        },
+        project_name: session
+            .display_name
+            .clone()
+            .or_else(|| session.origin_label.clone())
+            .unwrap_or_else(|| session.profile_name.clone()),
+        workspace_path: workspace.clone(),
+        workspace_short: shorten_path(&workspace),
+        model: session.model.clone(),
+        provider: Some("hermes".into()),
+        agent_name: Some(session.profile_name.clone()),
+        agent_display_name: session.display_name.clone(),
+        account_alias: Some("local-probe".into()),
+        auth_mode: Some(
+            if probe.gateway_running {
+                "gateway"
+            } else {
+                "sessions-scan"
+            }
+            .into(),
+        ),
+        auth_verified: probe.cli_available,
+        session_id: Some(session.session_id.clone()),
+        thread_id: None,
+        session_key: Some(session.session_key.clone()),
+        transcript_path: None,
+        started_at,
+        last_activity_at,
+        elapsed_ms: elapsed,
+        state: state.clone(),
+        last_action: session
+            .last_question
+            .clone()
+            .or_else(|| session.first_question.clone())
+            .or_else(|| session.display_name.clone())
+            .or_else(|| session.origin_label.clone()),
+        last_tail: session.model.clone(),
+        pending_approval: false,
+        first_question: session.first_question.clone(),
+        last_question: session.last_question.clone(),
+        error_message: session.error_message.clone(),
+        message_count: session.message_count,
+        tokens: TokenUsage {
+            input: session.input_tokens,
+            output: session.output_tokens,
+            cache_read: session.cache_read_tokens,
+            cache_write: session.cache_write_tokens,
+            total: session.total_tokens,
+            context: 0,
+        },
+        cost: MoneyValue {
+            usd: session.cost_usd,
+            confidence: if session.cost_usd.is_some() {
+                SourceConfidence::Derived
+            } else {
+                SourceConfidence::Estimated
+            },
+        },
+        quota: QuotaValue {
+            five_hour_used_pct: None,
+            seven_day_used_pct: None,
+            reset_at: vec![],
+            confidence: SourceConfidence::Derived,
+        },
+        source: SourceInfo {
+            confidence: SourceConfidence::Live,
+            freshness: Freshness::Hot,
+            last_updated_at: probe.probed_at.clone(),
+        },
+        vcs: None,
+        origin_label: session.origin_label.clone(),
+        origin_provider: session.origin_provider.clone(),
+        workflow_hint: None,
+    }
+}
+
+fn classify_hermes_session_state(session: &hermes_adapter::HermesSession) -> RunState {
+    // Hermes sessions.json doesn't have explicit status — derive from timestamps
+    let updated_at = session
+        .updated_at
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .or_else(|| {
+            session
+                .updated_at
+                .as_deref()
+                .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").ok())
+                .map(|ndt| ndt.and_utc().fixed_offset())
+        });
+
+    match updated_at {
+        Some(dt) => {
+            let age_secs = (Utc::now() - dt.with_timezone(&Utc)).num_seconds();
+            if age_secs < 120 {
+                RunState::Active
+            } else if age_secs < 600 {
+                RunState::Idle
+            } else {
+                RunState::Completed
+            }
+        }
+        None => RunState::Completed,
+    }
+}
+
+/// Fields that vary between the probe-only placeholder runs.
 struct ProbeRunParams {
     id: &'static str,
     tool: ToolKind,
@@ -1396,6 +1623,44 @@ fn build_probe_run_from_openclaw(probe: &openclaw_adapter::OpenClawSnapshot) -> 
     })
 }
 
+fn build_probe_run_from_hermes(probe: &hermes_adapter::HermesSnapshot) -> RunRecord {
+    build_probe_placeholder_run(ProbeRunParams {
+        id: "hermes-probe-run",
+        tool: ToolKind::Hermes,
+        source_mode: if probe.gateway_running {
+            "hermes_gateway".into()
+        } else {
+            "hermes_sessions".into()
+        },
+        project_name: "Hermes",
+        workspace_path: "~/.hermes".into(),
+        workspace_short: "~/.hermes",
+        provider: "hermes",
+        auth_mode: if probe.gateway_running {
+            "gateway"
+        } else {
+            "sessions-scan"
+        },
+        auth_verified: probe.cli_available,
+        state: if probe.gateway_running || !probe.instances.is_empty() {
+            RunState::Idle
+        } else {
+            RunState::GatewayOffline
+        },
+        last_action: "Probed Gateway/CLI/session store",
+        last_tail: probe.cli_version.clone(),
+        probed_at: probe.probed_at.clone(),
+        quota: QuotaValue {
+            five_hour_used_pct: None,
+            seven_day_used_pct: None,
+            reset_at: vec![],
+            confidence: SourceConfidence::Derived,
+        },
+        cost_confidence: SourceConfidence::Derived,
+        source_confidence: SourceConfidence::Live,
+    })
+}
+
 pub fn elapsed_from_timestamps(start: &str, end: &str) -> i64 {
     let start_dt = chrono::DateTime::parse_from_rfc3339(start).ok();
     let end_dt = chrono::DateTime::parse_from_rfc3339(end).ok();
@@ -1421,7 +1686,7 @@ fn normalized_total_tokens(
         // Codex cached input is a subset of input_tokens; ccusage falls back
         // to input + output when total_tokens is missing.
         ToolKind::Codex => input.saturating_add(output),
-        ToolKind::Claude | ToolKind::OpenClaw => input
+        ToolKind::Claude | ToolKind::OpenClaw | ToolKind::Hermes => input
             .saturating_add(output)
             .saturating_add(cache_read)
             .saturating_add(cache_write),
@@ -1616,6 +1881,7 @@ pub fn tool_key(tool: &ToolKind) -> &'static str {
         ToolKind::Claude => "claude",
         ToolKind::Codex => "codex",
         ToolKind::OpenClaw => "openClaw",
+        ToolKind::Hermes => "hermes",
     }
 }
 

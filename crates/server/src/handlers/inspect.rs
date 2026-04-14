@@ -72,6 +72,7 @@ fn load_run_entries(run: &RunRecord) -> Vec<InspectEntry> {
         ToolKind::Claude => parse_claude_entries(reader),
         ToolKind::Codex => parse_codex_entries(reader),
         ToolKind::OpenClaw => parse_openclaw_entries(reader),
+        ToolKind::Hermes => Vec::new(), // Hermes uses SQLite, no JSONL transcripts
     }
 }
 
@@ -194,8 +195,9 @@ fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
                     .and_then(|value| value.as_str())
                     .unwrap_or_default();
                 if payload_type == "message" && role == "assistant" {
-                    if let Some(text) =
-                        payload.get("content").and_then(|c| extract_string_or_text_blocks(c, &["output_text"]))
+                    if let Some(text) = payload
+                        .get("content")
+                        .and_then(|c| extract_string_or_text_blocks(c, &["output_text"]))
                     {
                         pending_output = build_entry(
                             InspectEntryKind::Output,

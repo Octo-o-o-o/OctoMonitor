@@ -148,24 +148,17 @@ impl LauncherDispatcher {
 
     /// Check which CLI tools are available on this system.
     pub async fn detect_capabilities(&mut self) {
-        self.capabilities.insert(
-            ToolKind::Claude,
-            check_cli("claude", &["--version"]).await,
-        );
-        self.capabilities.insert(
-            ToolKind::Codex,
-            check_cli("codex", &["--version"]).await,
-        );
+        self.capabilities
+            .insert(ToolKind::Claude, check_cli("claude", &["--version"]).await);
+        self.capabilities
+            .insert(ToolKind::Codex, check_cli("codex", &["--version"]).await);
     }
 
     pub fn is_available(&self, tool: &ToolKind) -> bool {
         self.capabilities.get(tool).copied().unwrap_or(false)
     }
 
-    pub async fn launch(
-        &self,
-        request: LaunchRequest,
-    ) -> Result<LauncherResult, LaunchError> {
+    pub async fn launch(&self, request: LaunchRequest) -> Result<LauncherResult, LaunchError> {
         if !self.is_available(&request.tool) {
             return Err(LaunchError::CliNotAvailable(format!(
                 "{:?} CLI not detected",
@@ -178,6 +171,9 @@ impl LauncherDispatcher {
             ToolKind::Codex => CodexLauncher.launch(request).await,
             ToolKind::OpenClaw => Err(LaunchError::CliNotAvailable(
                 "OpenClaw launcher not yet implemented".into(),
+            )),
+            ToolKind::Hermes => Err(LaunchError::CliNotAvailable(
+                "Hermes launcher not yet implemented".into(),
             )),
         }
     }
@@ -201,7 +197,9 @@ async fn run_cli_command(
     timeout_secs: Option<u64>,
     working_dir: &str,
 ) -> Result<LauncherResult, LaunchError> {
-    let mut child = cmd.spawn().map_err(|e| LaunchError::SpawnFailed(e.to_string()))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| LaunchError::SpawnFailed(e.to_string()))?;
 
     let stdout = child
         .stdout
