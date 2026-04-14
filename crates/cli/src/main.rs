@@ -489,7 +489,7 @@ fn print_template() {
     eprintln!("#   {{{{linked_run.summary}}}}     - Current step's linked run first question");
     eprintln!("#   {{{{file:relative/path}}}}     - Inject file content (max 8000 chars)");
     eprintln!("#");
-    eprintln!("# Tools: claude, codex, openClaw");
+    eprintln!("# Tools: claude, codex, openClaw, hermes");
     eprintln!("# Kinds: observe, launch");
     eprintln!("# Completion modes: manualLink, manualComplete, launcherExit, hookEvent");
     eprintln!("# Execution modes: tracking (default), assisted, auto");
