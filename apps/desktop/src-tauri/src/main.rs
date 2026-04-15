@@ -351,7 +351,7 @@ fn main() {
             let issue = window
                 .app_handle()
                 .try_state::<DesktopBootState>()
-                .and_then(|state| state.0.lock().ok().and_then(|issue| issue.clone()));
+                .and_then(|state| state.0.lock().ok()?.clone());
             let payload = serde_json::to_string(&issue).unwrap_or_else(|_| "null".into());
             let script = format!(
                 "window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload}; window.dispatchEvent(new CustomEvent('octomonitor:desktop-boot-status', {{ detail: {payload} }}));"

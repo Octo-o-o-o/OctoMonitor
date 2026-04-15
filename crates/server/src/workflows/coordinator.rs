@@ -369,7 +369,7 @@ impl WorkflowCoordinator {
         if step.kind != WorkflowStepKind::Launch {
             bail!("Only launch steps can be approved");
         }
-        if step.state != StepRunState::WaitingApproval && step.state != StepRunState::Ready {
+        if !matches!(step.state, StepRunState::WaitingApproval | StepRunState::Ready) {
             bail!(
                 "Step is not in an approvable state (current: {:?})",
                 step.state

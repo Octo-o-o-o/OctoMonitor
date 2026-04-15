@@ -176,7 +176,6 @@ function useWaitingNotifications(enabled: boolean, t: (key: I18nKey) => string) 
     const currentWaiting = new Set(
       data.runs.filter((r) => r.state === 'waitingApproval').map((r) => r.id)
     )
-    // Find newly waiting sessions (not in previous set)
     const newWaiting = data.runs.filter(
       (r) => r.state === 'waitingApproval' && !prevWaitingRef.current.has(r.id)
     )

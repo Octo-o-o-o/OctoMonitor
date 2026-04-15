@@ -62,7 +62,7 @@ fn ensure_referenced_assets(dist_dir: &std::path::Path) {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("html") {
+        if !path.extension().is_some_and(|ext| ext == "html") {
             continue;
         }
         let Ok(contents) = fs::read_to_string(&path) else {
@@ -80,7 +80,7 @@ fn ensure_referenced_assets(dist_dir: &std::path::Path) {
             if let Some(parent) = asset_path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            let placeholder = match asset_path.extension().and_then(|ext| ext.to_str()) {
+            let placeholder = match asset_path.extension().and_then(std::ffi::OsStr::to_str) {
                 Some("js") => {
                     "console.warn('OctoMonitor placeholder asset loaded during cargo test');\n"
                 }

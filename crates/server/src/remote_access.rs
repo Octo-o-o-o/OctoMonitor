@@ -399,16 +399,17 @@ async fn remote_stream_socket(mut socket: WebSocket, state: AppState, session_se
         return;
     }
 
-    {
+    async fn send_snapshot(socket: &mut WebSocket, state: &AppState) -> bool {
         let payload = redact_bootstrap(&state.bootstrap.read().await.clone());
         let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
-        if socket
+        socket
             .send(Message::Text(msg.to_string().into()))
             .await
-            .is_err()
-        {
-            return;
-        }
+            .is_ok()
+    }
+
+    if !send_snapshot(&mut socket, &state).await {
+        return;
     }
 
     let mut rx = state.notify.subscribe();
@@ -418,8 +419,7 @@ async fn remote_stream_socket(mut socket: WebSocket, state: AppState, session_se
             result = rx.recv() => {
                 match result {
                     Err(RecvError::Closed) => break,
-                    Err(RecvError::Lagged(_)) => {}
-                    Ok(_) => {}
+                    Err(RecvError::Lagged(_)) | Ok(_) => {}
                 }
                 while rx.try_recv().is_ok() {}
 
@@ -428,9 +428,7 @@ async fn remote_stream_socket(mut socket: WebSocket, state: AppState, session_se
                     break;
                 }
 
-                let payload = redact_bootstrap(&state.bootstrap.read().await.clone());
-                let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
-                if socket.send(Message::Text(msg.to_string().into())).await.is_err() {
+                if !send_snapshot(&mut socket, &state).await {
                     break;
                 }
             }

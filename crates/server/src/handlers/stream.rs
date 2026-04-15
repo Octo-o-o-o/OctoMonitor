@@ -15,16 +15,14 @@ pub async fn stream(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 }
 
 async fn stream_socket(mut socket: WebSocket, state: AppState) {
+    let payload = state.bootstrap.read().await.clone();
+    let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
+    if socket
+        .send(Message::Text(msg.to_string().into()))
+        .await
+        .is_err()
     {
-        let payload = state.bootstrap.read().await.clone();
-        let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
-        if socket
-            .send(Message::Text(msg.to_string().into()))
-            .await
-            .is_err()
-        {
-            return;
-        }
+        return;
     }
 
     let mut rx = state.notify.subscribe();

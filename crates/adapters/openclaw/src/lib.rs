@@ -114,16 +114,12 @@ struct OpenClawTranscriptState {
 }
 
 fn openclaw_root() -> PathBuf {
-    // OPENCLAW_STATE_DIR is the official env var for state directory override.
-    // OPENCLAW_HOME is a common alias used in community scripts.
-    for var in ["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"] {
-        if let Ok(custom) = std::env::var(var) {
-            if !custom.is_empty() {
-                return PathBuf::from(custom);
-            }
-        }
-    }
-    resolve_home_dir(".openclaw")
+    ["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"]
+        .iter()
+        .filter_map(|var| std::env::var(var).ok())
+        .find(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_home_dir(".openclaw"))
 }
 
 fn mask_tail(value: &str) -> String {
@@ -307,15 +303,15 @@ fn scan_cron_jobs_inner(root: &Path) -> Option<Vec<OpenClawCronJob>> {
     )
 }
 
-fn load_agent_name_map(root: &Path) -> std::collections::HashMap<String, String> {
+fn load_agent_name_map(root: &Path) -> HashMap<String, String> {
     load_agent_name_map_inner(root).unwrap_or_default()
 }
 
-fn load_agent_name_map_inner(root: &Path) -> Option<std::collections::HashMap<String, String>> {
+fn load_agent_name_map_inner(root: &Path) -> Option<HashMap<String, String>> {
     let contents = fs::read_to_string(root.join("openclaw.json")).ok()?;
     let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let agents = val.pointer("/agents/list").and_then(|v| v.as_array())?;
-    let mut map = std::collections::HashMap::new();
+    let mut map = HashMap::new();
     for agent in agents {
         if let (Some(id), Some(name)) = (
             agent.get("id").and_then(|v| v.as_str()),
@@ -438,23 +434,21 @@ fn apply_openclaw_transcript_line(state: &mut OpenClawTranscriptState, line: &st
 fn extract_text_content(msg: &serde_json::Value) -> Option<String> {
     let content = msg.get("content")?;
     if let Some(s) = content.as_str() {
-        if s.is_empty() {
-            return None;
-        }
-        return Some(s.to_string());
+        return (!s.is_empty()).then(|| s.to_string());
     }
-    if let Some(arr) = content.as_array() {
-        for block in arr {
+    content.as_array().and_then(|arr| {
+        arr.iter().find_map(|block| {
             if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
-                    if !t.is_empty() {
-                        return Some(t.to_string());
-                    }
-                }
+                block
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .filter(|t| !t.is_empty())
+                    .map(String::from)
+            } else {
+                None
             }
-        }
-    }
-    None
+        })
+    })
 }
 
 fn parse_sessions_json_base(

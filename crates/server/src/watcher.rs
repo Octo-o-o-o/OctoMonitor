@@ -32,14 +32,11 @@ fn watch_dirs() -> Vec<PathBuf> {
         hermes_base.join("sessions"),
     ];
 
-    // Hermes profiles: each profile has its own sessions dir
     let hermes_profiles = hermes_base.join("profiles");
-    if hermes_profiles.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&hermes_profiles) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    dirs.push(entry.path().join("sessions"));
-                }
+    if let Ok(entries) = std::fs::read_dir(&hermes_profiles) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+                dirs.push(entry.path().join("sessions"));
             }
         }
     }

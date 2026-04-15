@@ -1,11 +1,8 @@
 import { useState } from 'react'
 import { useMonitorStore, type FilterMode, type FilterRules } from '../../../store/monitorStore'
 import { useI18n } from '../../../lib/i18n'
+import { allTools, sourceLabels } from '../../../lib/constants'
 import type { ToolKind } from '../../../lib/types'
-
-const panelLabels: Record<ToolKind, string> = {
-  claude: 'Claude Code', codex: 'Codex', openClaw: 'OpenClaw', hermes: 'Hermes',
-}
 
 export function FilterSection() {
   const filterRules = useMonitorStore((s) => s.settings.filterRules)
@@ -40,7 +37,7 @@ export function FilterSection() {
       <div className="settings-cards-1">
         <p className="settings-hint">{t('settings.filterRulesHint')}</p>
         <div className="filter-rules-list">
-          {(['claude', 'codex', 'openClaw', 'hermes'] as ToolKind[]).map((tool) => {
+          {allTools.map((tool) => {
             const filter = filterRules[tool]
             const isProject = tool !== 'openClaw' && tool !== 'hermes'
             const placeholder = isProject
@@ -50,7 +47,7 @@ export function FilterSection() {
               <div key={tool} className="filter-rule-group">
                 <div className="filter-rule-header">
                   <div className="filter-rule-title">
-                    <strong>{panelLabels[tool]}</strong>
+                    <strong>{sourceLabels[tool]}</strong>
                     <span className="filter-dimension">{isProject ? t('ui.project') : t('ui.agent')}</span>
                   </div>
                   <div className="filter-mode-row">

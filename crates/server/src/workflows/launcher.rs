@@ -169,11 +169,8 @@ impl LauncherDispatcher {
         match request.tool {
             ToolKind::Claude => ClaudeLauncher.launch(request).await,
             ToolKind::Codex => CodexLauncher.launch(request).await,
-            ToolKind::OpenClaw => Err(LaunchError::CliNotAvailable(
-                "OpenClaw launcher not yet implemented".into(),
-            )),
-            ToolKind::Hermes => Err(LaunchError::CliNotAvailable(
-                "Hermes launcher not yet implemented".into(),
+            tool @ (ToolKind::OpenClaw | ToolKind::Hermes) => Err(LaunchError::CliNotAvailable(
+                format!("{tool:?} launcher not yet implemented"),
             )),
         }
     }

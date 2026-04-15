@@ -134,7 +134,6 @@ function DailySummaryCard({
   const [aiError, setAiError] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  // Reset AI report when date changes
   const dateKey = data.date.toISOString().slice(0, 10)
   useEffect(() => {
     setAiReport(undefined)

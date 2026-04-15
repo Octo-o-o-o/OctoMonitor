@@ -46,13 +46,12 @@ pub fn shorten_path(path: &str) -> String {
         home.replace('/', "\\"),
     ];
 
-    for candidate in candidates {
-        if let Some(rest) = path.strip_prefix(&candidate) {
-            return if rest.is_empty() {
-                "~".into()
-            } else {
-                format!("~{rest}")
-            };
+    for candidate in &candidates {
+        if let Some(rest) = path.strip_prefix(candidate.as_str()) {
+            if rest.is_empty() {
+                return "~".into();
+            }
+            return format!("~{rest}");
         }
     }
 

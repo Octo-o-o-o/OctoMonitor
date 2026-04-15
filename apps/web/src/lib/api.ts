@@ -1,10 +1,9 @@
 import type { BootstrapPayload } from './types'
 
-const isTauri = Boolean(
+const isTauri =
   '__TAURI_INTERNALS__' in window
-    || '__TAURI__' in window
-    || window.location.protocol === 'tauri:'
-)
+  || '__TAURI__' in window
+  || window.location.protocol === 'tauri:'
 
 const DEFAULT_CONFIG: BootstrapPayload['config'] = {
   listenHost: '127.0.0.1',

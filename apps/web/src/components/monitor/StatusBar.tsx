@@ -26,7 +26,6 @@ const periodLabels: Record<MonitorPeriod, string> = {
   '24h': '24H',
 }
 
-/** Compute the union of active time intervals and return total seconds */
 function computeActiveSeconds(runs: RunRecord[], cutoff: number, now: number): number {
   const intervals: [number, number][] = []
   for (const r of runs) {
@@ -124,8 +123,6 @@ export function StatusBar({ runtimeMode, wsConnected }: { runtimeMode: RuntimeMo
     const tokens = usageTotals.totalTokens
     const usd = usageTotals.costUsd ?? 0
 
-    // TPS = (input + output) tokens / active seconds
-    // Excludes cacheRead/cacheWrite — cache hits are not real compute work
     const monitorUsageTotals = sumUsageSlices(monitorUsageSlices.map(({ usage }) => usage))
     const ioTokens = monitorUsageTotals.inputTokens + monitorUsageTotals.outputTokens
     const activeSec = computeActiveSeconds(runsInPeriod, cutoff, now)

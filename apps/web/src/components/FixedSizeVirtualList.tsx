@@ -40,7 +40,7 @@ export function FixedSizeVirtualList<T>({
     }
     updateHeight()
 
-    const observer = new ResizeObserver(() => updateHeight())
+    const observer = new ResizeObserver(updateHeight)
     observer.observe(node)
     return () => observer.disconnect()
   }, [])

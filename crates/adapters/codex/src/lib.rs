@@ -49,6 +49,9 @@ pub struct CodexSession {
     pub message_count: u64,
     /// Sum of (user_message → next_response) intervals in ms, excluding idle gaps.
     pub active_elapsed_ms: i64,
+    /// True when a `function_call` with `require_escalated` has no matching
+    /// `function_call_output` — the session is waiting for user approval.
+    pub has_pending_approval: bool,
     /// Workflow hint from .octomonitor/workflow-context.json in the workspace
     pub workflow_hint: Option<WorkflowContextFile>,
 }
@@ -119,6 +122,8 @@ struct CodexSessionState {
     message_count: u64,
     completed_active_elapsed_ms: i64,
     pending_user_ts: Option<chrono::DateTime<chrono::FixedOffset>>,
+    /// call_ids of function_calls with `require_escalated` that have no matching output yet.
+    pending_escalated_calls: HashSet<String>,
 }
 
 fn codex_config_dir() -> PathBuf {
@@ -409,6 +414,37 @@ fn apply_codex_line(state: &mut CodexSessionState, line: &str) {
                 state.last_question = Some(truncated);
             }
         }
+        "response_item" => {
+            if let Some(payload) = val.get("payload") {
+                let item_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match item_type {
+                    "function_call" => {
+                        // Check if the function_call requires escalated approval
+                        if let Some(args_str) =
+                            payload.get("arguments").and_then(|v| v.as_str())
+                        {
+                            if args_str.contains("require_escalated") {
+                                if let Some(call_id) =
+                                    payload.get("call_id").and_then(|v| v.as_str())
+                                {
+                                    state
+                                        .pending_escalated_calls
+                                        .insert(call_id.to_string());
+                                }
+                            }
+                        }
+                    }
+                    "function_call_output" => {
+                        if let Some(call_id) =
+                            payload.get("call_id").and_then(|v| v.as_str())
+                        {
+                            state.pending_escalated_calls.remove(call_id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -457,6 +493,7 @@ fn build_codex_session(
         last_question,
         message_count: state.message_count,
         active_elapsed_ms,
+        has_pending_approval: !state.pending_escalated_calls.is_empty(),
         workflow_hint,
     })
 }

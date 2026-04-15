@@ -157,11 +157,11 @@ export const CommitsView = memo(function CommitsView() {
 
     return commits
       .filter((commit) => {
+        if (selectedRepoId !== 'all' && commit.repoId !== selectedRepoId) return false
         if (mode !== 'snapshot') return true
         const committedAt = new Date(commit.committedAt).getTime()
         return Number.isFinite(committedAt) && committedAt >= snapshotFrom && committedAt <= snapshotTo
       })
-      .filter((commit) => selectedRepoId === 'all' || commit.repoId === selectedRepoId)
       .sort((a, b) => b.committedAt.localeCompare(a.committedAt))
   }, [commits, effectiveSnapshotRange, mode, selectedRepoId])
 

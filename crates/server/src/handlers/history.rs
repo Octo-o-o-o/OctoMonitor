@@ -32,12 +32,8 @@ fn parse_history_range(query: &HistoryQuery) -> Result<(DateTime<Utc>, DateTime<
     }
 
     let now = Utc::now();
-    if from > now {
-        from = now;
-    }
-    if to > now {
-        to = now;
-    }
+    from = from.min(now);
+    to = to.min(now);
 
     let max_span = Duration::days(3650);
     if to - from > max_span {

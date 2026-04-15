@@ -1,17 +1,11 @@
 import type { StepRun } from '../../lib/types'
 import { useI18n, type I18nKey } from '../../lib/i18n'
+import { toolBadges } from '../../lib/constants'
 
 interface Props {
   steps: StepRun[]
   selectedStepId: string | undefined
   onSelectStep: (id: string) => void
-}
-
-const toolLabels: Record<string, { short: string; cls: string }> = {
-  claude: { short: 'CC', cls: 'wf-tool-claude' },
-  codex: { short: 'CX', cls: 'wf-tool-codex' },
-  openClaw: { short: 'OC', cls: 'wf-tool-openclaw' },
-  hermes: { short: 'HM', cls: 'wf-tool-hermes' },
 }
 
 const stateClasses: Record<string, string> = {
@@ -53,7 +47,7 @@ export function PipelineView({ steps, selectedStepId, onSelectStep }: Props) {
     <div className="wf-pipeline">
       <div className="wf-pipe-row">
         {steps.map((step, i) => {
-          const tool = toolLabels[step.tool] ?? { short: '?', cls: '' }
+          const tool = toolBadges[step.tool] ?? { short: '?', cls: '' }
           const isSelected = step.stepId === selectedStepId
           const isObserve = step.kind === 'observe'
           const stateKey = stateI18nKeys[step.state]

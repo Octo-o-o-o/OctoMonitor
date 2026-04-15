@@ -46,9 +46,8 @@ fn local_allowed_origins() -> Vec<HeaderValue> {
         "https://tauri.localhost",
         "tauri://localhost",
     ]
-    .into_iter()
     .map(HeaderValue::from_static)
-    .collect()
+    .to_vec()
 }
 
 fn build_cors_layer() -> CorsLayer {
@@ -213,7 +212,6 @@ async fn main() -> anyhow::Result<()> {
             .expect("Failed to initialize workflow store");
     let wf_coordinator = workflows::coordinator::WorkflowCoordinator::new(wf_store);
 
-    // Load workflow summaries into bootstrap
     initial.workflow_runs = wf_coordinator.get_summary_list();
 
     let state = AppState::new(initial, pricing, wf_coordinator);

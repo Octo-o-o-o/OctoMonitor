@@ -356,7 +356,7 @@ fn extract_string_or_text_blocks(
         .iter()
         .filter_map(|block| {
             let block_type = block.get("type").and_then(|value| value.as_str())?;
-            if !allowed_types.iter().any(|allowed| allowed == &block_type) {
+            if !allowed_types.contains(&block_type) {
                 return None;
             }
             block.get("text").and_then(|value| value.as_str())

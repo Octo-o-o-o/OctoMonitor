@@ -8,8 +8,6 @@ use serde::Deserialize;
 
 use crate::state::AppState;
 
-// --- Definition CRUD ---
-
 pub async fn list_defs(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<WorkflowDef>>, StatusCode> {
@@ -92,8 +90,6 @@ pub async fn delete_def(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// --- Run CRUD ---
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRunBody {
@@ -169,8 +165,6 @@ pub async fn change_mode(
     Ok(Json(run))
 }
 
-// --- Step Actions ---
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StepPath {
@@ -244,9 +238,7 @@ pub async fn complete_step(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     state.signal_change();
 
-    // Auto-launch: if the next step is Ready + Launch + Auto mode, approve & launch
     maybe_auto_launch(&run, &coord, &state);
-
     Ok(Json(run))
 }
 
@@ -272,9 +264,7 @@ pub async fn skip_step(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     state.signal_change();
 
-    // Auto-launch: skipping may advance to a launchable step
     maybe_auto_launch(&run, &coord, &state);
-
     Ok(Json(run))
 }
 
@@ -287,8 +277,6 @@ pub async fn retry_step(
         .retry_step(&path.id, &path.step_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     state.signal_change();
-
-    // Auto-launch: if retry puts the step into Ready + Launch + Auto mode
     maybe_auto_launch(&run, &coord, &state);
 
     Ok(Json(run))
@@ -320,7 +308,6 @@ pub async fn approve_step(
     })?;
     state.signal_change();
 
-    // If approved, spawn the launcher in background
     let run_id = run.id.clone();
     let step_id = path.step_id.clone();
     let state_clone = state.clone();
@@ -331,7 +318,6 @@ pub async fn approve_step(
     Ok(Json(run))
 }
 
-/// If any launch step is in Ready state and mode is Auto, approve and spawn the launcher.
 fn maybe_auto_launch(
     run: &WorkflowRun,
     coord: &crate::workflows::coordinator::WorkflowCoordinator,
@@ -344,7 +330,6 @@ fn maybe_auto_launch(
         if step.kind == WorkflowStepKind::Launch && step.state == StepRunState::Ready {
             let run_id = run.id.clone();
             let step_id = step.step_id.clone();
-            // Approve transitions Ready → Running
             if coord.approve_step(&run_id, &step_id).is_ok() {
                 state.signal_change();
                 let state_clone = state.clone();
@@ -360,7 +345,7 @@ fn maybe_auto_launch(
 async fn execute_launch_step(state: AppState, run_id: &str, step_id: &str) {
     use crate::workflows::launcher::{LaunchRequest, LauncherDispatcher};
 
-    let (request, _) = {
+    let request = {
         let coord = state.workflow_coordinator.lock().await;
         let payload = state.bootstrap.read().await;
         let preview = match coord.get_launch_preview(run_id, step_id, &payload.runs) {
@@ -375,13 +360,13 @@ async fn execute_launch_step(state: AppState, run_id: &str, step_id: &str) {
             Some(s) => s,
             None => return,
         };
-        let def_step = run
+        let launch_spec = run
             .definition_snapshot
             .steps
             .iter()
-            .find(|d| d.id == step.step_id);
-        let launch_spec = def_step.and_then(|d| d.launch.as_ref());
-        let req = LaunchRequest {
+            .find(|d| d.id == step.step_id)
+            .and_then(|d| d.launch.as_ref());
+        LaunchRequest {
             tool: step.tool.clone(),
             prompt: preview.rendered_prompt,
             working_dir: run.working_dir.clone(),
@@ -389,8 +374,7 @@ async fn execute_launch_step(state: AppState, run_id: &str, step_id: &str) {
             timeout_secs: launch_spec.and_then(|l| l.timeout_secs),
             allowed_tools: preview.allowed_tools,
             args: launch_spec.map(|l| l.args.clone()).unwrap_or_default(),
-        };
-        (req, ())
+        }
     };
 
     let mut dispatcher = LauncherDispatcher::new();
@@ -399,10 +383,7 @@ async fn execute_launch_step(state: AppState, run_id: &str, step_id: &str) {
     match dispatcher.launch(request).await {
         Ok(result) => {
             let coord = state.workflow_coordinator.lock().await;
-            let source = if result.exit_code == 0 {
-                CompletionSource::LauncherExit
-            } else {
-                // Treat non-zero exit as failure
+            if result.exit_code != 0 {
                 let _ = coord.fail_step(
                     run_id,
                     step_id,
@@ -410,10 +391,9 @@ async fn execute_launch_step(state: AppState, run_id: &str, step_id: &str) {
                 );
                 state.signal_change();
                 return;
-            };
-            if let Ok(run) = coord.complete_step(run_id, step_id, source) {
+            }
+            if let Ok(run) = coord.complete_step(run_id, step_id, CompletionSource::LauncherExit) {
                 state.signal_change();
-                // Chain auto-launch for the next step in Auto mode
                 maybe_auto_launch(&run, &coord, &state);
             }
         }

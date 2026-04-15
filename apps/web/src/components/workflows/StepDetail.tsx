@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
+import { sourceLabels, toolBadges } from '../../lib/constants'
 import type { StepRun, WorkflowRun, RunRecord, LinkedRunRef } from '../../lib/types'
 
 interface Props {
@@ -45,9 +46,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
   const defStep = run.definitionSnapshot.steps.find((s) => s.id === step.stepId)
   const isObserve = step.kind === 'observe'
   const isLaunch = step.kind === 'launch'
-  const canLink = step.state === 'waitingLink' || step.state === 'ready' || step.state === 'running'
-  const canComplete =
-    step.state === 'waitingLink' || step.state === 'ready' || step.state === 'running'
+  const canLinkOrComplete = step.state === 'waitingLink' || step.state === 'ready' || step.state === 'running'
   const canSkip = step.state !== 'completed' && step.state !== 'skipped' && step.state !== 'cancelled'
   const canApprove = isLaunch && (step.state === 'waitingApproval' || step.state === 'ready')
   const canRetry = step.state === 'failed'
@@ -90,11 +89,11 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
         </div>
         <div className="wf-panel-body">
           <div className="wf-detail-header">
-            <span className={`wf-tool-icon ${step.tool === 'claude' ? 'wf-tool-claude' : step.tool === 'codex' ? 'wf-tool-codex' : step.tool === 'hermes' ? 'wf-tool-hermes' : 'wf-tool-openclaw'}`}>
-              {step.tool === 'claude' ? 'CC' : step.tool === 'codex' ? 'CX' : step.tool === 'hermes' ? 'HM' : 'OC'}
+            <span className={`wf-tool-icon ${toolBadges[step.tool]?.cls ?? ''}`}>
+              {toolBadges[step.tool]?.short ?? '?'}
             </span>
             <span className="wf-detail-tool-name">
-              {step.tool === 'claude' ? 'Claude Code' : step.tool === 'codex' ? 'Codex' : step.tool === 'hermes' ? 'Hermes' : 'OpenClaw'}
+              {sourceLabels[step.tool] ?? step.tool}
             </span>
             <span className={`wf-step-kind ${isObserve ? 'observe' : 'launch'}`}>
               {isObserve ? `\u{1F441} ${t('wf.stepObserve')}` : `\u{1F680} ${t('wf.stepLaunch')}`}
@@ -116,7 +115,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
         </div>
 
         <div className="wf-step-actions">
-          {canLink && (
+          {canLinkOrComplete && (
             <button
               className="wf-btn wf-btn-primary"
               onClick={() => setShowLinkPicker(!showLinkPicker)}
@@ -132,7 +131,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
               {t('wf.approveAndLaunch')}
             </button>
           )}
-          {canComplete && (
+          {canLinkOrComplete && (
             <button className="wf-btn" onClick={() => onAction('complete', step.stepId)}>
               {t('wf.complete')}
             </button>
@@ -264,7 +263,7 @@ export function StepDetail({ step, run, monitorRuns, onAction }: Props) {
                     <div key={r.id} className="wf-candidate">
                       <div className="wf-lr-info">
                         <div className="wf-lr-name">
-                          {r.tool === 'claude' ? 'Claude' : r.tool === 'codex' ? 'Codex' : 'OpenClaw'}{' '}
+                          {sourceLabels[r.tool] ?? r.tool}{' '}
                           &mdash; {r.firstQuestion?.slice(0, 60) ?? r.projectName}
                         </div>
                         <div className="wf-lr-meta">

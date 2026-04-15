@@ -29,15 +29,13 @@ const stateBadgeClass: Record<string, string> = {
   cancelled: 'wf-badge-done',
 }
 
+const activeStates = new Set(['running', 'waitingInput', 'waitingApproval'])
+
 export function WorkflowRunList({ summaries, selectedRunId, onSelect, onNewWorkflow, onShowHelp }: Props) {
   const { t } = useI18n()
 
-  const active = summaries.filter(
-    (s) => s.state === 'running' || s.state === 'waitingInput' || s.state === 'waitingApproval',
-  )
-  const recent = summaries.filter(
-    (s) => s.state === 'completed' || s.state === 'failed' || s.state === 'cancelled' || s.state === 'pending',
-  )
+  const active = summaries.filter((s) => activeStates.has(s.state))
+  const recent = summaries.filter((s) => !activeStates.has(s.state))
 
   return (
     <div className="wf-sidebar">

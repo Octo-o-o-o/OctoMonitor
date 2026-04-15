@@ -151,10 +151,7 @@ fn resolve_included_file(working_dir: &str, file_path: &str) -> Result<PathBuf, 
     if requested.is_absolute() {
         return Err(FileIncludeError::AbsolutePath);
     }
-    if requested
-        .components()
-        .any(|component| matches!(component, Component::ParentDir))
-    {
+    if requested.components().any(|c| c == Component::ParentDir) {
         return Err(FileIncludeError::ParentTraversal);
     }
 

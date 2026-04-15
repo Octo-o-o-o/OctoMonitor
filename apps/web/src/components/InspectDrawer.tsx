@@ -62,23 +62,23 @@ export function InspectDrawer() {
     setEntries([])
     setEntriesLoading(false)
 
-    if (selectedRun && runtimeMode !== 'remoteViewer') {
-      setEntriesLoading(true)
-      void apiFetch(`/api/runs/${encodeURIComponent(selectedRun.id)}/inspect`)
-        .then(async (response) => {
-          if (!response.ok) throw new Error(`inspect fetch failed: ${response.status}`)
-          return response.json() as Promise<{ entries?: InspectEntry[] }>
-        })
-        .then((payload) => {
-          if (!cancelled) setEntries(Array.isArray(payload.entries) ? payload.entries : [])
-        })
-        .catch(() => {
-          if (!cancelled) setEntries([])
-        })
-        .finally(() => {
-          if (!cancelled) setEntriesLoading(false)
-        })
+    if (!selectedRun || runtimeMode === 'remoteViewer') {
+      return () => { cancelled = true }
     }
+
+    setEntriesLoading(true)
+    void (async () => {
+      try {
+        const response = await apiFetch(`/api/runs/${encodeURIComponent(selectedRun.id)}/inspect`)
+        if (!response.ok) throw new Error(`inspect fetch failed: ${response.status}`)
+        const payload = await response.json() as { entries?: InspectEntry[] }
+        if (!cancelled) setEntries(Array.isArray(payload.entries) ? payload.entries : [])
+      } catch {
+        if (!cancelled) setEntries([])
+      } finally {
+        if (!cancelled) setEntriesLoading(false)
+      }
+    })()
 
     return () => { cancelled = true }
   }, [runtimeMode, selectedRun])

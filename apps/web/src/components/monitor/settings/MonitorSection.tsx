@@ -1,6 +1,6 @@
 import { useMonitorStore, type AgentDisplayFormat, type MonitorPeriod, type ColumnLayout } from '../../../store/monitorStore'
 import { useI18n } from '../../../lib/i18n'
-import type { ToolKind } from '../../../lib/types'
+import { sourceLabels } from '../../../lib/constants'
 
 const periods: MonitorPeriod[] = ['30m', '1h', '2h', '4h', '8h', '24h']
 const periodLabels: Record<MonitorPeriod, string> = {
@@ -10,9 +10,6 @@ const periodLabels: Record<MonitorPeriod, string> = {
 const columnLayouts: ColumnLayout[] = ['fixed', 'adaptive']
 const columnLayoutLabels: Record<ColumnLayout, string> = {
   fixed: 'Fixed (Equal)', adaptive: 'Adaptive',
-}
-const panelLabels: Record<ToolKind, string> = {
-  claude: 'Claude Code', codex: 'Codex', openClaw: 'OpenClaw', hermes: 'Hermes',
 }
 const agentDisplayFormats: AgentDisplayFormat[] = ['id', 'name', 'id:name']
 const agentDisplayExamples: Record<AgentDisplayFormat, string> = {
@@ -93,7 +90,7 @@ export function MonitorSection() {
                     title={t('ui.moveDown')}
                   >{'\u25BC'}</button>
                 </div>
-                <span className="panel-config-label">{panelLabels[entry.tool]}</span>
+                <span className="panel-config-label">{sourceLabels[entry.tool]}</span>
                 <button
                   className={`toggle-switch ${entry.enabled ? 'on' : ''}`}
                   disabled={entry.enabled && enabledCount <= 1}
@@ -105,7 +102,7 @@ export function MonitorSection() {
                   }}
                   role="switch"
                   aria-checked={entry.enabled}
-                  aria-label={panelLabels[entry.tool]}
+                  aria-label={sourceLabels[entry.tool]}
                 >
                   <span className="toggle-thumb" />
                 </button>

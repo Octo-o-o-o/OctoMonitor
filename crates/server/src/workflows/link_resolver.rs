@@ -18,16 +18,16 @@ pub fn resolve_strong(run: &RunRecord, step: &StepRun, workflow_id: &str) -> Opt
         });
     }
 
-    // Context file match: same workspace + artifact overlap
-    if hint.workflow_id.as_deref() == Some(workflow_id) && hint.step_id.is_none() {
-        if !hint.artifact_refs.is_empty() {
-            return Some(LinkedRunRef {
-                run_id: run.id.clone(),
-                confidence: LinkConfidence::ContextFile,
-                matched_by: "context-file-artifact".into(),
-                linked_at: chrono::Utc::now().to_rfc3339(),
-            });
-        }
+    if hint.workflow_id.as_deref() == Some(workflow_id)
+        && hint.step_id.is_none()
+        && !hint.artifact_refs.is_empty()
+    {
+        return Some(LinkedRunRef {
+            run_id: run.id.clone(),
+            confidence: LinkConfidence::ContextFile,
+            matched_by: "context-file-artifact".into(),
+            linked_at: chrono::Utc::now().to_rfc3339(),
+        });
     }
 
     None

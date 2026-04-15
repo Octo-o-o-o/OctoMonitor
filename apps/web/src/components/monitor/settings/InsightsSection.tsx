@@ -232,7 +232,6 @@ export function InsightsSection() {
   }, [])
 
   function isAvailable(mode: DailySummaryMode): boolean {
-    if (mode === 'basic') return true
     return detectedTools.has(mode)
   }
 

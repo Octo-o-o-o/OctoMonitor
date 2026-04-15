@@ -22,7 +22,9 @@ export function formatDuration(ms: number): string {
   return `${m}m${String(s).padStart(2, '0')}s`
 }
 
-export const pad2 = (n: number) => String(n).padStart(2, '0')
+export function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
 
 /** Full ISO → "YYYY-MM-DD HH:MM:SS" */
 export function formatDateTime(iso: string): string {

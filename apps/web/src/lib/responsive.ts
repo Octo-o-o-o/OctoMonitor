@@ -17,15 +17,8 @@ export function useMediaQuery(query: string, fallback = false): boolean {
       }
 
       const mediaQuery = window.matchMedia(query)
-      const handler = () => onStoreChange()
-
-      if (typeof mediaQuery.addEventListener === 'function') {
-        mediaQuery.addEventListener('change', handler)
-        return () => mediaQuery.removeEventListener('change', handler)
-      }
-
-      mediaQuery.addListener(handler)
-      return () => mediaQuery.removeListener(handler)
+      mediaQuery.addEventListener('change', onStoreChange)
+      return () => mediaQuery.removeEventListener('change', onStoreChange)
     },
     () => getMediaQuerySnapshot(query, fallback),
     () => fallback,

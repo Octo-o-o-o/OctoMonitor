@@ -212,7 +212,7 @@ function PayAsYouGoBadge() {
   )
 }
 
-const cronParseField = (field: string, max: number): number[] => {
+function cronParseField(field: string, max: number): number[] {
   if (field === '*') return Array.from({ length: max }, (_, i) => i)
   if (field.startsWith('*/')) {
     const step = parseInt(field.slice(2))
@@ -241,17 +241,13 @@ function expandCrons(crons: PendingCron[]): ExpandedCron[] {
     const hours = cronParseField(hourPart, 24)
     const dows = dowPart === '*' ? null : dowPart.split(',').map(Number)
 
-    // Build all (hour, minute) combinations
     const combos: { h: number; m: number }[] = []
     for (const h of hours) for (const m of minutes) combos.push({ h, m })
 
-    // Only expand if there are multiple distinct fire times per day
     const needsExpand = combos.length > 1 && (hours.length > 1 || minutes.length > 1)
-      // Don't expand wildcard-heavy patterns like "every hour" / "every 5 min"
       && !hourPart.startsWith('*') && !minPart.startsWith('*')
 
     if (!needsExpand) {
-      // Single time or recurring — keep as one row, compute next fire
       const times = combos.map(({ h, m }) => h * 60 + m).sort((a, b) => a - b)
       let fire: number
       if (!dows) {
@@ -332,7 +328,6 @@ function CronList({ crons }: { crons: PendingCron[] }) {
   const runs = useMonitorStore((s) => s.data?.runs)
   const { t } = useI18n()
 
-  // Build agentName → agentDisplayName lookup from OpenClaw runs
   const nameMap = useMemo(() => {
     const m = new Map<string, string>()
     if (runs) {

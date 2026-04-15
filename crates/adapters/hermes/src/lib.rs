@@ -107,12 +107,11 @@ struct CachedSessionsFile {
 // ---------------------------------------------------------------------------
 
 fn hermes_root() -> PathBuf {
-    if let Ok(custom) = std::env::var("HERMES_HOME") {
-        if !custom.is_empty() {
-            return PathBuf::from(custom);
-        }
-    }
-    resolve_home_dir(".hermes")
+    std::env::var("HERMES_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_home_dir(".hermes"))
 }
 
 /// Discover all Hermes instances: default + profiles.
@@ -151,24 +150,22 @@ fn check_gateway_status(home: &Path) -> (bool, Option<String>, Vec<String>) {
     let pid_file = home.join("gateway.pid");
 
     let state_file = home.join("gateway_state.json");
-    let (state, platforms) = match fs::read_to_string(&state_file) {
-        Ok(contents) => match serde_json::from_str::<serde_json::Value>(&contents) {
-            Ok(val) => {
-                let state = val
-                    .get("gateway_state")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                let platforms = val
-                    .get("platforms")
-                    .and_then(|v| v.as_object())
-                    .map(|m| m.keys().cloned().collect())
-                    .unwrap_or_default();
-                (state, platforms)
-            }
-            Err(_) => (None, vec![]),
-        },
-        Err(_) => (None, vec![]),
-    };
+    let (state, platforms) = fs::read_to_string(&state_file)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+        .map(|val| {
+            let state = val
+                .get("gateway_state")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let platforms = val
+                .get("platforms")
+                .and_then(|v| v.as_object())
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default();
+            (state, platforms)
+        })
+        .unwrap_or((None, vec![]));
 
     // Running = PID file exists, process is alive, and state is not explicitly stopped
     let pid_alive = fs::read_to_string(&pid_file)
@@ -201,9 +198,7 @@ fn is_process_alive(pid: u32) -> bool {
 // Session parsing
 // ---------------------------------------------------------------------------
 
-fn derive_origin(
-    entry: &serde_json::Value,
-) -> (Option<String>, Option<String>) {
+fn derive_origin(entry: &serde_json::Value) -> (Option<String>, Option<String>) {
     let origin = entry.get("origin");
 
     let platform = origin
@@ -422,11 +417,11 @@ fn cron_to_human(schedule: &serde_json::Value) -> String {
             let minute = schedule.get("at_minute").and_then(|v| v.as_u64()).unwrap_or(0);
             format!("Daily {:02}:{:02}", hour, minute)
         }
-        _ => {
-            schedule.get("display").and_then(|v| v.as_str())
-                .map(String::from)
-                .unwrap_or_else(|| kind.to_string())
-        }
+        _ => schedule
+            .get("display")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| kind.to_string()),
     }
 }
 
@@ -526,15 +521,14 @@ fn scan_instance(
     let (gw_running, gw_state, gw_platforms) = check_gateway_status(home);
 
     let sessions_json = home.join("sessions").join("sessions.json");
-    let sessions = if sessions_json.exists() {
-        match cache {
+    let sessions = sessions_json
+        .exists()
+        .then(|| match cache {
             Some(cache) => load_cached_sessions(cache, &sessions_json, profile_name, model_ref),
             None => parse_sessions_json(&sessions_json, profile_name, model_ref),
-        }
-        .unwrap_or_default()
-    } else {
-        vec![]
-    };
+        })
+        .flatten()
+        .unwrap_or_default();
 
     let cron_jobs = scan_cron_jobs(home, profile_name);
 

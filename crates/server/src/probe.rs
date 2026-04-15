@@ -19,8 +19,8 @@ use crate::platform::last_path_component;
 use crate::pricing::PricingStore;
 use crate::state::AppState;
 
-const PROBE_ACTIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
-const PROBE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const PROBE_ACTIVE_INTERVAL: Duration = Duration::from_secs(30);
+const PROBE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(test)]
 const ADAPTER_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(not(test))]
@@ -680,57 +680,53 @@ fn collect_probe_scan_from_snapshots(
     let now = Utc::now().to_rfc3339();
     let mut runs: Vec<RunRecord> = Vec::new();
 
-    if claude_probe.sessions.is_empty() {
-        if include_placeholder_runs {
-            runs.push(build_probe_run_from_claude(&claude_probe));
+    fn extend_or_placeholder<S, F, P>(
+        runs: &mut Vec<RunRecord>,
+        sessions: &[S],
+        include_placeholder: bool,
+        map_session: F,
+        build_placeholder: P,
+    ) where
+        F: Fn(&S) -> RunRecord,
+        P: FnOnce() -> RunRecord,
+    {
+        if sessions.is_empty() {
+            if include_placeholder {
+                runs.push(build_placeholder());
+            }
+        } else {
+            runs.extend(sessions.iter().map(map_session));
         }
-    } else {
-        runs.extend(
-            claude_probe
-                .sessions
-                .iter()
-                .map(|s| build_run_from_claude_session(s, &claude_probe)),
-        );
     }
 
-    if codex_probe.sessions.is_empty() {
-        if include_placeholder_runs {
-            runs.push(build_probe_run_from_codex(&codex_probe));
-        }
-    } else {
-        runs.extend(
-            codex_probe
-                .sessions
-                .iter()
-                .map(|s| build_run_from_codex_session(s, &codex_probe)),
-        );
-    }
-
-    if openclaw_probe.sessions.is_empty() {
-        if include_placeholder_runs {
-            runs.push(build_probe_run_from_openclaw(&openclaw_probe));
-        }
-    } else {
-        runs.extend(
-            openclaw_probe
-                .sessions
-                .iter()
-                .map(|s| build_run_from_openclaw_session(s, &openclaw_probe)),
-        );
-    }
-
-    if hermes_probe.sessions.is_empty() {
-        if include_placeholder_runs {
-            runs.push(build_probe_run_from_hermes(&hermes_probe));
-        }
-    } else {
-        runs.extend(
-            hermes_probe
-                .sessions
-                .iter()
-                .map(|s| build_run_from_hermes_session(s, &hermes_probe)),
-        );
-    }
+    extend_or_placeholder(
+        &mut runs,
+        &claude_probe.sessions,
+        include_placeholder_runs,
+        |s| build_run_from_claude_session(s, &claude_probe),
+        || build_probe_run_from_claude(&claude_probe),
+    );
+    extend_or_placeholder(
+        &mut runs,
+        &codex_probe.sessions,
+        include_placeholder_runs,
+        |s| build_run_from_codex_session(s, &codex_probe),
+        || build_probe_run_from_codex(&codex_probe),
+    );
+    extend_or_placeholder(
+        &mut runs,
+        &openclaw_probe.sessions,
+        include_placeholder_runs,
+        |s| build_run_from_openclaw_session(s, &openclaw_probe),
+        || build_probe_run_from_openclaw(&openclaw_probe),
+    );
+    extend_or_placeholder(
+        &mut runs,
+        &hermes_probe.sessions,
+        include_placeholder_runs,
+        |s| build_run_from_hermes_session(s, &hermes_probe),
+        || build_probe_run_from_hermes(&hermes_probe),
+    );
 
     dedupe_runs(&mut runs);
 
@@ -984,7 +980,7 @@ fn build_run_from_claude_session(
             .clone()
             .or_else(|| session.first_question.clone()),
         last_tail: None,
-        pending_approval: false,
+        pending_approval: session.has_pending_tool_use,
         first_question: session.first_question.clone(),
         last_question: session.last_question.clone(),
         error_message: None,
@@ -1039,6 +1035,11 @@ fn build_run_from_claude_session(
 fn classify_claude_session_state(session: &claude_adapter::ClaudeSession) -> RunState {
     if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&session.last_activity_at) {
         let age = Utc::now().signed_duration_since(last);
+        // If the last assistant message had tool_use with no tool_result,
+        // the session is waiting for the user to approve the tool.
+        if session.has_pending_tool_use && age.num_minutes() < 30 {
+            return RunState::WaitingApproval;
+        }
         if age.num_seconds() < 60 {
             return RunState::Active;
         } else if age.num_minutes() < 5 {
@@ -1104,7 +1105,7 @@ fn build_run_from_codex_session(
             .or_else(|| session.first_question.clone())
             .or_else(|| session.thread_name.clone()),
         last_tail: None,
-        pending_approval: false,
+        pending_approval: session.has_pending_approval,
         first_question: session
             .first_question
             .clone()
@@ -1164,6 +1165,11 @@ fn build_run_from_codex_session(
 fn classify_codex_session_state(session: &codex_adapter::CodexSession) -> RunState {
     if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&session.last_activity_at) {
         let age = Utc::now().signed_duration_since(last);
+        // If there are unmatched function_calls with require_escalated,
+        // the session is waiting for the user to approve a tool execution.
+        if session.has_pending_approval && age.num_minutes() < 30 {
+            return RunState::WaitingApproval;
+        }
         if age.num_minutes() < 2 {
             return RunState::Active;
         } else if age.num_minutes() < 10 {
@@ -1207,24 +1213,14 @@ fn build_run_from_openclaw_session(
 
     let state = classify_openclaw_session_state(session);
 
-    let started_at = session
-        .started_at
-        .map(|ts| {
-            chrono::DateTime::from_timestamp_millis(ts)
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
+    fn millis_to_rfc3339(ts: i64) -> String {
+        chrono::DateTime::from_timestamp_millis(ts)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default()
+    }
 
-    let last_activity_at = session
-        .updated_at
-        .map(|ts| {
-            chrono::DateTime::from_timestamp_millis(ts)
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
-
+    let started_at = session.started_at.map(millis_to_rfc3339).unwrap_or_default();
+    let last_activity_at = session.updated_at.map(millis_to_rfc3339).unwrap_or_default();
     let elapsed = match (session.started_at, session.updated_at) {
         (Some(start), Some(end)) => end.saturating_sub(start),
         _ => 0,
@@ -1438,24 +1434,22 @@ fn build_run_from_hermes_session(
 }
 
 fn classify_hermes_session_state(session: &hermes_adapter::HermesSession) -> RunState {
-    // Hermes sessions.json doesn't have explicit status — derive from timestamps
     let updated_at = session
         .updated_at
         .as_deref()
-        .and_then(|s| parse_flexible_datetime(s));
+        .and_then(parse_flexible_datetime);
 
-    match updated_at {
-        Some(dt) => {
-            let age_secs = (Utc::now() - dt.with_timezone(&Utc)).num_seconds();
-            if age_secs < 120 {
-                RunState::Active
-            } else if age_secs < 600 {
-                RunState::Idle
-            } else {
-                RunState::Completed
-            }
-        }
-        None => RunState::Completed,
+    let Some(dt) = updated_at else {
+        return RunState::Completed;
+    };
+
+    let age_secs = (Utc::now() - dt.with_timezone(&Utc)).num_seconds();
+    if age_secs < 120 {
+        RunState::Active
+    } else if age_secs < 600 {
+        RunState::Idle
+    } else {
+        RunState::Completed
     }
 }
 
@@ -2403,6 +2397,7 @@ mod tests {
             last_question: None,
             message_count: 1,
             active_elapsed_ms: 10_000,
+            has_pending_approval: false,
             workflow_hint: None,
         };
         let probe = codex_adapter::CodexSnapshot {

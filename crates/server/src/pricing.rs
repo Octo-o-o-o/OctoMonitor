@@ -146,9 +146,8 @@ impl PricingStore {
         cache_read: u64,
         cache_write: u64,
     ) -> Option<f64> {
-        let model_name = model.unwrap_or("");
         let (billable_input, billable_cache_read) = billable_usage(tool, input, cache_read);
-        let cost = match self.resolve_rates(tool, model_name) {
+        let cost = match self.resolve_rates(tool, model.unwrap_or("")) {
             PricingResolution::Rates(rates) => {
                 billable_input as f64 * rates.input
                     + output as f64 * rates.output

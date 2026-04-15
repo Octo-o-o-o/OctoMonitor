@@ -117,11 +117,11 @@ function MiniCalendar({
     { month: 'long', year: 'numeric' },
   )
 
-  const prev = () => {
+  function prev() {
     if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11) }
     else setViewMonth(viewMonth - 1)
   }
-  const next = () => {
+  function next() {
     if (viewMonth === 11) { setViewYear(viewYear + 1); setViewMonth(0) }
     else setViewMonth(viewMonth + 1)
   }
@@ -243,21 +243,18 @@ export function DateRangePicker({ value, onChange, allRange, presets }: Props) {
     }
   }, [customStep, customFrom, onChange])
 
-  // Display label
   const label = useMemo(() => {
-    if (activePreset !== 'custom') {
-      if (activePreset === 'all') {
-        return locale === 'zh' ? '全部' : 'All'
-      }
-      const days = PRESET_DAYS[activePreset]
-      if (days === 1) {
-        return locale === 'zh' ? '今天' : 'Today'
-      }
-      return locale === 'zh' ? `最近 ${days} 天` : `Last ${days}d`
+    if (activePreset === 'custom') {
+      return `${formatShort(value.from, locale)} – ${formatShort(value.to, locale)}`
     }
-    const f = formatShort(value.from, locale)
-    const t = formatShort(value.to, locale)
-    return `${f} – ${t}`
+    if (activePreset === 'all') {
+      return locale === 'zh' ? '全部' : 'All'
+    }
+    const days = PRESET_DAYS[activePreset]
+    if (days === 1) {
+      return locale === 'zh' ? '今天' : 'Today'
+    }
+    return locale === 'zh' ? `最近 ${days} 天` : `Last ${days}d`
   }, [activePreset, value, locale])
 
   const presetLabels: Record<Exclude<PresetKey, 'custom'>, string> = locale === 'zh'

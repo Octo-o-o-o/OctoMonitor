@@ -73,13 +73,11 @@ impl WorkflowStore {
 
     pub fn list_defs(&self) -> Result<Vec<WorkflowDef>> {
         let index = self.load_def_index();
-        let mut defs = Vec::new();
-        for entry in &index.defs {
-            if let Ok(def) = self.load_def(&entry.id) {
-                defs.push(def);
-            }
-        }
-        Ok(defs)
+        Ok(index
+            .defs
+            .iter()
+            .filter_map(|entry| self.load_def(&entry.id).ok())
+            .collect())
     }
 
     pub fn load_def(&self, id: &str) -> Result<WorkflowDef> {

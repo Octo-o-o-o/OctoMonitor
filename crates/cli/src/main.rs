@@ -413,7 +413,7 @@ async fn start_run(
     Ok(())
 }
 
-fn read_input(path: &PathBuf) -> Result<String> {
+fn read_input(path: &std::path::Path) -> Result<String> {
     if path.as_os_str() == "-" {
         use std::io::Read;
         let mut buf = String::new();

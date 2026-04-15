@@ -43,6 +43,10 @@ pub struct ClaudeSession {
     /// Sum of (user_message_timestamp → next_assistant_response_timestamp) intervals in ms.
     /// Excludes idle time between an assistant response and the next user message.
     pub active_elapsed_ms: i64,
+    /// True when the last assistant message contains a `tool_use` block
+    /// with no subsequent `tool_result` from the user — indicates the
+    /// session is waiting for permission approval.
+    pub has_pending_tool_use: bool,
     /// Workflow hint from .octomonitor/workflow-context.json in the workspace
     pub workflow_hint: Option<WorkflowContextFile>,
 }
@@ -112,6 +116,8 @@ struct ClaudeSessionState {
     last_question: Option<String>,
     completed_active_elapsed_ms: i64,
     pending_user_ts: Option<chrono::DateTime<chrono::FixedOffset>>,
+    /// True when the last assistant message had tool_use and no tool_result followed.
+    has_pending_tool_use: bool,
 }
 
 fn mask_secret(value: &str) -> String {
@@ -264,6 +270,19 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
         if let Some(dt) = line_dt {
             state.pending_user_ts = Some(dt);
         }
+        // Check if user message contains tool_result (clears pending tool_use)
+        if let Some(content) = val
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+        {
+            if content
+                .iter()
+                .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            {
+                state.has_pending_tool_use = false;
+            }
+        }
         if let Some(t) = val.get("message").and_then(extract_text_from_content) {
             if t.starts_with("<local-command-caveat>")
                 || t.starts_with("<system-reminder>")
@@ -282,6 +301,16 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
     }
 
     if msg_type == "assistant" {
+        // Check if assistant message contains tool_use
+        state.has_pending_tool_use = val
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .is_some_and(|arr| {
+                arr.iter()
+                    .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+            });
+
         if let (Some(user_dt), Some(asst_dt)) = (state.pending_user_ts.take(), line_dt) {
             let interval = (asst_dt - user_dt).num_milliseconds().max(0);
             state.completed_active_elapsed_ms += interval;
@@ -366,6 +395,7 @@ fn build_claude_session(
         first_question: state.first_question.clone(),
         last_question: state.last_question.clone(),
         active_elapsed_ms,
+        has_pending_tool_use: state.has_pending_tool_use,
         workflow_hint: read_workflow_context(workspace_path),
     })
 }

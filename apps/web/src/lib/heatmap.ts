@@ -363,18 +363,18 @@ function buildCalendarColumns(
 
   const monthMarkers: HeatmapMonthMarker[] = []
   let previousMonthKey = ''
-  columns.forEach((column, index) => {
-    const firstVisibleCell = column.cells.find((cell) => !cell.hidden)
-    if (!firstVisibleCell) return
+  for (let i = 0; i < columns.length; i += 1) {
+    const firstVisibleCell = columns[i].cells.find((cell) => !cell.hidden)
+    if (!firstVisibleCell) continue
     const monthKey = `${firstVisibleCell.date.getFullYear()}-${firstVisibleCell.date.getMonth()}`
-    if (monthKey === previousMonthKey) return
+    if (monthKey === previousMonthKey) continue
     previousMonthKey = monthKey
     monthMarkers.push({
       key: monthKey,
       date: firstVisibleCell.date,
-      column: index,
+      column: i,
     })
-  })
+  }
 
   return {
     kind: 'calendar',

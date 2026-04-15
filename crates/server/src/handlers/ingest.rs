@@ -336,17 +336,14 @@ async fn upsert_runtime_run(state: &AppState, mut run: RunRecord, wake_reason: &
     state.wake_probe_with_reason(wake_reason);
 }
 
-/// When an ingest event carries workflow hints, attempt to auto-link the run to the matching step.
 async fn notify_coordinator(state: &AppState, run_id: &str, hint: &WorkflowHint) {
-    let wf_id = match &hint.workflow_id {
-        Some(w) => w.clone(),
-        None => return,
+    let Some(wf_id) = &hint.workflow_id else {
+        return;
     };
 
-    // If we have both workflow_id and step_id, do a direct link (fast path)
     if let Some(step_id) = &hint.step_id {
         let coord = state.workflow_coordinator.lock().await;
-        if let Ok(runs) = coord.list_runs_for_def(&wf_id) {
+        if let Ok(runs) = coord.list_runs_for_def(wf_id) {
             for wr_id in runs {
                 let _ = coord.link_run(
                     &wr_id,
@@ -360,29 +357,23 @@ async fn notify_coordinator(state: &AppState, run_id: &str, hint: &WorkflowHint)
         return;
     }
 
-    // workflow_id present but no step_id — use resolve_strong / resolve_prompt_marker
-    // to find the right step by scanning the run record
     let payload = state.bootstrap.read().await;
-    let monitor_run = match payload.runs.iter().find(|r| r.id == run_id) {
-        Some(r) => r,
-        None => return,
+    let Some(monitor_run) = payload.runs.iter().find(|r| r.id == run_id) else {
+        return;
     };
 
     let coord = state.workflow_coordinator.lock().await;
-    let wr_ids = match coord.list_runs_for_def(&wf_id) {
-        Ok(ids) => ids,
-        Err(_) => return,
+    let Ok(wr_ids) = coord.list_runs_for_def(wf_id) else {
+        return;
     };
 
     for wr_id in wr_ids {
-        let wf_run = match coord.store().load_run(&wr_id) {
-            Ok(r) => r,
-            Err(_) => continue,
+        let Ok(wf_run) = coord.store().load_run(&wr_id) else {
+            continue;
         };
         for step in &wf_run.steps {
-            // Try strong match (context-file with artifacts)
             if let Some(linked) =
-                crate::workflows::link_resolver::resolve_strong(monitor_run, step, &wf_id)
+                crate::workflows::link_resolver::resolve_strong(monitor_run, step, wf_id)
             {
                 let _ = coord.link_run(
                     &wr_id,
@@ -393,9 +384,8 @@ async fn notify_coordinator(state: &AppState, run_id: &str, hint: &WorkflowHint)
                 );
                 return;
             }
-            // Try prompt marker match
             if let Some(linked) =
-                crate::workflows::link_resolver::resolve_prompt_marker(monitor_run, step, &wf_id)
+                crate::workflows::link_resolver::resolve_prompt_marker(monitor_run, step, wf_id)
             {
                 let _ = coord.link_run(
                     &wr_id,

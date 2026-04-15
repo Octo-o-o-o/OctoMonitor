@@ -106,10 +106,8 @@ pub fn read_jsonl_delta(path: &Path, cursor: &mut JsonlCursor) -> io::Result<Jso
         if bytes == 0 {
             break;
         }
-        while line.ends_with('\n') || line.ends_with('\r') {
-            line.pop();
-        }
-        lines.push(line);
+        let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
+        lines.push(trimmed);
     }
     cursor.offset = reader.stream_position()?;
 

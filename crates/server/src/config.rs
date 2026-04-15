@@ -36,7 +36,6 @@ pub fn save_config(config: &AppConfig) -> std::io::Result<()> {
         companion_enabled: Some(config.companion_enabled),
         history_days: Some(config.history_days),
     };
-    let json = serde_json::to_string_pretty(&patch)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let json = serde_json::to_string_pretty(&patch).map_err(std::io::Error::other)?;
     std::fs::write(&path, json)
 }

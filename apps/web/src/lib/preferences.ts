@@ -137,10 +137,14 @@ function migrateSnapshotWindow(
   }
 }
 
+function freshDefaults(): FrontendSettings {
+  return { ...defaultSettings, panelConfig: migratePanelConfig(undefined), filterRules: cloneDefaultFilterRules() }
+}
+
 export function loadFrontendSettings(): FrontendSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...defaultSettings, panelConfig: migratePanelConfig(undefined), filterRules: cloneDefaultFilterRules() }
+    if (!raw) return freshDefaults()
 
     const parsed = JSON.parse(raw) as StoredFrontendSettings
     return {
@@ -161,7 +165,7 @@ export function loadFrontendSettings(): FrontendSettings {
         : defaultSettings.dailySummaryDayStart,
     }
   } catch {
-    return { ...defaultSettings, panelConfig: migratePanelConfig(undefined), filterRules: cloneDefaultFilterRules() }
+    return freshDefaults()
   }
 }
 

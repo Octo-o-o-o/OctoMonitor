@@ -551,9 +551,7 @@ fn allocate_proportionally(total: u64, weights: &[f64]) -> Vec<u64> {
 
 fn primary_worktree(commit: &ScannedCommit) -> (Option<String>, Option<String>) {
     fn sole_element(set: &BTreeSet<String>) -> Option<String> {
-        (set.len() == 1)
-            .then(|| set.iter().next().cloned())
-            .flatten()
+        (set.len() == 1).then(|| set.iter().next().cloned())?
     }
     (
         sole_element(&commit.worktree_ids),
