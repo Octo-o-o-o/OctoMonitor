@@ -1,5 +1,7 @@
 # 本地 AI Coding Agents 监控台（OctoMonitor）开发说明书
 
+> 2026-04-16 更新：本文件保留为历史设计说明。当前实现已经按简化方案收敛，真实产品边界请以 `README.md` / `README.zh.md` 和 `docs/simplification-plan-2026-04-15.md` 为准。下文如与当前代码不一致，应以后者为准。
+
 ## 1. 项目名称与定位
 
 项目名称暂定：**Agent Mission Control**。
@@ -53,7 +55,7 @@
 
 ### 4.2 Read-only by default
 
-默认只读；允许的“写入”仅限于用户明确同意的本地接入动作，例如安装 hooks、写入 statusline 配置、生成 companion pairing token。
+默认只读；当前允许的持久化仅限于应用自身配置与 companion 配对/会话管理。环境页只提供 detect/doctor，不再承担 hooks、statusline 或任何工具配置写入。
 
 ### 4.3 One renderer, multiple shells
 
@@ -174,14 +176,15 @@ agent-mission-control/
       claude/
       codex/
       openclaw/
-    installer/               # 接入安装、自动探测、配置回滚
+      hermes/                # 实验性适配器
+    installer/               # 工具检测与诊断
     companion/               # pairing / LAN read-only access
 ```
 
 ### 6.1 运行流程
 
 1. 启动服务。
-2. 自动探测本机是否安装 Claude Code / Codex / OpenClaw。
+2. 自动探测本机是否安装 Claude Code / Codex / OpenClaw / Hermes（实验性）。
 3. 扫描最近 7 天原始数据，重建内存快照。
 4. 挂上实时输入源：
 
@@ -678,9 +681,16 @@ POST  /api/ingest/claude/statusline
 POST  /api/ingest/claude/hook
 POST  /api/ingest/codex/hook
 
-POST  /api/pair/request
-POST  /api/pair/approve
-POST  /api/pair/revoke
+GET   /api/history/usage
+GET   /api/history/commits
+GET   /api/runs/{id}/inspect
+
+GET   /api/remote/access
+PATCH /api/remote/access
+GET   /api/remote/devices
+POST  /api/remote/pairings
+DELETE /api/remote/devices/{device_id}
+POST  /api/pair/claim
 ```
 
 ## 10.2 WebSocket
@@ -712,13 +722,20 @@ Tauri 官方说明其 event system 不是为低延迟、高吞吐 streaming data
 
 ## 11. 前端信息架构
 
-## 11.1 路由
+## 11.1 信息架构
 
-* `/wallboard`：默认全屏监控页
-* `/history`：今天 / 7 天分析页
-* `/setup`：安装接入页
-* `/companion`：手机 / 小平板页
-* `/companion/eink`：Kindle / 墨水屏页
+本地主界面保留 5 个核心 tab：
+
+* `Monitor`
+* `Usage`
+* `Commits`
+* `Heatmap`
+* `Settings`
+
+远程只读 viewer 只保留：
+
+* `Monitor`
+* `Usage`
 
 详情不跳大页面，使用右侧 drawer：
 
@@ -1183,40 +1200,42 @@ UI 文案固定三档：
 
 ---
 
-## 16. Setup / Installer 设计
+## 16. Environment / Doctor 设计
 
 ## 16.1 功能
 
-`/setup` 页面必须支持：
+`Settings -> Environment / Doctor` 区域必须支持：
 
-* 自动探测三家安装
+* 自动探测四类工具（Hermes 为 experimental）
 * 显示当前可接入能力矩阵
-* 一键接入 / 回滚
 * 运行 doctor
 
-## 16.2 接入流程
+## 16.2 诊断流程
 
 ### Claude
 
 * 探测 `claude` 命令
-* 安装 statusline 脚本
-* 安装 hook 脚本
-* 写入 settings 前先备份
-* 若自动写入失败，则给出可复制的配置片段
+* 诊断 statusline / hook 路径是否可用
+* 报告当前环境是否满足监控接入条件
 
 ### Codex
 
 * 探测 `codex` 命令
 * 探测 `CODEX_HOME`
-* 安装 `hooks.json`
-* 尝试打开 `codex_hooks`
-* Windows 自动提示 hooks 不可用，回退到 file-scan / app-server optional
+* 报告 hooks / app-server 路径是否可用
+* Windows 上将 hooks 视为可选增强项，而不是必需能力
 
 ### OpenClaw
 
 * 探测 `openclaw` 命令
 * 探测 Gateway
 * 探测 profile / bind / auth 状态
+
+### Hermes
+
+* 探测 `hermes` 命令
+* 探测 gateway / sessions 路径
+* 标记为 experimental adapter
 * 不默认改写其配置，只读取
 
 ## 16.3 回滚
@@ -1298,11 +1317,10 @@ Installer 必须支持：
 * 日志 tail
 * transcript path / workspace path copy
 
-### 18.7 安装与维护
+### 18.7 环境与维护
 
-* setup
-* doctor
-* rollback
+* environment / doctor
+* tool detection
 * re-pair / revoke companion device
 
 ### 18.8 Companion Mode
@@ -1417,7 +1435,7 @@ agent-mission-control/
         routes/
           wallboard/
           history/
-          setup/
+          settings/
           companion/
           companion-eink/
         components/
@@ -1477,11 +1495,7 @@ agent-mission-control/
           process.rs
     installer/
       src/
-        detect.rs
-        claude.rs
-        codex.rs
-        openclaw.rs
-        rollback.rs
+        lib.rs
     companion/
       src/
         pairing.rs

@@ -2,23 +2,23 @@
 
 [English](README.md)
 
-**面向 Claude Code、Codex 和 OpenClaw 的本地优先统一监控面板。**
+**面向 Claude Code、Codex、OpenClaw 与 Hermes（实验性）的本地优先统一监控面板。**
 
 OctoMonitor 用一个统一仪表盘实时查看你的 AI 编码会话状态，包括 token 用量、配额、成本和会话状态，数据默认只保留在本机，不上传云端。
 
-![OctoMonitor 截图](exports/octomonitor-figma-designer-handoff-2026-04-01/previews/desktop-preview.png)
-
 ## 功能
 
-- **三工具统一视图**：在同一界面查看 Claude Code、Codex 和 OpenClaw 会话
+- **统一本地监控器**：聚焦 `Monitor / Usage / Commits / Heatmap / Settings`
 - **实时 WebSocket 更新**：事件驱动推送，无需轮询
 - **Token 与成本跟踪**：支持按会话和聚合维度查看使用量
+- **Commit 与热力图视图**：保留实用历史观察，不再扩张成独立分析产品
 - **桌面通知**：当会话需要批准时给出提醒
-- **键盘优先**：支持 `j` / `k` 导航、`1` / `2` / `3` 切换标签、`?` 查看快捷键
+- **键盘优先**：支持 `j` / `k` 导航、`1`-`5` 切换标签、`?` 查看快捷键
 - **多主题**：支持深色、浅色、电子墨水风格，以及 VS Code 主题导入
 - **本地优先**：服务端默认只绑定 `127.0.0.1`
 - **零配置**：自动探测已安装工具，无需数据库
-- **远程只读查看**：可选开启局域网 / 私网查看模式
+- **远程只读查看**：可选开启配对后的局域网 / 私网 companion，仅开放 `Monitor / Usage`
+- **Hermes 适配器（实验性）**：继续接入监控与用量链路，但不再作为主线扩张
 - **中英文 i18n**：编译期校验翻译完整性
 
 ## 安装
@@ -37,7 +37,7 @@ Homebrew 和 npm 分发的是本地 `octomonitor-server` 二进制；npm 现已�
 
 - [Rust](https://rustup.rs/) 1.75+
 - [Node.js](https://nodejs.org/) 20+，并安装 [pnpm](https://pnpm.io/) 10+
-- 至少安装以下工具之一：[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenClaw](https://github.com/openclaw)
+- 至少安装以下工具之一：[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenClaw](https://github.com/openclaw)，或 Hermes（实验性）
 
 ### 运行 Web 版
 
@@ -83,52 +83,6 @@ pnpm build:desktop:notarized
 cargo tauri dev
 ```
 
-## CLI
-
-OctoMonitor 提供了命令行工具 `octomonitor`，用于通过终端管理工作流。适合 LLM 驱动的自动化场景——让 AI 读完规范后直接创建工作流。
-
-```bash
-# 构建 CLI
-cargo build -p octomonitor-cli
-
-# 输出工作流 JSON 模板（含字段说明和模板变量文档）
-octomonitor workflow template > my-workflow.json
-
-# 从 JSON 文件创建工作流
-octomonitor workflow create -f my-workflow.json
-
-# 创建并立即启动运行
-octomonitor workflow create -f my-workflow.json --run --dir /path/to/project --mode assisted
-
-# 列出定义和运行
-octomonitor wf list
-octomonitor wf runs
-
-# 从已有定义启动运行
-octomonitor wf run <workflow-id> -d /path/to/project -m auto
-
-# 查看运行详情（步骤状态、关联 run 等）
-octomonitor wf inspect <run-id>
-
-# 步骤操作
-octomonitor wf step <run-id> step-0 approve   # 审批
-octomonitor wf step <run-id> step-0 complete   # 完成
-octomonitor wf step <run-id> step-0 skip       # 跳过
-
-# 关联 monitor run 到步骤
-octomonitor wf link <run-id> step-0 <monitor-run-id>
-
-# 从 stdin 读取（LLM 可直接 pipe JSON）
-echo '{ ... }' | octomonitor wf create -f -
-
-# 自定义服务器地址
-octomonitor --server http://192.168.1.100:46321 wf list
-# 或通过环境变量
-export OCTOMONITOR_URL=http://192.168.1.100:46321
-```
-
-CLI 通过 HTTP 与运行中的 `octomonitor-server` 通信（默认 `http://127.0.0.1:46321`），使用前请确保服务已启动。
-
 ## 架构
 
 ```text
@@ -136,12 +90,12 @@ OctoMonitor
 ├── crates/
 │   ├── core/            # 领域模型、ts-rs 导出
 │   ├── server/          # 本地 Axum HTTP / WS 服务 + 远程只读查看面
-│   ├── cli/             # 工作流命令行工具（octomonitor 二进制）
 │   ├── adapters/
 │   │   ├── claude/      # Claude Code 会话解析
 │   │   ├── codex/       # Codex 会话解析
-│   │   └── openclaw/    # OpenClaw 会话解析
-│   ├── installer/       # 检测、诊断、回滚辅助
+│   │   ├── openclaw/    # OpenClaw 会话解析
+│   │   └── hermes/      # Hermes 会话解析（实验性）
+│   ├── installer/       # 工具检测与诊断
 │   └── companion/       # 配对码与远程查看会话
 ├── apps/
 │   ├── web/             # React 19 + Zustand + Vite 7 + Tailwind CSS 4
@@ -159,7 +113,7 @@ OctoMonitor
 | 仅 3 个运行时 JS 依赖 | `react`、`react-dom`、`zustand`，刻意保持精简 |
 | 只用 WebSocket 做实时通道 | 事件驱动推送，避免轮询和竞态 |
 | `tokio::sync::RwLock` | 适合异步场景下的多读少写状态 |
-| 并行 adapter 探测 | 使用 `std::thread::scope` 处理阻塞 I/O |
+| 并行 adapter 探测 | 使用隔离并发 probe 任务并行本地扫描，不引入数据库 |
 | 本地管理面与远程只读面分离 | 管理 API 仅 loopback 暴露；远程查看面只读且带 cookie 鉴权 |
 
 ## 开发与验证
@@ -188,7 +142,7 @@ pnpm build:desktop:notarized
 
 | 按键 | 功能 |
 |------|------|
-| `1` / `2` / `3` | 切换标签页（Monitor / Usage / Settings） |
+| `1` / `2` / `3` / `4` / `5` | 切换标签页（Monitor / Usage / Commits / Heatmap / Settings） |
 | `j` / `k` | 在会话列表中移动 |
 | `Enter` | 打开详情抽屉 |
 | `Esc` | 关闭抽屉 |
@@ -198,7 +152,7 @@ pnpm build:desktop:notarized
 
 远程访问相关配置会保存在 `~/.octomonitor/config.json`，重启后仍然有效。前端显示偏好（主题、密度、筛选条件、通知等）保存在 `localStorage`。
 
-当前 Setup 页面提供诊断能力和本地 sandbox manifest 辅助，但不会自动改写 Claude Code、Codex 或 OpenClaw 的配置文件。
+当前“环境与诊断”页面只提供检测与 doctor 能力，不会自动改写 Claude Code、Codex、OpenClaw 或 Hermes 的配置文件。
 
 ## 许可证
 

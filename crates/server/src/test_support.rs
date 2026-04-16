@@ -15,7 +15,6 @@ use crate::{
     pricing::PricingStore,
     probe::empty_bootstrap,
     state::AppState,
-    workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore},
 };
 
 pub(crate) struct ServerTestHarness {
@@ -27,12 +26,8 @@ pub(crate) struct ServerTestHarness {
 impl ServerTestHarness {
     pub(crate) fn new() -> Self {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        let store = WorkflowStore::new(temp_dir.path().join("workflows")).expect("workflow store");
-        let coordinator = WorkflowCoordinator::new(store);
-        let mut bootstrap = empty_bootstrap();
-        bootstrap.workflow_runs = coordinator.get_summary_list();
         let pricing = PricingStore::new();
-        let state = AppState::new(bootstrap, pricing, coordinator);
+        let state = AppState::new(empty_bootstrap(), pricing);
         let app = build_app(state.clone());
         Self {
             _temp_dir: temp_dir,

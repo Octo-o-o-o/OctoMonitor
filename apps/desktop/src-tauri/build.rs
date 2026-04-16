@@ -13,7 +13,6 @@ fn ensure_placeholder_frontend_dist() {
     }
 
     ensure_html_shell(&dist_dir.join("index.html"), "OctoMonitor");
-    ensure_html_shell(&dist_dir.join("figma-make.html"), "OctoMonitor Preview");
     ensure_referenced_assets(dist_dir);
 }
 

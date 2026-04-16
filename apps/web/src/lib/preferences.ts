@@ -8,7 +8,6 @@ export type ColumnLayout = 'fixed' | 'adaptive'
 export type AgentDisplayFormat = 'id' | 'name' | 'id:name'
 export type FontSize = 'xsmall' | 'small' | 'default' | 'large' | 'xlarge'
 export type FilterMode = 'off' | 'include' | 'exclude'
-export type DailySummaryMode = 'claude' | 'codex' | 'basic'
 
 export interface PanelEntry {
   tool: ToolKind
@@ -33,9 +32,6 @@ export interface FrontendSettings {
   agentDisplayFormat: AgentDisplayFormat
   fontSize: FontSize
   notificationsEnabled: boolean
-  dailySummaryEnabled: boolean
-  dailySummaryMode: DailySummaryMode
-  dailySummaryDayStart: number // 0-23, hour when a "day" begins for reporting
 }
 
 interface StoredFrontendSettings extends Partial<FrontendSettings> {
@@ -73,9 +69,6 @@ export const defaultSettings: FrontendSettings = {
   agentDisplayFormat: 'id',
   fontSize: 'default',
   notificationsEnabled: false,
-  dailySummaryEnabled: true,
-  dailySummaryMode: 'basic',
-  dailySummaryDayStart: 0,
 }
 
 function cloneDefaultFilterRules(): FilterRules {
@@ -158,11 +151,6 @@ export function loadFrontendSettings(): FrontendSettings {
       agentDisplayFormat: parsed.agentDisplayFormat ?? defaultSettings.agentDisplayFormat,
       fontSize: parsed.fontSize ?? defaultSettings.fontSize,
       notificationsEnabled: parsed.notificationsEnabled ?? defaultSettings.notificationsEnabled,
-      dailySummaryEnabled: parsed.dailySummaryEnabled ?? defaultSettings.dailySummaryEnabled,
-      dailySummaryMode: parsed.dailySummaryMode ?? defaultSettings.dailySummaryMode,
-      dailySummaryDayStart: typeof parsed.dailySummaryDayStart === 'number'
-        ? Math.max(0, Math.min(23, Math.round(parsed.dailySummaryDayStart)))
-        : defaultSettings.dailySummaryDayStart,
     }
   } catch {
     return freshDefaults()

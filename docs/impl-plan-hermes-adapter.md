@@ -1,5 +1,7 @@
 # Hermes Agent Adapter 实施计划
 
+> 2026-04-16 更新：本文件中的 workflow 相关步骤已失效。`Workflows` 产品线已在简化方案中删除，当前 Hermes 只需要接入 adapter / probe / monitor / usage / installer 这条主线。
+
 ## Phase 1: Core 层 ToolKind 扩展
 
 **修改文件:**
@@ -71,16 +73,10 @@
 - `load_run_entries()` match — 添加 `ToolKind::Hermes`
   - Hermes 不使用 JSONL transcript，返回空 Vec 即可
 
-### 3.4 workflows/launcher.rs
-- `launch()` match — 添加 `ToolKind::Hermes` (返回 not-implemented 错误)
-
-### 3.5 workflows/link_resolver.rs
-- tool_to_str match — 添加 Hermes → "hermes"
-
-### 3.6 pricing.rs
+### 3.4 pricing.rs
 - `normalized_total_tokens()` 和相关 match — 添加 Hermes 分支
 
-### 3.7 server Cargo.toml
+### 3.5 server Cargo.toml
 - 添加 `octomonitor-hermes-adapter` 依赖
 
 **验证:**
@@ -97,7 +93,7 @@
 - `crates/installer/src/lib.rs`
   - `detect_tools()` — 添加 hermes CLI 检测
   - `doctor_report()` — 添加 hermes 诊断信息
-  - `install_plan()` / `apply_install()` / `verify_install()` / `rollback_install()` — 添加 hermes case
+  - 2026-04-16 起不再包含安装/回滚写入能力，installer 只保留 detect/doctor
 
 **验证:**
 - `cargo test -p octomonitor-installer`

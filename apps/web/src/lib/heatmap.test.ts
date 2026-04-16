@@ -61,7 +61,6 @@ function createRun(overrides: Partial<RunRecord>): RunRecord {
     vcs: overrides.vcs ?? null,
     originLabel: overrides.originLabel ?? null,
     originProvider: overrides.originProvider ?? null,
-    workflowHint: null,
   }
 }
 

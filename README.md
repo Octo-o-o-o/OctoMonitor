@@ -2,23 +2,23 @@
 
 [中文说明](README.zh.md)
 
-**Local-first unified monitor for Claude Code, Codex, and OpenClaw.**
+**Local-first unified monitor for Claude Code, Codex, OpenClaw, and Hermes (experimental).**
 
 OctoMonitor gives you a single dashboard to watch all your AI coding sessions in real time — token usage, quota, costs, and session state — without sending any data to the cloud.
 
-![OctoMonitor Screenshot](exports/octomonitor-figma-designer-handoff-2026-04-01/previews/desktop-preview.png)
-
 ## Features
 
-- **Three-tool unified view** — Claude Code, Codex, and OpenClaw sessions in one place
+- **Unified local monitor** — `Monitor / Usage / Commits / Heatmap / Settings` in one app
 - **Real-time WebSocket updates** — event-driven push, no polling
 - **Token & cost tracking** — per-session and aggregated usage with quota bars
+- **Commit and heatmap views** — practical history views without a separate analytics product layer
 - **Desktop notifications** — get notified when a session needs approval
-- **Keyboard-driven** — `j`/`k` navigation, `1`/`2`/`3` tab switching, `?` shortcut help
+- **Keyboard-driven** — `j`/`k` navigation, `1`-`5` tab switching, `?` shortcut help
 - **Dark / Light / E-Ink themes** — plus VS Code theme import
 - **Local-first** — all data stays on your machine; server binds to `127.0.0.1`
 - **Zero-config** — auto-detects installed tools; no database required
-- **Remote viewer** — opt-in read-only companion surface for LAN / private-network devices
+- **Read-only remote viewer** — opt-in companion surface for paired LAN / private-network devices, limited to `Monitor / Usage`
+- **Hermes adapter (experimental)** — still visible in monitor/usage flows, but not a first-class product track
 - **i18n** — English and Chinese, compile-time safe
 
 ## Install
@@ -37,7 +37,7 @@ The Homebrew and npm packages install the local `octomonitor-server` binary. The
 
 - [Rust](https://rustup.rs/) (1.75+)
 - [Node.js](https://nodejs.org/) (20+) with [pnpm](https://pnpm.io/) (10+)
-- At least one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenClaw](https://github.com/openclaw)
+- At least one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenClaw](https://github.com/openclaw), or Hermes (experimental)
 
 ### Run (Web)
 
@@ -85,52 +85,6 @@ Or for development:
 cargo tauri dev
 ```
 
-## CLI
-
-OctoMonitor includes a CLI (`octomonitor`) for managing workflows programmatically — especially useful for LLM-driven automation where an AI agent reads a spec and creates workflows via the terminal.
-
-```bash
-# Build the CLI
-cargo build -p octomonitor-cli
-
-# Print a workflow JSON template (shows all fields and variable docs)
-octomonitor workflow template > my-workflow.json
-
-# Create a workflow from a JSON file
-octomonitor workflow create -f my-workflow.json
-
-# Create and immediately start a run
-octomonitor workflow create -f my-workflow.json --run --dir /path/to/project --mode assisted
-
-# List definitions and runs
-octomonitor wf list
-octomonitor wf runs
-
-# Start a run from an existing definition
-octomonitor wf run <workflow-id> -d /path/to/project -m auto
-
-# Inspect a run (shows step states, linked runs, etc.)
-octomonitor wf inspect <run-id>
-
-# Step operations
-octomonitor wf step <run-id> step-0 approve
-octomonitor wf step <run-id> step-0 complete
-octomonitor wf step <run-id> step-0 skip
-
-# Link a monitor run to a step
-octomonitor wf link <run-id> step-0 <monitor-run-id>
-
-# Read from stdin (LLM can pipe JSON directly)
-echo '{ ... }' | octomonitor wf create -f -
-
-# Custom server URL
-octomonitor --server http://192.168.1.100:46321 wf list
-# Or via environment variable
-export OCTOMONITOR_URL=http://192.168.1.100:46321
-```
-
-The CLI talks to the running `octomonitor-server` over HTTP (default `http://127.0.0.1:46321`). Make sure the server is running before using CLI commands.
-
 ## Architecture
 
 ```
@@ -138,12 +92,12 @@ OctoMonitor
 ├── crates/
 │   ├── core/            # Domain types, ts-rs exports
 │   ├── server/          # Axum local API + remote read-only viewer surface
-│   ├── cli/             # CLI for workflow management (octomonitor binary)
 │   ├── adapters/
 │   │   ├── claude/      # Claude Code session parser
 │   │   ├── codex/       # Codex session parser
-│   │   └── openclaw/    # OpenClaw session parser
-│   ├── installer/       # Tool detection, sandbox manifests, doctor, rollback
+│   │   ├── openclaw/    # OpenClaw session parser
+│   │   └── hermes/      # Hermes session parser (experimental)
+│   ├── installer/       # Tool detection + doctor diagnostics
 │   └── companion/       # Pairing codes + viewer sessions
 ├── apps/
 │   ├── web/             # React 19 + Zustand + Vite 7 + Tailwind CSS 4
@@ -161,7 +115,7 @@ OctoMonitor
 | 3 runtime JS deps | `react`, `react-dom`, `zustand` — intentionally lean |
 | WebSocket-only data flow | Event-driven push eliminates polling and race conditions |
 | `tokio::sync::RwLock` | Async-safe, read-many/write-few friendly |
-| Parallel adapter probing | `std::thread::scope` for concurrent blocking I/O |
+| Parallel adapter probing | Isolated concurrent probe tasks keep local scans parallel without adding a database |
 | Split local/remote surfaces | Full admin APIs stay loopback-only; remote viewer is read-only + cookie-authenticated |
 
 ## Development
@@ -190,7 +144,7 @@ pnpm build:desktop:notarized
 
 | Key | Action |
 |-----|--------|
-| `1` / `2` / `3` | Switch tab (Monitor / Usage / Settings) |
+| `1` / `2` / `3` / `4` / `5` | Switch tab (Monitor / Usage / Commits / Heatmap / Settings) |
 | `j` / `k` | Navigate session list |
 | `Enter` | Open detail drawer |
 | `Esc` | Close drawer |
@@ -200,7 +154,7 @@ pnpm build:desktop:notarized
 
 Server-side remote access state is persisted to `~/.octomonitor/config.json` and survives restarts. Frontend display preferences (theme, density, filters, notifications) are stored in `localStorage`.
 
-The Setup screen currently exposes diagnostics plus local sandbox manifest helpers. It does not automatically rewrite Claude Code, Codex, or OpenClaw configuration files.
+The Environment / Doctor screen exposes detection and diagnostics only. It does not rewrite Claude Code, Codex, OpenClaw, or Hermes configuration files.
 
 ## License
 

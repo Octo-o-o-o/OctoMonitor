@@ -48,7 +48,6 @@ pub fn log_bootstrap_payload(context: &'static str, payload: &BootstrapPayload) 
             commits = payload.commits.len(),
             usage_buckets = payload.usage_buckets.len(),
             completions = payload.recent_completions.len(),
-            workflow_runs = payload.workflow_runs.len(),
             "bootstrap payload sampled"
         ),
         Err(error) => tracing::warn!(

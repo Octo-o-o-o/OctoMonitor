@@ -185,6 +185,8 @@ When a session enters `waitingApproval`, fire a `Notification API` notification 
 
 ---
 
+> 2026-04-16 update: this document predates the simplification pass. Where it mentions setup/install workflows, prefer the current product boundary in `README.md` and `docs/simplification-plan-2026-04-15.md`.
+
 ## What NOT to Do (Avoiding Over-Engineering)
 
 | Temptation | Why skip it |
@@ -197,7 +199,7 @@ When a session enters `waitingApproval`, fire a `Notification API` notification 
 | React Router / TanStack Router | Three tabs don't need a router |
 | shadcn/ui or Radix | Overkill for a few toggles and cards |
 | recharts / d3 for Usage page | Add later when time-series data is available |
-| Setup wizard | Current detect → install → doctor flow works |
+| Setup wizard | Current detect + doctor flow is enough; no install/rollback path remains in product scope |
 | `ratatui` TUI | Separate product; don't block open-source on it |
 | CSS-in-JS | Tailwind is the better choice |
 | Graceful shutdown with drain logic | `Ctrl+C` is fine for a local dev tool |

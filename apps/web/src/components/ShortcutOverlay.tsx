@@ -1,19 +1,23 @@
 import { useEffect } from 'react'
 import { useMonitorStore } from '../store/monitorStore'
 import { useI18n } from '../lib/i18n'
-
-const shortcuts = [
-  { key: '1 / 2 / 3 / 4', action: 'shortcut.switchTab' },
-  { key: 'j / k', action: 'shortcut.navigate' },
-  { key: 'Enter', action: 'shortcut.openDrawer' },
-  { key: 'Esc', action: 'shortcut.closeDrawer' },
-  { key: '?', action: 'shortcut.toggleHelp' },
-] as const
+import { getRuntimeMode } from '../lib/runtimeMode'
 
 export function ShortcutOverlay() {
   const show = useMonitorStore((s) => s.showShortcutHelp)
   const toggle = useMonitorStore((s) => s.toggleShortcutHelp)
   const { t } = useI18n()
+  const runtimeMode = getRuntimeMode()
+  const shortcuts = [
+    {
+      key: runtimeMode === 'remoteViewer' ? '1 / 2' : '1 / 2 / 3 / 4 / 5',
+      action: runtimeMode === 'remoteViewer' ? t('shortcut.switchTabRemote') : t('shortcut.switchTab'),
+    },
+    { key: 'j / k', action: t('shortcut.navigate') },
+    { key: 'Enter', action: t('shortcut.openDrawer') },
+    { key: 'Esc', action: t('shortcut.closeDrawer') },
+    { key: '?', action: t('shortcut.toggleHelp') },
+  ] as const
 
   useEffect(() => {
     if (!show) return
@@ -39,7 +43,7 @@ export function ShortcutOverlay() {
           {shortcuts.map((s) => (
             <div key={s.key} className="shortcut-row">
               <kbd className="shortcut-key">{s.key}</kbd>
-              <span className="shortcut-action">{t(s.action)}</span>
+              <span className="shortcut-action">{s.action}</span>
             </div>
           ))}
         </div>

@@ -47,19 +47,6 @@ pub struct ClaudeSession {
     /// with no subsequent `tool_result` from the user — indicates the
     /// session is waiting for permission approval.
     pub has_pending_tool_use: bool,
-    /// Workflow hint from .octomonitor/workflow-context.json in the workspace
-    pub workflow_hint: Option<WorkflowContextFile>,
-}
-
-/// Contents of `.octomonitor/workflow-context.json` placed in a workspace directory.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowContextFile {
-    pub workflow_id: Option<String>,
-    pub step_id: Option<String>,
-    pub parent_step_id: Option<String>,
-    pub artifact_refs: Option<Vec<String>>,
-    pub updated_at: Option<String>,
 }
 
 /// Usage quota data from Claude HUD cache
@@ -396,7 +383,6 @@ fn build_claude_session(
         last_question: state.last_question.clone(),
         active_elapsed_ms,
         has_pending_tool_use: state.has_pending_tool_use,
-        workflow_hint: read_workflow_context(workspace_path),
     })
 }
 
@@ -414,12 +400,6 @@ fn update_cached_claude_session(
         apply_claude_line(&mut cached.state, &line);
     }
     build_claude_session(&cached.state, path, workspace_path, project_name)
-}
-
-fn read_workflow_context(workspace_path: &str) -> Option<WorkflowContextFile> {
-    let ctx_path = Path::new(workspace_path).join(".octomonitor/workflow-context.json");
-    let contents = fs::read_to_string(&ctx_path).ok()?;
-    serde_json::from_str(&contents).ok()
 }
 
 fn read_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {

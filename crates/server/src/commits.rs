@@ -901,7 +901,6 @@ mod tests {
             vcs: None,
             origin_label: None,
             origin_provider: None,
-            workflow_hint: None,
         };
 
         let score = keyword_overlap_score("Add worktree-aware commit attribution", &run);
@@ -1106,7 +1105,6 @@ mod tests {
             vcs,
             origin_label: None,
             origin_provider: None,
-            workflow_hint: None,
         }
     }
 

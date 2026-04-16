@@ -2,7 +2,6 @@ use axum::{extract::State, Json};
 use chrono::Utc;
 use octomonitor_core::{
     Freshness, MoneyValue, RunRecord, RunState, SourceConfidence, SourceInfo, TokenUsage, ToolKind,
-    WorkflowHint,
 };
 use serde::Deserialize;
 
@@ -18,24 +17,6 @@ fn default_quota() -> octomonitor_core::QuotaValue {
         reset_at: vec![],
         confidence: SourceConfidence::Derived,
     }
-}
-
-fn build_workflow_hint(
-    workflow_id: &Option<String>,
-    step_id: &Option<String>,
-    parent_step_id: &Option<String>,
-    artifact_refs: &Option<Vec<String>>,
-) -> Option<WorkflowHint> {
-    if workflow_id.is_none() && step_id.is_none() {
-        return None;
-    }
-    Some(WorkflowHint {
-        workflow_id: workflow_id.clone(),
-        step_id: step_id.clone(),
-        parent_step_id: parent_step_id.clone(),
-        artifact_refs: artifact_refs.clone().unwrap_or_default(),
-        updated_at: Some(Utc::now().to_rfc3339()),
-    })
 }
 
 fn live_source() -> SourceInfo {
@@ -72,10 +53,6 @@ pub struct ClaudeHookIngest {
     pub model: Option<String>,
     pub event: Option<String>,
     pub transcript_path: Option<String>,
-    pub workflow_id: Option<String>,
-    pub step_id: Option<String>,
-    pub parent_step_id: Option<String>,
-    pub artifact_refs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,10 +64,6 @@ pub struct CodexHookIngest {
     pub event: Option<String>,
     pub waiting_on_approval: Option<bool>,
     pub total_tokens: Option<u64>,
-    pub workflow_id: Option<String>,
-    pub step_id: Option<String>,
-    pub parent_step_id: Option<String>,
-    pub artifact_refs: Option<Vec<String>>,
 }
 
 pub async fn ingest_claude_statusline(
@@ -154,7 +127,6 @@ pub async fn ingest_claude_statusline(
         workspace_path,
         origin_label: None,
         origin_provider: None,
-        workflow_hint: None,
     };
     perf::log_ingest_event("claude_statusline", &run.id);
     upsert_runtime_run(&state, run, "ingest_claude_statusline").await;
@@ -168,12 +140,6 @@ pub async fn ingest_claude_hook(
     let event = input.event.unwrap_or_else(|| "notification".into());
     let pending = event.contains("permission");
     let workspace_path = input.cwd.unwrap_or_else(|| "~/.claude".into());
-    let wf_hint = build_workflow_hint(
-        &input.workflow_id,
-        &input.step_id,
-        &input.parent_step_id,
-        &input.artifact_refs,
-    );
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
@@ -224,14 +190,10 @@ pub async fn ingest_claude_hook(
         workspace_path,
         origin_label: None,
         origin_provider: None,
-        workflow_hint: wf_hint.clone(),
     };
     let run_id = run.id.clone();
     perf::log_ingest_event("claude_hook", &run_id);
     upsert_runtime_run(&state, run, "ingest_claude_hook").await;
-    if let Some(hint) = wf_hint {
-        notify_coordinator(&state, &run_id, &hint).await;
-    }
     Json(serde_json::json!({"ok": true}))
 }
 
@@ -246,12 +208,6 @@ pub async fn ingest_codex_hook(
         .as_deref()
         .map(crate::probe::resolve_worktree_cwd)
         .unwrap_or_else(|| "~/.codex".into());
-    let wf_hint = build_workflow_hint(
-        &input.workflow_id,
-        &input.step_id,
-        &input.parent_step_id,
-        &input.artifact_refs,
-    );
     let run = RunRecord {
         id: format!(
             "ingest-codex-{}",
@@ -305,14 +261,10 @@ pub async fn ingest_codex_hook(
         workspace_path,
         origin_label: None,
         origin_provider: None,
-        workflow_hint: wf_hint.clone(),
     };
     let run_id = run.id.clone();
     perf::log_ingest_event("codex_hook", &run_id);
     upsert_runtime_run(&state, run, "ingest_codex_hook").await;
-    if let Some(hint) = wf_hint {
-        notify_coordinator(&state, &run_id, &hint).await;
-    }
     Json(serde_json::json!({"ok": true}))
 }
 
@@ -336,70 +288,6 @@ async fn upsert_runtime_run(state: &AppState, mut run: RunRecord, wake_reason: &
     state.wake_probe_with_reason(wake_reason);
 }
 
-async fn notify_coordinator(state: &AppState, run_id: &str, hint: &WorkflowHint) {
-    let Some(wf_id) = &hint.workflow_id else {
-        return;
-    };
-
-    if let Some(step_id) = &hint.step_id {
-        let coord = state.workflow_coordinator.lock().await;
-        if let Ok(runs) = coord.list_runs_for_def(wf_id) {
-            for wr_id in runs {
-                let _ = coord.link_run(
-                    &wr_id,
-                    step_id,
-                    run_id,
-                    octomonitor_core::workflow::LinkConfidence::Explicit,
-                    "ingest-hint-explicit",
-                );
-            }
-        }
-        return;
-    }
-
-    let payload = state.bootstrap.read().await;
-    let Some(monitor_run) = payload.runs.iter().find(|r| r.id == run_id) else {
-        return;
-    };
-
-    let coord = state.workflow_coordinator.lock().await;
-    let Ok(wr_ids) = coord.list_runs_for_def(wf_id) else {
-        return;
-    };
-
-    for wr_id in wr_ids {
-        let Ok(wf_run) = coord.store().load_run(&wr_id) else {
-            continue;
-        };
-        for step in &wf_run.steps {
-            if let Some(linked) =
-                crate::workflows::link_resolver::resolve_strong(monitor_run, step, wf_id)
-            {
-                let _ = coord.link_run(
-                    &wr_id,
-                    &step.step_id,
-                    run_id,
-                    linked.confidence,
-                    &linked.matched_by,
-                );
-                return;
-            }
-            if let Some(linked) =
-                crate::workflows::link_resolver::resolve_prompt_marker(monitor_run, step, wf_id)
-            {
-                let _ = coord.link_run(
-                    &wr_id,
-                    &step.step_id,
-                    run_id,
-                    linked.confidence,
-                    &linked.matched_by,
-                );
-                return;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -408,19 +296,10 @@ mod tests {
     use octomonitor_core::{QuotaValue, SourceInfo};
 
     use super::*;
-    use crate::{
-        pricing::PricingStore,
-        probe::empty_bootstrap,
-        workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore},
-    };
+    use crate::{pricing::PricingStore, probe::empty_bootstrap};
 
     fn test_state() -> AppState {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let store = WorkflowStore::new(temp_dir.path().join("workflows")).expect("workflow store");
-        let coordinator = WorkflowCoordinator::new(store);
-        let mut bootstrap = empty_bootstrap();
-        bootstrap.workflow_runs = coordinator.get_summary_list();
-        AppState::new(bootstrap, PricingStore::new(), coordinator)
+        AppState::new(empty_bootstrap(), PricingStore::new())
     }
 
     fn sample_run(id: &str, state: RunState) -> RunRecord {
@@ -481,7 +360,6 @@ mod tests {
             vcs: None,
             origin_label: None,
             origin_provider: None,
-            workflow_hint: None,
         }
     }
 

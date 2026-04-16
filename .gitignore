@@ -23,3 +23,15 @@ apps/desktop/src-tauri/icons/source/octomonitor-mark.png
 CommitUIDemo/
 ccusage-main/
 b_*/
+
+# Temporary screenshots & test artifacts
+e2e-*.png
+verify-*.png
+final-*.png
+octomonitor_v*.png
+
+# Playwright MCP cache
+.playwright-mcp/
+
+# NPM binary tarballs (built during release)
+packages/*/*.tgz

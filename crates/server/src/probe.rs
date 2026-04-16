@@ -75,7 +75,6 @@ pub fn empty_bootstrap() -> BootstrapPayload {
         recent_completions: Vec::new(),
         pending_crons: Vec::new(),
         config: default_app_config(),
-        workflow_runs: Vec::new(),
     };
     payload.config.local_ip = detect_local_ip();
     payload
@@ -261,9 +260,7 @@ async fn refresh_bootstrap_once(state: &AppState) {
         .await;
 
         match result {
-            Ok(mut refreshed) => {
-                refreshed.workflow_runs =
-                    state.workflow_coordinator.lock().await.get_summary_list();
+            Ok(refreshed) => {
                 perf::log_bootstrap_payload("refresh_bootstrap_once", &refreshed);
                 if try_commit_refreshed_payload(state, refreshed, expected_revision).await {
                     perf::log_elapsed_with_details("refresh_bootstrap_once", started_at, || {
@@ -507,6 +504,7 @@ fn apply_history_window(payload: &mut BootstrapPayload) {
     payload.recent_completions.truncate(12);
 }
 
+#[cfg(test)]
 pub fn build_bootstrap(pricing: &PricingStore) -> BootstrapPayload {
     let started_at = Instant::now();
     let scanned = collect_probe_scan(true);
@@ -587,6 +585,7 @@ async fn scan_adapters_isolated(
     (claude_probe, codex_probe, openclaw_probe, hermes_probe)
 }
 
+#[cfg(test)]
 fn scan_adapters_blocking() -> (
     claude_adapter::ClaudeSnapshot,
     codex_adapter::CodexSnapshot,
@@ -898,6 +897,7 @@ fn collect_probe_scan_from_snapshots(
     result
 }
 
+#[cfg(test)]
 fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
     let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = scan_adapters_blocking();
     collect_probe_scan_from_snapshots(
@@ -1019,16 +1019,6 @@ fn build_run_from_claude_session(
         vcs: crate::commits::discover_vcs_context(&session.project_path),
         origin_label: None,
         origin_provider: None,
-        workflow_hint: session
-            .workflow_hint
-            .as_ref()
-            .map(|wh| octomonitor_core::WorkflowHint {
-                workflow_id: wh.workflow_id.clone(),
-                step_id: wh.step_id.clone(),
-                parent_step_id: wh.parent_step_id.clone(),
-                artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
-                updated_at: wh.updated_at.clone(),
-            }),
     }
 }
 
@@ -1149,16 +1139,6 @@ fn build_run_from_codex_session(
             .and_then(crate::commits::discover_vcs_context),
         origin_label: None,
         origin_provider: None,
-        workflow_hint: session
-            .workflow_hint
-            .as_ref()
-            .map(|wh| octomonitor_core::WorkflowHint {
-                workflow_id: wh.workflow_id.clone(),
-                step_id: wh.step_id.clone(),
-                parent_step_id: wh.parent_step_id.clone(),
-                artifact_refs: wh.artifact_refs.clone().unwrap_or_default(),
-                updated_at: wh.updated_at.clone(),
-            }),
     }
 }
 
@@ -1305,7 +1285,6 @@ fn build_run_from_openclaw_session(
         vcs: crate::commits::discover_vcs_context(&workspace),
         origin_label: session.origin_label.clone(),
         origin_provider: session.origin_provider.clone(),
-        workflow_hint: None,
     }
 }
 
@@ -1429,7 +1408,6 @@ fn build_run_from_hermes_session(
         vcs: None,
         origin_label: session.origin_label.clone(),
         origin_provider: session.origin_provider.clone(),
-        workflow_hint: None,
     }
 }
 
@@ -1518,7 +1496,6 @@ fn build_probe_placeholder_run(params: ProbeRunParams) -> RunRecord {
         vcs: None,
         origin_label: None,
         origin_provider: None,
-        workflow_hint: None,
     }
 }
 
@@ -1931,10 +1908,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::{
-        state::AppState,
-        workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore},
-    };
+    use crate::state::AppState;
     use octomonitor_core::CompletionRecord;
 
     fn pricing_store() -> PricingStore {
@@ -1942,12 +1916,7 @@ mod tests {
     }
 
     fn test_state() -> AppState {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let store = WorkflowStore::new(temp_dir.path().join("workflows")).expect("workflow store");
-        let coordinator = WorkflowCoordinator::new(store);
-        let mut bootstrap = empty_bootstrap();
-        bootstrap.workflow_runs = coordinator.get_summary_list();
-        AppState::new(bootstrap, PricingStore::new(), coordinator)
+        AppState::new(empty_bootstrap(), PricingStore::new())
     }
 
     fn run(
@@ -2012,7 +1981,6 @@ mod tests {
             vcs: None,
             origin_label: None,
             origin_provider: None,
-            workflow_hint: None,
         }
     }
 
@@ -2034,7 +2002,6 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
-            workflow_runs: Vec::new(),
         }
     }
 
@@ -2084,7 +2051,6 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
-            workflow_runs: Vec::new(),
         };
         let previous = BootstrapPayload {
             generated_at: String::new(),
@@ -2097,7 +2063,6 @@ mod tests {
             recent_completions: Vec::new(),
             pending_crons: Vec::new(),
             config: target.config.clone(),
-            workflow_runs: Vec::new(),
         };
 
         merge_runtime_state(&mut target, &previous, &pricing);
@@ -2153,7 +2118,6 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
-            workflow_runs: Vec::new(),
         };
         let previous = BootstrapPayload {
             generated_at: String::new(),
@@ -2166,7 +2130,6 @@ mod tests {
             recent_completions: Vec::new(),
             pending_crons: Vec::new(),
             config: target.config.clone(),
-            workflow_runs: Vec::new(),
         };
 
         merge_runtime_state(&mut target, &previous, &pricing);
@@ -2338,7 +2301,6 @@ mod tests {
                 companion_enabled: false,
                 local_ip: None,
             },
-            workflow_runs: Vec::new(),
         };
 
         rebuild_derived(&mut payload, &pricing);
@@ -2398,7 +2360,6 @@ mod tests {
             message_count: 1,
             active_elapsed_ms: 10_000,
             has_pending_approval: false,
-            workflow_hint: None,
         };
         let probe = codex_adapter::CodexSnapshot {
             probed_at: "2026-04-01T08:10:00Z".into(),
@@ -2544,13 +2505,11 @@ mod tests {
 
         let mut stale_refresh = bootstrap_from_scan(scanned.clone());
         merge_runtime_state(&mut stale_refresh, &stale_snapshot, &pricing);
-        stale_refresh.workflow_runs = Vec::new();
         assert!(!try_commit_refreshed_payload(&state, stale_refresh, stale_revision).await);
 
         let (fresh_revision, latest_snapshot) = state.snapshot_bootstrap().await;
         let mut refreshed = bootstrap_from_scan(scanned);
         merge_runtime_state(&mut refreshed, &latest_snapshot, &pricing);
-        refreshed.workflow_runs = Vec::new();
         assert!(try_commit_refreshed_payload(&state, refreshed, fresh_revision).await);
 
         let payload = state.bootstrap.read().await;

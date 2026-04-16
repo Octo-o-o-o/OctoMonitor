@@ -35,7 +35,6 @@ export function normalizeBootstrapPayload(payload: unknown): BootstrapPayload {
     adapterHealth: asArray(data?.adapterHealth),
     recentCompletions: asArray(data?.recentCompletions),
     pendingCrons: asArray(data?.pendingCrons),
-    workflowRuns: asArray(data?.workflowRuns),
     config: {
       listenHost: typeof config?.listenHost === 'string' ? config.listenHost : DEFAULT_CONFIG.listenHost,
       listenPort: typeof config?.listenPort === 'number' ? config.listenPort : DEFAULT_CONFIG.listenPort,

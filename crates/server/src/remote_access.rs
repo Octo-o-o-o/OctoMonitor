@@ -191,7 +191,6 @@ pub fn redact_bootstrap(payload: &BootstrapPayload) -> BootstrapPayload {
             .collect(),
         pending_crons: payload.pending_crons.clone(),
         config: redact_config(&payload.config),
-        workflow_runs: payload.workflow_runs.clone(),
     }
 }
 
@@ -232,7 +231,6 @@ fn redact_run(run: &RunRecord) -> RunRecord {
         vcs: run.vcs.as_ref().map(redact_vcs_context),
         origin_label: None,
         origin_provider: run.origin_provider.clone(),
-        workflow_hint: None,
     }
 }
 
@@ -529,19 +527,14 @@ mod tests {
         AppConfig, AttentionItem, CommitAttributionLink, CommitAttributionMethod, CommitRecord,
         CommitSourceStat, CompletionRecord, Freshness, IdentityState, MoneyValue, QuotaValue,
         RunRecord, RunState, SourceConfidence, SourceInfo, TokenUsage, ToolKind, VcsContext,
-        WorkflowHint,
     };
 
     use super::*;
     use crate::pricing::PricingStore;
     use crate::probe::empty_bootstrap;
-    use crate::workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore};
 
     fn test_state(pricing: &PricingStore) -> AppState {
-        let dir = std::env::temp_dir().join(format!("octomonitor-ra-test-{}", std::process::id()));
-        let store = WorkflowStore::new(dir).unwrap();
-        let coord = WorkflowCoordinator::new(store);
-        AppState::new(empty_bootstrap(), pricing.clone(), coord)
+        AppState::new(empty_bootstrap(), pricing.clone())
     }
 
     #[test]
@@ -564,7 +557,6 @@ mod tests {
         assert!(run.last_question.is_none());
         assert!(run.error_message.is_none());
         assert!(run.origin_label.is_none());
-        assert!(run.workflow_hint.is_none());
 
         let vcs = run.vcs.as_ref().expect("redacted vcs");
         assert!(vcs.repo_name.is_empty());
@@ -672,13 +664,6 @@ mod tests {
             }),
             origin_label: Some("Telegram: Alice".into()),
             origin_provider: Some("telegram".into()),
-            workflow_hint: Some(WorkflowHint {
-                workflow_id: Some("wf-1".into()),
-                step_id: Some("step-1".into()),
-                parent_step_id: None,
-                artifact_refs: vec!["artifact-1".into()],
-                updated_at: Some("2026-04-09T08:04:00Z".into()),
-            }),
         });
         payload.attentions.push(AttentionItem {
             id: "attention-run-1".into(),

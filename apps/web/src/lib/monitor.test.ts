@@ -58,7 +58,6 @@ function createRun(overrides: Partial<RunRecord> = {}): RunRecord {
     vcs: null,
     originLabel: null,
     originProvider: null,
-    workflowHint: null,
     ...overrides,
   }
 }

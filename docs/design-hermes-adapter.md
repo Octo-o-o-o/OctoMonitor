@@ -1,5 +1,7 @@
 # Hermes Agent Adapter 设计方案
 
+> 2026-04-16 更新：本设计文档早于 2026-04-15 的项目收敛方案。文中如果出现 workflow 集成点，应以当前实现为准；现有产品已经移除 workflow 子系统，Hermes 仅保留监控适配器角色。
+
 ## 1. 背景
 
 Hermes Agent (Nous Research) 是一个类似 OpenClaw 的自托管 AI Agent 框架，支持：
@@ -366,7 +368,7 @@ fn build_run_from_hermes_session(session, probe) -> RunRecord {
 | `crates/server/src/probe.rs` | 修改 | 集成 hermes probe |
 | `crates/server/src/main.rs` | 不变 | 无需新路由 |
 | `crates/installer/src/lib.rs` | 修改 | 添加 hermes 检测 |
-| `crates/server/src/workflows/` | 修改 | ToolKind 匹配添加 Hermes 分支 |
+| workflow 子系统 | 无需变更 | 2026-04-15 收敛后已删除，不再为 Hermes 添加 workflow 分支 |
 | `apps/web/src/lib/constants.ts` | 修改 | allTools, sourceLabels 添加 hermes |
 | `apps/web/src/lib/monitor.ts` | 修改 | sessionsBySource 初始化添加 hermes |
 | `apps/web/src/components/monitor/MonitorView.tsx` | 修改 | sourceAccents 添加 hermes，显示逻辑适配 |

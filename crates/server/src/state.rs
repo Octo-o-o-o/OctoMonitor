@@ -2,14 +2,13 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex as StdMutex,
 };
-use tokio::sync::{broadcast, Mutex, Notify, RwLock};
+use tokio::sync::{broadcast, Notify, RwLock};
 
 use octomonitor_companion::{PairingRecord, ViewerSession};
 use octomonitor_core::BootstrapPayload;
 
 use crate::perf;
 use crate::pricing::PricingStore;
-use crate::workflows::coordinator::WorkflowCoordinator;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -26,15 +25,10 @@ pub struct AppState {
     pub openclaw_probe_cache: Arc<StdMutex<octomonitor_openclaw_adapter::OpenClawProbeCache>>,
     pub hermes_probe_cache: Arc<StdMutex<octomonitor_hermes_adapter::HermesProbeCache>>,
     pub pricing: PricingStore,
-    pub workflow_coordinator: Arc<Mutex<WorkflowCoordinator>>,
 }
 
 impl AppState {
-    pub fn new(
-        initial: BootstrapPayload,
-        pricing: PricingStore,
-        workflow_coordinator: WorkflowCoordinator,
-    ) -> Self {
+    pub fn new(initial: BootstrapPayload, pricing: PricingStore) -> Self {
         let (notify, _) = broadcast::channel(16);
         Self {
             bootstrap: Arc::new(RwLock::new(initial)),
@@ -58,7 +52,6 @@ impl AppState {
                 octomonitor_hermes_adapter::HermesProbeCache::default(),
             )),
             pricing,
-            workflow_coordinator: Arc::new(Mutex::new(workflow_coordinator)),
         }
     }
 
@@ -115,14 +108,10 @@ mod tests {
     use crate::{
         pricing::PricingStore,
         probe::build_bootstrap,
-        workflows::{coordinator::WorkflowCoordinator, store::WorkflowStore},
     };
 
     fn test_state(pricing: &PricingStore) -> AppState {
-        let dir = std::env::temp_dir().join(format!("octomonitor-test-{}", std::process::id()));
-        let store = WorkflowStore::new(dir).unwrap();
-        let coord = WorkflowCoordinator::new(store);
-        AppState::new(build_bootstrap(pricing), pricing.clone(), coord)
+        AppState::new(build_bootstrap(pricing), pricing.clone())
     }
 
     fn sample_session() -> ViewerSession {

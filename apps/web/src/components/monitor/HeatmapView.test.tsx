@@ -29,7 +29,6 @@ function createBootstrap(): BootstrapPayload {
     adapterHealth: [],
     recentCompletions: [],
     pendingCrons: [],
-    workflowRuns: [],
     config: {
       listenHost: '127.0.0.1',
       listenPort: 46321,
@@ -104,7 +103,6 @@ function createUsagePayload(): UsageHistoryPayload {
         vcs: null,
         originLabel: null,
         originProvider: null,
-        workflowHint: null,
       },
     ],
     usageBuckets: [
@@ -189,6 +187,8 @@ function createCommitPayload(): CommitHistoryPayload {
 
 describe('HeatmapView', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(localIso(2026, 4, 3, 16)))
     historyMocks.fetchUsageHistory.mockResolvedValue(createUsagePayload())
     historyMocks.fetchCommitHistory.mockResolvedValue(createCommitPayload())
 
@@ -204,6 +204,7 @@ describe('HeatmapView', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     historyMocks.fetchUsageHistory.mockReset()
     historyMocks.fetchCommitHistory.mockReset()
     act(() => {

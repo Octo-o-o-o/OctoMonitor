@@ -2,7 +2,6 @@
 members = [
   "crates/core",
   "crates/server",
-  "crates/cli",
   "crates/installer",
   "crates/companion",
   "crates/adapters/common",

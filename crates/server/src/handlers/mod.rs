@@ -1,11 +1,8 @@
 pub mod bootstrap;
 pub mod config;
-pub mod daily_summary;
 pub mod history;
 pub mod ingest;
 pub mod inspect;
 pub mod installer;
-pub mod pairing;
 pub mod remote;
 pub mod stream;
-pub mod workflows;

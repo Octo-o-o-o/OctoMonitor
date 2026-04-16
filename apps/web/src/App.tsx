@@ -7,7 +7,6 @@ import { UsageView } from './components/monitor/UsageView'
 import { CommitsView } from './components/monitor/CommitsView'
 import { HeatmapView } from './components/monitor/HeatmapView'
 import { SettingsView } from './components/monitor/SettingsView'
-import { WorkflowsView } from './components/workflows/WorkflowsView'
 import { InspectDrawer } from './components/InspectDrawer'
 import { ShortcutOverlay } from './components/ShortcutOverlay'
 import { RemotePairingGate } from './components/RemotePairingGate'
@@ -100,7 +99,6 @@ function TabContent({ runtimeMode, tab }: { runtimeMode: ReturnType<typeof getRu
     case 'usage': return <UsageView />
     case 'commits': return <CommitsView />
     case 'heatmap': return <HeatmapView />
-    case 'workflows': return <WorkflowsView />
     case 'settings': return runtimeMode === 'local' ? <SettingsView /> : <MonitorView />
     default: return <MonitorView />
   }
@@ -134,12 +132,15 @@ function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>, ac
         switch (e.key) {
           case '1': setActiveTab('monitor'); break
           case '2': setActiveTab('usage'); break
-          case '3': setActiveTab('commits'); break
-          case '4': setActiveTab('heatmap'); break
+          case '3':
+            if (runtimeMode === 'local') setActiveTab('commits')
+            break
+          case '4':
+            if (runtimeMode === 'local') setActiveTab('heatmap')
+            break
           case '5':
             if (runtimeMode === 'local') setActiveTab('settings')
             break
-          case '6': setActiveTab('workflows'); break
           case 'j':
           case 'k': {
             if (runIds.length === 0) break
@@ -296,7 +297,7 @@ export default function App() {
   }, [connectionStatus, remoteAuthState, runtimeMode, setData])
 
   useEffect(() => {
-    if (runtimeMode === 'remoteViewer' && activeTab === 'settings') {
+    if (runtimeMode === 'remoteViewer' && activeTab !== 'monitor' && activeTab !== 'usage') {
       setActiveTab('monitor')
     }
   }, [activeTab, runtimeMode, setActiveTab])

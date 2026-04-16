@@ -1,5 +1,4 @@
 import { AppearanceSection } from './settings/AppearanceSection'
-import { InsightsSection } from './settings/InsightsSection'
 import { MonitorSection } from './settings/MonitorSection'
 import { FilterSection } from './settings/FilterSection'
 import { RemoteAccessSection } from './settings/RemoteAccessSection'
@@ -11,7 +10,6 @@ export function SettingsView() {
     <div className="settings-page">
       <AppearanceSection />
       <RemoteAccessSection />
-      <InsightsSection />
       <MonitorSection />
       <FilterSection />
       <SystemSection />

@@ -12,7 +12,6 @@ mod static_files;
 #[cfg(test)]
 mod test_support;
 mod watcher;
-mod workflows;
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -25,8 +24,7 @@ use tower_http::cors::CorsLayer;
 
 use config::{load_config, save_config};
 use handlers::{
-    bootstrap, config as config_handler, daily_summary, history, ingest, inspect, installer,
-    pairing, remote, stream, workflows as wf,
+    bootstrap, config as config_handler, history, ingest, inspect, installer, remote, stream,
 };
 use pricing::PricingStore;
 use probe::{empty_bootstrap, spawn_derive_refresh, spawn_probe_refresh};
@@ -74,24 +72,8 @@ pub(crate) fn build_app(state: AppState) -> Router {
             "/api/config",
             get(config_handler::get_config).patch(config_handler::patch_config),
         )
-        .route(
-            "/api/daily-summary/generate",
-            post(daily_summary::generate_daily_summary),
-        )
         .route("/api/installer/detect", get(installer::installer_detect))
         .route("/api/installer/doctor", get(installer::installer_doctor))
-        .route(
-            "/api/installer/install-plan",
-            post(installer::installer_install_plan),
-        )
-        .route("/api/installer/install", post(installer::installer_install))
-        .route(
-            "/api/installer/rollback",
-            post(installer::installer_rollback),
-        )
-        .route("/api/pair/request", post(pairing::pair_request))
-        .route("/api/pair/approve/{token}", post(pairing::pair_approve))
-        .route("/api/pair/revoke/{token}", post(pairing::pair_revoke))
         .route(
             "/api/remote/access",
             get(remote::get_remote_access).patch(remote::patch_remote_access),
@@ -109,52 +91,6 @@ pub(crate) fn build_app(state: AppState) -> Router {
         .route("/api/ingest/claude/hook", post(ingest::ingest_claude_hook))
         .route("/api/ingest/codex/hook", post(ingest::ingest_codex_hook))
         .route("/api/stream", get(stream::stream))
-        .route("/api/workflows", get(wf::list_defs).post(wf::create_def))
-        .route(
-            "/api/workflows/{id}",
-            get(wf::get_def).put(wf::update_def).delete(wf::delete_def),
-        )
-        .route("/api/workflows/{id}/runs", post(wf::create_run))
-        .route("/api/workflow-runs", get(wf::list_runs))
-        .route("/api/workflow-runs/{id}", get(wf::get_run))
-        .route("/api/workflow-runs/{id}/cancel", post(wf::cancel_run))
-        .route("/api/workflow-runs/{id}/mode", post(wf::change_mode))
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/link",
-            post(wf::link_run),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/unlink",
-            post(wf::unlink_run),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/complete",
-            post(wf::complete_step),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/fail",
-            post(wf::fail_step),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/skip",
-            post(wf::skip_step),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/retry",
-            post(wf::retry_step),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/candidates",
-            get(wf::get_candidates),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/preview",
-            get(wf::get_launch_preview),
-        )
-        .route(
-            "/api/workflow-runs/{id}/steps/{step_id}/approve",
-            post(wf::approve_step),
-        )
         .layer(build_cors_layer())
         .with_state(state)
         .fallback(static_files::static_handler)
@@ -207,14 +143,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let wf_store =
-        workflows::store::WorkflowStore::new(workflows::store::WorkflowStore::default_base_dir())
-            .expect("Failed to initialize workflow store");
-    let wf_coordinator = workflows::coordinator::WorkflowCoordinator::new(wf_store);
-
-    initial.workflow_runs = wf_coordinator.get_summary_list();
-
-    let state = AppState::new(initial, pricing, wf_coordinator);
+    let state = AppState::new(initial, pricing);
 
     let app = build_app(state.clone());
 

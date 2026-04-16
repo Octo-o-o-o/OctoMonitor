@@ -52,19 +52,6 @@ pub struct CodexSession {
     /// True when a `function_call` with `require_escalated` has no matching
     /// `function_call_output` — the session is waiting for user approval.
     pub has_pending_approval: bool,
-    /// Workflow hint from .octomonitor/workflow-context.json in the workspace
-    pub workflow_hint: Option<WorkflowContextFile>,
-}
-
-/// Contents of `.octomonitor/workflow-context.json` placed in a workspace directory.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowContextFile {
-    pub workflow_id: Option<String>,
-    pub step_id: Option<String>,
-    pub parent_step_id: Option<String>,
-    pub artifact_refs: Option<Vec<String>>,
-    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -469,8 +456,6 @@ fn build_codex_session(
                 (now - user_dt).num_milliseconds().max(0)
             })
             .unwrap_or(0);
-    let workflow_hint = state.cwd.as_deref().and_then(read_workflow_context);
-
     Some(CodexSession {
         session_id: sid,
         thread_name,
@@ -494,7 +479,6 @@ fn build_codex_session(
         message_count: state.message_count,
         active_elapsed_ms,
         has_pending_approval: !state.pending_escalated_calls.is_empty(),
-        workflow_hint,
     })
 }
 
@@ -511,12 +495,6 @@ fn update_cached_codex_session(
         apply_codex_line(&mut cached.state, &line);
     }
     build_codex_session(&cached.state, path, thread_index)
-}
-
-fn read_workflow_context(workspace_path: &str) -> Option<WorkflowContextFile> {
-    let ctx_path = Path::new(workspace_path).join(".octomonitor/workflow-context.json");
-    let contents = fs::read_to_string(&ctx_path).ok()?;
-    serde_json::from_str(&contents).ok()
 }
 
 pub fn probe_with_cache(cache: &mut CodexProbeCache) -> CodexSnapshot {
