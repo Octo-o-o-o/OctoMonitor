@@ -1,6 +1,6 @@
 {
   "name": "octomonitor",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Local-first unified monitor for Claude Code, Codex & OpenClaw",
   "license": "MIT",
   "bin": {
@@ -10,10 +10,10 @@
     "bin"
   ],
   "optionalDependencies": {
-    "octomonitor-darwin-arm64": "0.1.5",
-    "octomonitor-darwin-x64": "0.1.5",
-    "octomonitor-linux-x64": "0.1.5",
-    "@clawbutler/octomonitor-win32-x64": "0.1.5"
+    "octomonitor-darwin-arm64": "0.1.6",
+    "octomonitor-darwin-x64": "0.1.6",
+    "octomonitor-linux-x64": "0.1.6",
+    "@clawbutler/octomonitor-win32-x64": "0.1.6"
   },
   "keywords": [
     "claude-code",
