@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../../../lib/api'
 import { useI18n } from '../../../lib/i18n'
 import type { RemoteAccessState } from '../../../lib/types'
@@ -7,15 +7,20 @@ export function RemoteAccessSection() {
   const { t } = useI18n()
   const [remoteAccess, setRemoteAccess] = useState<RemoteAccessState | null>(null)
   const [busy, setBusy] = useState(false)
+  const mountedRef = useRef(true)
 
   async function refresh() {
     const response = await apiFetch('/api/remote/access')
-    if (!response.ok) return
+    if (!response.ok || !mountedRef.current) return
     setRemoteAccess(await response.json() as RemoteAccessState)
   }
 
   useEffect(() => {
+    mountedRef.current = true
     void refresh()
+    return () => {
+      mountedRef.current = false
+    }
   }, [])
 
   async function toggleEnabled() {
@@ -28,9 +33,12 @@ export function RemoteAccessSection() {
         body: JSON.stringify({ enabled: !remoteAccess.enabled }),
       })
       if (!response.ok) throw new Error('remote access toggle failed')
+      if (!mountedRef.current) return
       setRemoteAccess(await response.json() as RemoteAccessState)
     } finally {
-      setBusy(false)
+      if (mountedRef.current) {
+        setBusy(false)
+      }
     }
   }
 
@@ -46,7 +54,9 @@ export function RemoteAccessSection() {
       if (!response.ok) throw new Error('pair code creation failed')
       await refresh()
     } finally {
-      setBusy(false)
+      if (mountedRef.current) {
+        setBusy(false)
+      }
     }
   }
 
@@ -57,7 +67,9 @@ export function RemoteAccessSection() {
       await apiFetch(`/api/remote/devices/${deviceId}`, { method: 'DELETE' })
       await refresh()
     } finally {
-      setBusy(false)
+      if (mountedRef.current) {
+        setBusy(false)
+      }
     }
   }
 

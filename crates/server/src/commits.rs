@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
     path::{Path, PathBuf},
     process::Command,
@@ -39,7 +40,10 @@ struct ScannedCommit {
 #[derive(Debug, Clone)]
 struct LinkCandidate {
     commit_index: usize,
-    score: f64,
+    worktree_match: bool,
+    branch_match: bool,
+    time_distance_ms: i64,
+    committed_at_ms: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -187,145 +191,13 @@ pub fn build_commit_records(
             continue;
         }
 
-        let mut aggregated = scanned
-            .into_iter()
-            .map(|base| AggregatedCommit {
-                base,
-                repo_id: repo_vcs.repo_id.clone(),
-                repo_name: repo_vcs.repo_name.clone(),
-                repo_root: repo_vcs.repo_root.clone(),
-                links: Vec::new(),
-            })
-            .collect::<Vec<_>>();
-
-        for run in repo_run_list {
-            let candidates = candidate_commits(run, &aggregated);
-            if candidates.is_empty() {
-                continue;
-            }
-
-            let weights = candidates.iter().map(|item| item.score).collect::<Vec<_>>();
-            let token_allocations = allocate_proportionally(run.tokens.total, &weights);
-            let run_cost = pricing.estimate_run_cost(run);
-            let total_weight = weights.iter().sum::<f64>().max(1.0);
-
-            for (idx, candidate) in candidates.iter().enumerate() {
-                let tokens = token_allocations[idx];
-                if tokens == 0 && run_cost.is_none() {
-                    continue;
-                }
-
-                let share = candidate.score / total_weight;
-                let allocated_cost = run_cost.map(|cost| cost * share);
-                aggregated[candidate.commit_index]
-                    .links
-                    .push(CommitAttributionLink {
-                        run_id: run.id.clone(),
-                        tool: run.tool.clone(),
-                        source_mode: run.source_mode.clone(),
-                        project_name: run.project_name.clone(),
-                        session_label: run
-                            .last_question
-                            .clone()
-                            .or_else(|| run.first_question.clone())
-                            .or_else(|| run.last_action.clone())
-                            .unwrap_or_else(|| run.project_name.clone()),
-                        score: share,
-                        allocated_tokens: tokens,
-                        allocated_cost_usd: allocated_cost,
-                        confidence: SourceConfidence::Heuristic,
-                        method: CommitAttributionMethod::ReadOnlyHeuristic,
-                    });
-            }
-        }
-
-        for aggregated_commit in aggregated {
-            let mut run_ids = HashSet::new();
-            let mut sources_by_tool: HashMap<ToolKind, CommitSourceStat> = HashMap::new();
-            let mut worktree_votes: HashMap<(Option<String>, Option<String>), u64> = HashMap::new();
-            let mut total_cost = 0.0;
-            let mut has_cost = false;
-
-            for link in &aggregated_commit.links {
-                run_ids.insert(link.run_id.clone());
-                let entry =
-                    sources_by_tool
-                        .entry(link.tool.clone())
-                        .or_insert_with(|| CommitSourceStat {
-                            tool: link.tool.clone(),
-                            run_count: 0,
-                            attributed_tokens: 0,
-                            attributed_cost_usd: None,
-                            confidence: SourceConfidence::Heuristic,
-                        });
-                entry.run_count += 1;
-                entry.attributed_tokens += link.allocated_tokens;
-                if let Some(cost) = link.allocated_cost_usd {
-                    entry.attributed_cost_usd =
-                        Some(entry.attributed_cost_usd.unwrap_or(0.0) + cost);
-                    total_cost += cost;
-                    has_cost = true;
-                }
-
-                if let Some(vcs) = run_index
-                    .get(link.run_id.as_str())
-                    .and_then(|run| run.vcs.as_ref())
-                {
-                    let key = (vcs.worktree_id.clone(), vcs.worktree_name.clone());
-                    *worktree_votes.entry(key).or_insert(0) += link.allocated_tokens;
-                }
-            }
-
-            let mut sources = sources_by_tool.into_values().collect::<Vec<_>>();
-            sources.sort_by(|a, b| b.attributed_tokens.cmp(&a.attributed_tokens));
-
-            let inferred_worktree = worktree_votes
-                .into_iter()
-                .max_by_key(|(_, tokens)| *tokens)
-                .map(|(key, _)| key)
-                .unwrap_or_else(|| primary_worktree(&aggregated_commit.base));
-
-            let attributed_tokens = aggregated_commit
-                .links
-                .iter()
-                .map(|link| link.allocated_tokens)
-                .sum();
-
-            let mut links = aggregated_commit.links;
-            links.sort_by(|a, b| b.allocated_tokens.cmp(&a.allocated_tokens));
-
-            out.push(CommitRecord {
-                id: format!(
-                    "{}:{}",
-                    aggregated_commit.repo_id, aggregated_commit.base.sha
-                ),
-                repo_id: aggregated_commit.repo_id,
-                repo_name: aggregated_commit.repo_name,
-                repo_root: aggregated_commit.repo_root,
-                worktree_id: inferred_worktree.0,
-                worktree_name: inferred_worktree.1,
-                sha: aggregated_commit.base.sha,
-                short_sha: aggregated_commit.base.short_sha,
-                author_name: aggregated_commit.base.author_name,
-                committed_at: aggregated_commit.base.committed_at,
-                summary: aggregated_commit.base.summary,
-                files_changed: aggregated_commit.base.files_changed,
-                insertions: aggregated_commit.base.insertions,
-                deletions: aggregated_commit.base.deletions,
-                attributed_tokens,
-                attributed_cost_usd: has_cost.then_some(total_cost),
-                run_count: run_ids.len() as u64,
-                source_count: sources.len() as u64,
-                confidence: if links.is_empty() {
-                    SourceConfidence::Derived
-                } else {
-                    SourceConfidence::Heuristic
-                },
-                method: CommitAttributionMethod::ReadOnlyHeuristic,
-                sources,
-                links,
-            });
-        }
+        out.extend(build_commit_records_for_repo(
+            &repo_vcs,
+            &repo_run_list,
+            scanned,
+            &run_index,
+            pricing,
+        ));
     }
 
     out.sort_by(|a, b| b.committed_at.cmp(&a.committed_at));
@@ -338,6 +210,161 @@ pub fn build_commit_records(
         )
     });
     out
+}
+
+fn build_commit_records_for_repo(
+    repo_vcs: &VcsContext,
+    repo_runs: &[&RunRecord],
+    scanned: Vec<ScannedCommit>,
+    run_index: &HashMap<&str, &RunRecord>,
+    pricing: &PricingStore,
+) -> Vec<CommitRecord> {
+    let mut aggregated = scanned
+        .into_iter()
+        .map(|base| AggregatedCommit {
+            base,
+            repo_id: repo_vcs.repo_id.clone(),
+            repo_name: repo_vcs.repo_name.clone(),
+            repo_root: repo_vcs.repo_root.clone(),
+            links: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+
+    for run in repo_runs {
+        let Some(candidate) = best_commit_candidate(run, &aggregated) else {
+            continue;
+        };
+        let allocated_tokens = run.tokens.total;
+        let allocated_cost = pricing.estimate_run_cost(run);
+        if allocated_tokens == 0 && allocated_cost.is_none() {
+            continue;
+        }
+
+        aggregated[candidate.commit_index]
+            .links
+            .push(CommitAttributionLink {
+                run_id: run.id.clone(),
+                tool: run.tool.clone(),
+                source_mode: run.source_mode.clone(),
+                project_name: run.project_name.clone(),
+                session_label: run
+                    .last_question
+                    .clone()
+                    .or_else(|| run.first_question.clone())
+                    .or_else(|| run.last_action.clone())
+                    .unwrap_or_else(|| run.project_name.clone()),
+                score: 0.0,
+                allocated_tokens,
+                allocated_cost_usd: allocated_cost,
+                confidence: SourceConfidence::Heuristic,
+                method: CommitAttributionMethod::ReadOnlyHeuristic,
+            });
+    }
+
+    aggregated
+        .into_iter()
+        .map(|aggregated_commit| finalize_commit_record(aggregated_commit, run_index))
+        .collect()
+}
+
+fn finalize_commit_record(
+    aggregated_commit: AggregatedCommit,
+    run_index: &HashMap<&str, &RunRecord>,
+) -> CommitRecord {
+    let mut run_ids = HashSet::new();
+    let mut sources_by_tool: HashMap<ToolKind, CommitSourceStat> = HashMap::new();
+    let mut worktree_votes: HashMap<(Option<String>, Option<String>), u64> = HashMap::new();
+    let mut total_cost = 0.0;
+    let mut has_cost = false;
+
+    for link in &aggregated_commit.links {
+        run_ids.insert(link.run_id.clone());
+        let entry = sources_by_tool
+            .entry(link.tool.clone())
+            .or_insert_with(|| CommitSourceStat {
+                tool: link.tool.clone(),
+                run_count: 0,
+                attributed_tokens: 0,
+                attributed_cost_usd: None,
+                confidence: SourceConfidence::Heuristic,
+            });
+        entry.run_count += 1;
+        entry.attributed_tokens += link.allocated_tokens;
+        if let Some(cost) = link.allocated_cost_usd {
+            entry.attributed_cost_usd = Some(entry.attributed_cost_usd.unwrap_or(0.0) + cost);
+            total_cost += cost;
+            has_cost = true;
+        }
+
+        if let Some(vcs) = run_index
+            .get(link.run_id.as_str())
+            .and_then(|run| run.vcs.as_ref())
+        {
+            let key = (vcs.worktree_id.clone(), vcs.worktree_name.clone());
+            *worktree_votes.entry(key).or_insert(0) += link.allocated_tokens.max(1);
+        }
+    }
+
+    let mut sources = sources_by_tool.into_values().collect::<Vec<_>>();
+    sources.sort_by(|a, b| b.attributed_tokens.cmp(&a.attributed_tokens));
+
+    let inferred_worktree = worktree_votes
+        .into_iter()
+        .max_by_key(|(_, tokens)| *tokens)
+        .map(|(key, _)| key)
+        .unwrap_or_else(|| primary_worktree(&aggregated_commit.base));
+
+    let attributed_tokens = aggregated_commit
+        .links
+        .iter()
+        .map(|link| link.allocated_tokens)
+        .sum::<u64>();
+    let link_count = aggregated_commit.links.len();
+    let mut links = aggregated_commit.links;
+    for link in &mut links {
+        link.score = if attributed_tokens > 0 {
+            link.allocated_tokens as f64 / attributed_tokens as f64
+        } else if total_cost > 0.0 {
+            link.allocated_cost_usd.unwrap_or(0.0) / total_cost
+        } else if link_count > 0 {
+            1.0 / link_count as f64
+        } else {
+            0.0
+        };
+    }
+    links.sort_by(|a, b| b.allocated_tokens.cmp(&a.allocated_tokens));
+
+    CommitRecord {
+        id: format!(
+            "{}:{}",
+            aggregated_commit.repo_id, aggregated_commit.base.sha
+        ),
+        repo_id: aggregated_commit.repo_id,
+        repo_name: aggregated_commit.repo_name,
+        repo_root: aggregated_commit.repo_root,
+        worktree_id: inferred_worktree.0,
+        worktree_name: inferred_worktree.1,
+        sha: aggregated_commit.base.sha,
+        short_sha: aggregated_commit.base.short_sha,
+        author_name: aggregated_commit.base.author_name,
+        committed_at: aggregated_commit.base.committed_at,
+        summary: aggregated_commit.base.summary,
+        files_changed: aggregated_commit.base.files_changed,
+        insertions: aggregated_commit.base.insertions,
+        deletions: aggregated_commit.base.deletions,
+        attributed_tokens,
+        attributed_cost_usd: has_cost.then_some(total_cost),
+        run_count: run_ids.len() as u64,
+        source_count: sources.len() as u64,
+        confidence: if links.is_empty() {
+            SourceConfidence::Derived
+        } else {
+            SourceConfidence::Heuristic
+        },
+        method: CommitAttributionMethod::ReadOnlyHeuristic,
+        sources,
+        links,
+    }
 }
 
 fn scan_recent_commits(vcs: &VcsContext, since: Option<DateTime<Utc>>) -> Vec<ScannedCommit> {
@@ -388,11 +415,11 @@ fn scan_recent_commits(vcs: &VcsContext, since: Option<DateTime<Utc>>) -> Vec<Sc
     commits
 }
 
-fn candidate_commits(run: &RunRecord, commits: &[AggregatedCommit]) -> Vec<LinkCandidate> {
+fn best_commit_candidate(run: &RunRecord, commits: &[AggregatedCommit]) -> Option<LinkCandidate> {
     let start = parse_timestamp_ms(&run.started_at);
     let end = parse_timestamp_ms(&run.last_activity_at);
     let (Some(start_ms), Some(end_ms)) = (start, end) else {
-        return Vec::new();
+        return None;
     };
 
     commits
@@ -400,153 +427,66 @@ fn candidate_commits(run: &RunRecord, commits: &[AggregatedCommit]) -> Vec<LinkC
         .enumerate()
         .filter_map(|(idx, commit)| {
             let commit_ms = parse_timestamp_ms(&commit.base.committed_at)?;
-            let time_score = temporal_score(commit_ms, start_ms, end_ms);
-            if time_score <= 0.0 {
+            if !within_commit_window(commit_ms, start_ms, end_ms) {
                 return None;
             }
 
-            let text_score = keyword_overlap_score(&commit.base.summary, run);
-            let locality_score = locality_score(run, &commit.base)?;
-            let score = time_score + text_score + locality_score;
-            (score > 0.0).then_some(LinkCandidate {
+            let (worktree_match, branch_match) = locality_match(run, &commit.base)?;
+            Some(LinkCandidate {
                 commit_index: idx,
-                score,
+                worktree_match,
+                branch_match,
+                time_distance_ms: (commit_ms - end_ms).abs(),
+                committed_at_ms: commit_ms,
             })
         })
-        .collect()
+        .max_by(compare_link_candidate)
 }
 
-fn locality_score(run: &RunRecord, commit: &ScannedCommit) -> Option<f64> {
+fn locality_match(run: &RunRecord, commit: &ScannedCommit) -> Option<(bool, bool)> {
     let Some(vcs) = run.vcs.as_ref() else {
-        return Some(0.0);
+        return Some((false, false));
     };
 
-    let mut score = 0.0;
     let worktree_match = vcs
         .worktree_id
         .as_ref()
-        .map(|worktree_id| commit.worktree_ids.contains(worktree_id))
-        .unwrap_or(false);
+        .is_some_and(|worktree_id| commit.worktree_ids.contains(worktree_id))
+        || vcs
+            .worktree_name
+            .as_ref()
+            .is_some_and(|worktree_name| commit.worktree_names.contains(worktree_name));
     let branch_match = vcs
         .branch
         .as_ref()
-        .map(|branch| commit.branches.contains(branch))
-        .unwrap_or(false);
+        .is_some_and(|branch| commit.branches.contains(branch));
 
-    if worktree_match {
-        score += 0.45;
-    } else if vcs.worktree_id.is_some() && !commit.worktree_ids.is_empty() && !branch_match {
+    if (vcs.worktree_id.is_some() || vcs.worktree_name.is_some())
+        && !worktree_match
+        && !branch_match
+    {
         return None;
     }
 
-    if branch_match {
-        score += 0.2;
-    }
-
-    Some(score)
+    Some((worktree_match, branch_match))
 }
 
-fn temporal_score(commit_ms: i64, start_ms: i64, end_ms: i64) -> f64 {
-    if commit_ms < start_ms - PRE_COMMIT_GRACE_MS || commit_ms > end_ms + POST_COMMIT_GRACE_MS {
-        return 0.0;
-    }
-
-    if commit_ms >= start_ms && commit_ms <= end_ms {
-        let span = (end_ms - start_ms).max(1) as f64;
-        let progress = (commit_ms - start_ms) as f64 / span;
-        return 0.7 + 0.2 * progress;
-    }
-
-    if commit_ms > end_ms {
-        let distance = (commit_ms - end_ms) as f64;
-        return 0.2 + 0.6 * (1.0 - (distance / POST_COMMIT_GRACE_MS as f64)).max(0.0);
-    }
-
-    let distance = (start_ms - commit_ms) as f64;
-    0.05 + 0.25 * (1.0 - (distance / PRE_COMMIT_GRACE_MS as f64)).max(0.0)
+fn compare_link_candidate(a: &LinkCandidate, b: &LinkCandidate) -> Ordering {
+    a.worktree_match
+        .cmp(&b.worktree_match)
+        .then_with(|| a.branch_match.cmp(&b.branch_match))
+        .then_with(|| b.time_distance_ms.cmp(&a.time_distance_ms))
+        .then_with(|| a.committed_at_ms.cmp(&b.committed_at_ms))
 }
 
-fn keyword_overlap_score(summary: &str, run: &RunRecord) -> f64 {
-    let summary_tokens = tokenize(summary);
-    if summary_tokens.is_empty() {
-        return 0.0;
-    }
-
-    let session_parts: Vec<&str> = [Some(run.project_name.as_str())]
-        .into_iter()
-        .chain(
-            [&run.first_question, &run.last_question, &run.last_action]
-                .into_iter()
-                .map(|opt| opt.as_deref()),
-        )
-        .flatten()
-        .collect();
-    let session_text = session_parts.join(" ");
-
-    let session_tokens = tokenize(&session_text);
-    if session_tokens.is_empty() {
-        return 0.0;
-    }
-
-    let overlap = summary_tokens
-        .iter()
-        .filter(|token| session_tokens.contains(*token))
-        .count();
-    if overlap == 0 {
-        return 0.0;
-    }
-
-    let overlap_ratio = overlap as f64 / summary_tokens.len() as f64;
-    0.2 * overlap_ratio.min(1.0)
-}
-
-fn tokenize(text: &str) -> BTreeSet<String> {
-    text.split(|ch: char| !ch.is_alphanumeric())
-        .map(|token| token.trim().to_ascii_lowercase())
-        .filter(|token| token.len() >= 3)
-        .collect()
+fn within_commit_window(commit_ms: i64, start_ms: i64, end_ms: i64) -> bool {
+    commit_ms >= start_ms - PRE_COMMIT_GRACE_MS && commit_ms <= end_ms + POST_COMMIT_GRACE_MS
 }
 
 fn parse_timestamp_ms(value: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|dt| dt.with_timezone(&Utc).timestamp_millis())
-}
-
-fn allocate_proportionally(total: u64, weights: &[f64]) -> Vec<u64> {
-    if total == 0 || weights.is_empty() {
-        return vec![0; weights.len()];
-    }
-
-    let weight_sum = weights.iter().sum::<f64>();
-    if weight_sum <= f64::EPSILON {
-        return vec![0; weights.len()];
-    }
-
-    let raw = weights
-        .iter()
-        .map(|weight| (total as f64) * (*weight / weight_sum))
-        .collect::<Vec<_>>();
-
-    let mut floors = raw
-        .iter()
-        .map(|value| value.floor() as u64)
-        .collect::<Vec<_>>();
-    let allocated = floors.iter().sum::<u64>();
-    let remainder = total.saturating_sub(allocated) as usize;
-
-    let mut remainders = raw
-        .iter()
-        .enumerate()
-        .map(|(idx, value)| (idx, value - value.floor()))
-        .collect::<Vec<_>>();
-    remainders.sort_by(|a, b| b.1.total_cmp(&a.1));
-
-    for (idx, _) in remainders.into_iter().take(remainder) {
-        floors[idx] += 1;
-    }
-
-    floors
 }
 
 fn primary_worktree(commit: &ScannedCommit) -> (Option<String>, Option<String>) {
@@ -837,103 +777,142 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allocate_proportionally_preserves_total() {
-        let values = allocate_proportionally(100, &[3.0, 2.0, 1.0]);
-        assert_eq!(values.iter().sum::<u64>(), 100);
-        assert!(values[0] >= values[1]);
-        assert!(values[1] >= values[2]);
+    fn best_commit_candidate_prefers_same_worktree_over_branch_only() {
+        let run = sample_run(Some(sample_vcs()));
+        let candidates = vec![
+            aggregated_commit(
+                "branch-only",
+                "2026-04-01T10:19:00Z",
+                &["feature/commit-attribution"],
+                &["wt-main"],
+                &["main"],
+            ),
+            aggregated_commit(
+                "same-worktree",
+                "2026-04-01T10:05:00Z",
+                &["feature/commit-attribution"],
+                &["wt-feature"],
+                &["feature-wt"],
+            ),
+        ];
+
+        let selected = best_commit_candidate(&run, &candidates).expect("candidate should exist");
+        assert_eq!(selected.commit_index, 1);
+        assert!(selected.worktree_match);
     }
 
     #[test]
-    fn keyword_overlap_scores_matching_terms() {
-        let run = RunRecord {
-            id: "run-1".into(),
-            tool: ToolKind::Claude,
-            source_mode: "test".into(),
-            project_name: "OctoMonitor".into(),
-            workspace_path: "/tmp/octomonitor".into(),
-            workspace_short: "~/octomonitor".into(),
-            model: None,
-            provider: None,
-            agent_name: None,
-            agent_display_name: None,
-            account_alias: None,
-            auth_mode: None,
-            auth_verified: true,
-            session_id: None,
-            thread_id: None,
-            session_key: None,
-            transcript_path: None,
-            started_at: "2026-04-01T10:00:00Z".into(),
-            last_activity_at: "2026-04-01T10:20:00Z".into(),
-            elapsed_ms: 0,
-            state: octomonitor_core::RunState::Completed,
-            last_action: Some("implement commit attribution".into()),
-            last_tail: None,
-            pending_approval: false,
-            first_question: Some("design commit attribution".into()),
-            last_question: Some("worktree aware commit attribution".into()),
-            error_message: None,
-            message_count: 1,
-            tokens: octomonitor_core::TokenUsage {
-                input: 0,
-                output: 0,
-                cache_read: 0,
-                cache_write: 0,
-                total: 0,
-                context: 0,
-            },
-            cost: octomonitor_core::MoneyValue {
-                usd: None,
-                confidence: SourceConfidence::Derived,
-            },
-            quota: octomonitor_core::QuotaValue {
-                five_hour_used_pct: None,
-                seven_day_used_pct: None,
-                reset_at: Vec::new(),
-                confidence: SourceConfidence::Derived,
-            },
-            source: octomonitor_core::SourceInfo {
-                confidence: SourceConfidence::Derived,
-                freshness: octomonitor_core::Freshness::Warm,
-                last_updated_at: "2026-04-01T10:20:00Z".into(),
-            },
-            vcs: None,
-            origin_label: None,
-            origin_provider: None,
-        };
+    fn best_commit_candidate_uses_branch_only_as_fallback() {
+        let run = sample_run(Some(sample_vcs()));
+        let candidates = vec![
+            aggregated_commit(
+                "branch-fallback",
+                "2026-04-01T10:18:00Z",
+                &["feature/commit-attribution"],
+                &["wt-main"],
+                &["main"],
+            ),
+            aggregated_commit(
+                "unrelated",
+                "2026-04-01T10:19:00Z",
+                &["main"],
+                &["wt-main"],
+                &["main"],
+            ),
+        ];
 
-        let score = keyword_overlap_score("Add worktree-aware commit attribution", &run);
-        assert!(score > 0.0);
+        let selected = best_commit_candidate(&run, &candidates).expect("candidate should exist");
+        assert_eq!(selected.commit_index, 0);
+        assert!(!selected.worktree_match);
+        assert!(selected.branch_match);
     }
 
     #[test]
-    fn locality_score_rejects_mismatched_worktrees_without_branch_match() {
-        let run = sample_run(Some(VcsContext {
-            repo_id: "repo-1".into(),
-            repo_name: "OctoMonitor".into(),
-            repo_root: "/tmp/octomonitor".into(),
-            worktree_id: Some("wt-feature".into()),
-            worktree_name: Some("feature-wt".into()),
-            worktree_path: Some("/tmp/octomonitor-feature".into()),
-            branch: Some("feature".into()),
-            confidence: SourceConfidence::Derived,
-        }));
-        let commit = ScannedCommit {
-            sha: "abc".into(),
-            short_sha: "abc".into(),
-            author_name: "test".into(),
-            committed_at: "2026-04-01T10:10:00Z".into(),
-            summary: "feature work".into(),
-            files_changed: 1,
-            insertions: 1,
-            deletions: 0,
-            branches: BTreeSet::from(["main".into()]),
-            worktree_ids: BTreeSet::from(["wt-main".into()]),
-            worktree_names: BTreeSet::from(["main".into()]),
-        };
+    fn best_commit_candidate_rejects_mismatched_worktree_without_branch_match() {
+        let run = sample_run(Some(sample_vcs()));
+        let candidates = vec![aggregated_commit(
+            "wrong-worktree",
+            "2026-04-01T10:10:00Z",
+            &["main"],
+            &["wt-main"],
+            &["main"],
+        )];
 
-        assert_eq!(locality_score(&run, &commit), None);
+        assert!(best_commit_candidate(&run, &candidates).is_none());
+    }
+
+    #[test]
+    fn best_commit_candidate_rejects_mismatched_worktree_name_without_branch_match() {
+        let mut vcs = sample_vcs();
+        vcs.worktree_id = None;
+        let run = sample_run(Some(vcs));
+        let candidates = vec![aggregated_commit(
+            "wrong-worktree",
+            "2026-04-01T10:10:00Z",
+            &["main"],
+            &[],
+            &["main"],
+        )];
+
+        assert!(best_commit_candidate(&run, &candidates).is_none());
+    }
+
+    #[test]
+    fn build_commit_records_for_repo_assigns_each_run_once_and_keeps_unmatched_commit() {
+        let pricing = PricingStore::new();
+        let run = sample_run(Some(sample_vcs()));
+        let run_refs = vec![&run];
+        let run_index = HashMap::from([(run.id.as_str(), &run)]);
+        let repo_vcs = sample_vcs();
+        let records = build_commit_records_for_repo(
+            &repo_vcs,
+            &run_refs,
+            vec![
+                scanned_commit(
+                    "matched",
+                    "2026-04-01T10:15:00Z",
+                    &["feature/commit-attribution"],
+                    &["wt-feature"],
+                    &["feature-wt"],
+                ),
+                scanned_commit(
+                    "unmatched",
+                    "2026-04-01T10:16:00Z",
+                    &["main"],
+                    &["wt-main"],
+                    &["main"],
+                ),
+            ],
+            &run_index,
+            &pricing,
+        );
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.links.len())
+                .sum::<usize>(),
+            1
+        );
+
+        let matched = records
+            .iter()
+            .find(|record| record.summary == "matched")
+            .expect("matched commit");
+        assert_eq!(matched.links.len(), 1);
+        assert_eq!(matched.run_count, 1);
+        assert_eq!(matched.attributed_tokens, run.tokens.total);
+        assert_eq!(matched.links[0].allocated_tokens, run.tokens.total);
+        assert_eq!(matched.links[0].score, 1.0);
+        assert_eq!(matched.confidence, SourceConfidence::Heuristic);
+
+        let unmatched = records
+            .iter()
+            .find(|record| record.summary == "unmatched")
+            .expect("unmatched commit");
+        assert!(unmatched.links.is_empty());
+        assert_eq!(unmatched.confidence, SourceConfidence::Derived);
     }
 
     #[test]
@@ -1080,16 +1059,16 @@ mod tests {
             error_message: None,
             message_count: 1,
             tokens: octomonitor_core::TokenUsage {
-                input: 0,
-                output: 0,
+                input: 700,
+                output: 500,
                 cache_read: 0,
                 cache_write: 0,
-                total: 0,
+                total: 1_200,
                 context: 0,
             },
             cost: octomonitor_core::MoneyValue {
-                usd: None,
-                confidence: SourceConfidence::Derived,
+                usd: Some(2.4),
+                confidence: SourceConfidence::Estimated,
             },
             quota: octomonitor_core::QuotaValue {
                 five_hour_used_pct: None,
@@ -1105,6 +1084,69 @@ mod tests {
             vcs,
             origin_label: None,
             origin_provider: None,
+        }
+    }
+
+    fn sample_vcs() -> VcsContext {
+        VcsContext {
+            repo_id: "repo-1".into(),
+            repo_name: "OctoMonitor".into(),
+            repo_root: "/tmp/octomonitor".into(),
+            worktree_id: Some("wt-feature".into()),
+            worktree_name: Some("feature-wt".into()),
+            worktree_path: Some("/tmp/octomonitor-feature".into()),
+            branch: Some("feature/commit-attribution".into()),
+            confidence: SourceConfidence::Derived,
+        }
+    }
+
+    fn aggregated_commit(
+        summary: &str,
+        committed_at: &str,
+        branches: &[&str],
+        worktree_ids: &[&str],
+        worktree_names: &[&str],
+    ) -> AggregatedCommit {
+        AggregatedCommit {
+            base: scanned_commit(
+                summary,
+                committed_at,
+                branches,
+                worktree_ids,
+                worktree_names,
+            ),
+            repo_id: "repo-1".into(),
+            repo_name: "OctoMonitor".into(),
+            repo_root: "/tmp/octomonitor".into(),
+            links: Vec::new(),
+        }
+    }
+
+    fn scanned_commit(
+        summary: &str,
+        committed_at: &str,
+        branches: &[&str],
+        worktree_ids: &[&str],
+        worktree_names: &[&str],
+    ) -> ScannedCommit {
+        ScannedCommit {
+            sha: format!("sha-{summary}"),
+            short_sha: summary.chars().take(7).collect(),
+            author_name: "test".into(),
+            committed_at: committed_at.into(),
+            summary: summary.into(),
+            files_changed: 1,
+            insertions: 1,
+            deletions: 0,
+            branches: branches.iter().map(|value| (*value).to_string()).collect(),
+            worktree_ids: worktree_ids
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            worktree_names: worktree_names
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
         }
     }
 

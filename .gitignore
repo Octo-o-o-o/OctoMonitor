@@ -11,6 +11,7 @@ apps/web/test-results/
 packages/octomonitor-darwin-arm64/bin/octomonitor-server
 packages/octomonitor-darwin-x64/bin/octomonitor-server
 packages/octomonitor-linux-x64/bin/octomonitor-server
+packages/octomonitor-win32-x64/bin/octomonitor-server.exe
 exports/**/*.zip
 exports/**/preview/assets/
 exports/**/preview/figma-make.html
