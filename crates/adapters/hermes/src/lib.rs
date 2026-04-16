@@ -174,11 +174,8 @@ fn check_gateway_status(home: &Path) -> (bool, Option<String>, Vec<String>) {
         .map(|pid| is_process_alive(pid))
         .unwrap_or(false);
 
-    let running = pid_alive
-        && !matches!(
-            state.as_deref(),
-            Some("stopped") | Some("startup_failed")
-        );
+    let running =
+        pid_alive && !matches!(state.as_deref(), Some("stopped") | Some("startup_failed"));
 
     (running, state, platforms)
 }
@@ -218,9 +215,7 @@ fn derive_origin(entry: &serde_json::Value) -> (Option<String>, Option<String>) 
     let label = match platform {
         Some("local") => Some("CLI".to_string()),
         Some(p) => {
-            let name = user_name
-                .or(chat_name)
-                .unwrap_or("DM");
+            let name = user_name.or(chat_name).unwrap_or("DM");
             Some(format!("{}: {}", capitalize(p), name))
         }
         None => None,
@@ -258,15 +253,24 @@ fn parse_sessions_json(
         };
         let session_id = session_id.to_string();
 
-        let created_at = entry.get("created_at").and_then(|v| v.as_str()).map(String::from);
-        let updated_at = entry.get("updated_at").and_then(|v| v.as_str()).map(String::from);
+        let created_at = entry
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let updated_at = entry
+            .get("updated_at")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         // Skip entries with no meaningful data
         if created_at.is_none() && updated_at.is_none() {
             continue;
         }
 
-        let display_name = entry.get("display_name").and_then(|v| v.as_str()).map(String::from);
+        let display_name = entry
+            .get("display_name")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let platform = entry
             .get("platform")
             .and_then(|v| v.as_str())
@@ -277,11 +281,26 @@ fn parse_sessions_json(
             .unwrap_or("dm")
             .to_string();
 
-        let input_tokens = entry.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let output_tokens = entry.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cache_read_tokens = entry.get("cache_read_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let cache_write_tokens = entry.get("cache_write_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        let total_tokens = entry.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let input_tokens = entry
+            .get("input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let output_tokens = entry
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_read_tokens = entry
+            .get("cache_read_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cache_write_tokens = entry
+            .get("cache_write_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let total_tokens = entry
+            .get("total_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let cost_usd = entry.get("estimated_cost_usd").and_then(|v| v.as_f64());
 
         let (origin_label, origin_provider) = derive_origin(entry);
@@ -391,15 +410,24 @@ fn cron_to_human(schedule: &serde_json::Value) -> String {
     // Hermes uses a richer schedule format: {"kind": "cron", "cron": "0 9 * * *", ...}
     // or {"kind": "interval", "seconds": 3600, ...}
     // or {"kind": "once", "at": "2026-04-15T10:00:00", ...}
-    let kind = schedule.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let kind = schedule
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     match kind {
         "cron" => {
             let expr = schedule.get("cron").and_then(|v| v.as_str()).unwrap_or("?");
-            let tz = schedule.get("timezone").and_then(|v| v.as_str()).unwrap_or("UTC");
+            let tz = schedule
+                .get("timezone")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UTC");
             format_cron_expr(expr, tz)
         }
         "interval" => {
-            let secs = schedule.get("seconds").and_then(|v| v.as_u64()).unwrap_or(0);
+            let secs = schedule
+                .get("seconds")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             if secs >= 3600 {
                 format!("Every {}h", secs / 3600)
             } else if secs >= 60 {
@@ -413,8 +441,14 @@ fn cron_to_human(schedule: &serde_json::Value) -> String {
             format!("Once at {}", at)
         }
         "daily" => {
-            let hour = schedule.get("at_hour").and_then(|v| v.as_u64()).unwrap_or(0);
-            let minute = schedule.get("at_minute").and_then(|v| v.as_u64()).unwrap_or(0);
+            let hour = schedule
+                .get("at_hour")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let minute = schedule
+                .get("at_minute")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("Daily {:02}:{:02}", hour, minute)
         }
         _ => schedule
@@ -706,8 +740,8 @@ mod tests {
         )
         .expect("write");
 
-        let sessions = parse_sessions_json(&sessions_path, "default", Some("gpt-5"))
-            .expect("parse");
+        let sessions =
+            parse_sessions_json(&sessions_path, "default", Some("gpt-5")).expect("parse");
 
         assert_eq!(sessions.len(), 2);
 

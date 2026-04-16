@@ -10,9 +10,12 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { bootstrapDesktopWebview } from './lib/desktopZoom'
 import { I18nProvider } from './lib/i18n'
 import { ThemeProvider } from './lib/theme'
 import './styles.css'
+
+void bootstrapDesktopWebview()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

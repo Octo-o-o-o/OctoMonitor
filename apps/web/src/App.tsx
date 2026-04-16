@@ -12,7 +12,15 @@ import { ShortcutOverlay } from './components/ShortcutOverlay'
 import { RemotePairingGate } from './components/RemotePairingGate'
 import { LoadingScreen } from './components/LoadingScreen'
 import { apiFetch, buildWsUrl, normalizeBootstrapPayload } from './lib/api'
+import {
+  applyDesktopZoom,
+  loadDesktopZoom,
+  nextDesktopZoom,
+  saveDesktopZoom,
+  type DesktopZoomAction,
+} from './lib/desktopZoom'
 import { buildVisiblePanels, buildVisibleRunIds, buildVisibleRunsBySource } from './lib/monitor'
+import { isTauriEnvironment } from './lib/runtimeEnvironment'
 import { getRuntimeMode } from './lib/runtimeMode'
 import { useI18n, type I18nKey } from './lib/i18n'
 
@@ -25,7 +33,19 @@ type DesktopBootWindow = Window & {
   __OCTOMONITOR_DESKTOP_BOOT__?: DesktopBootIssue | null
 }
 
+type DesktopMenuAction =
+  | 'open-settings'
+  | 'toggle-shortcuts'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'zoom-reset'
+
+type DesktopMenuActionDetail = {
+  action?: DesktopMenuAction
+}
+
 const DESKTOP_BOOT_EVENT = 'octomonitor:desktop-boot-status'
+const DESKTOP_MENU_ACTION_EVENT = 'octomonitor:desktop-menu-action'
 
 function readDesktopBootIssue(): DesktopBootIssue | null {
   const bootIssue = (window as DesktopBootWindow).__OCTOMONITOR_DESKTOP_BOOT__
@@ -170,6 +190,51 @@ function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>, ac
   }, [runtimeMode, activeTab, setActiveTab, runIds, focusedRunId, setFocusedRunId, selectRun, toggleShortcutHelp])
 }
 
+function toDesktopZoomAction(action: DesktopMenuAction): DesktopZoomAction | null {
+  switch (action) {
+    case 'zoom-in': return 'in'
+    case 'zoom-out': return 'out'
+    case 'zoom-reset': return 'reset'
+    default: return null
+  }
+}
+
+function useDesktopMenuActions(runtimeMode: ReturnType<typeof getRuntimeMode>) {
+  const setActiveTab = useMonitorStore((s) => s.setActiveTab)
+  const toggleShortcutHelp = useMonitorStore((s) => s.toggleShortcutHelp)
+  const zoomRef = useRef(1)
+
+  useEffect(() => {
+    if (!isTauriEnvironment() || runtimeMode !== 'local') return
+
+    zoomRef.current = loadDesktopZoom()
+
+    function handleDesktopMenuAction(event: Event) {
+      const action = (event as CustomEvent<DesktopMenuActionDetail>).detail?.action
+      if (!action) return
+
+      if (action === 'open-settings') {
+        setActiveTab('settings')
+        return
+      }
+      if (action === 'toggle-shortcuts') {
+        toggleShortcutHelp()
+        return
+      }
+
+      const zoomAction = toDesktopZoomAction(action)
+      if (!zoomAction) return
+
+      zoomRef.current = nextDesktopZoom(zoomRef.current, zoomAction)
+      saveDesktopZoom(zoomRef.current)
+      void applyDesktopZoom(zoomRef.current)
+    }
+
+    window.addEventListener(DESKTOP_MENU_ACTION_EVENT, handleDesktopMenuAction)
+    return () => window.removeEventListener(DESKTOP_MENU_ACTION_EVENT, handleDesktopMenuAction)
+  }, [runtimeMode, setActiveTab, toggleShortcutHelp])
+}
+
 function useWaitingNotifications(enabled: boolean, t: (key: I18nKey) => string) {
   const prevWaitingRef = useRef<Set<string>>(new Set())
 
@@ -231,6 +296,7 @@ export default function App() {
     handleConnectionChange,
   )
   useKeyboardShortcuts(runtimeMode, activeTab)
+  useDesktopMenuActions(runtimeMode)
 
   useEffect(() => {
     if (runtimeMode !== 'remoteViewer') return

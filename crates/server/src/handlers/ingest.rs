@@ -19,6 +19,29 @@ fn default_quota() -> octomonitor_core::QuotaValue {
     }
 }
 
+fn statusline_quota(
+    five_hour_used_pct: Option<f64>,
+    seven_day_used_pct: Option<f64>,
+    reset_at: Vec<String>,
+) -> octomonitor_core::QuotaValue {
+    let has_data =
+        five_hour_used_pct.is_some() || seven_day_used_pct.is_some() || !reset_at.is_empty();
+    octomonitor_core::QuotaValue {
+        five_hour_used_pct,
+        seven_day_used_pct,
+        reset_at,
+        confidence: if has_data {
+            SourceConfidence::Official
+        } else {
+            SourceConfidence::Derived
+        },
+    }
+}
+
+fn epoch_seconds_to_rfc3339(value: Option<i64>) -> Option<String> {
+    chrono::DateTime::from_timestamp(value?, 0).map(|dt| dt.to_rfc3339())
+}
+
 fn live_source() -> SourceInfo {
     SourceInfo {
         confidence: SourceConfidence::Live,
@@ -41,6 +64,10 @@ pub struct ClaudeStatuslineIngest {
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub context_tokens: Option<u64>,
+    pub five_hour_used_pct: Option<f64>,
+    pub seven_day_used_pct: Option<f64>,
+    pub five_hour_resets_at: Option<i64>,
+    pub seven_day_resets_at: Option<i64>,
     pub pending_approval: Option<bool>,
     pub last_action: Option<String>,
 }
@@ -72,6 +99,17 @@ pub async fn ingest_claude_statusline(
 ) -> Json<serde_json::Value> {
     let session_id = input.session_id;
     let workspace_path = input.workspace_path.unwrap_or_else(|| "~/.claude".into());
+    let quota = statusline_quota(
+        input.five_hour_used_pct,
+        input.seven_day_used_pct,
+        [
+            epoch_seconds_to_rfc3339(input.five_hour_resets_at),
+            epoch_seconds_to_rfc3339(input.seven_day_resets_at),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+    );
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
@@ -121,7 +159,7 @@ pub async fn ingest_claude_statusline(
             usd: input.total_cost_usd,
             confidence: SourceConfidence::Live,
         },
-        quota: default_quota(),
+        quota,
         source: live_source(),
         vcs: crate::commits::discover_vcs_context(&workspace_path),
         workspace_path,
@@ -413,5 +451,46 @@ mod tests {
         assert_eq!(payload.usage_buckets.len(), 1);
         assert_eq!(payload.attentions.len(), 1);
         assert_eq!(payload.attentions[0].run_id.as_deref(), Some("thread-2"));
+    }
+
+    #[tokio::test]
+    async fn claude_statusline_ingest_preserves_rate_limit_usage() {
+        let state = test_state();
+
+        let _ = ingest_claude_statusline(
+            State(state.clone()),
+            Json(ClaudeStatuslineIngest {
+                session_id: Some("session-1".into()),
+                transcript_path: None,
+                model: Some("claude-sonnet-4-5".into()),
+                provider: Some("claude.ai".into()),
+                project_name: Some("OctoMonitor".into()),
+                workspace_path: Some("/tmp/octomonitor".into()),
+                total_cost_usd: Some(1.23),
+                input_tokens: Some(100),
+                output_tokens: Some(50),
+                total_tokens: Some(150),
+                context_tokens: Some(25),
+                five_hour_used_pct: Some(23.5),
+                seven_day_used_pct: Some(41.2),
+                five_hour_resets_at: Some(1_738_425_600),
+                seven_day_resets_at: Some(1_738_857_600),
+                pending_approval: Some(false),
+                last_action: Some("statusline update".into()),
+            }),
+        )
+        .await;
+
+        let payload = state.bootstrap.read().await;
+        let run = payload
+            .runs
+            .iter()
+            .find(|run| run.id == "ingest-claude-session-1")
+            .expect("statusline run");
+
+        assert_eq!(run.quota.five_hour_used_pct, Some(23.5));
+        assert_eq!(run.quota.seven_day_used_pct, Some(41.2));
+        assert_eq!(run.quota.confidence, SourceConfidence::Official);
+        assert_eq!(run.quota.reset_at.len(), 2);
     }
 }

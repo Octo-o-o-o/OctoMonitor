@@ -4,6 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
+    process::Command,
     time::SystemTime,
 };
 
@@ -75,6 +76,8 @@ pub struct OpenClawSnapshot {
     pub probed_at: String,
     pub cli_available: bool,
     pub gateway_status_ok: bool,
+    pub gateway_status: Option<String>,
+    pub gateway_status_detail: Option<String>,
     pub cli_version: Option<String>,
     pub workspace_dir: Option<String>,
     pub sessions_dir_exists: bool,
@@ -113,6 +116,13 @@ struct OpenClawTranscriptState {
     error_message: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct OpenClawGatewayStatusProbe {
+    reachable: bool,
+    status: Option<String>,
+    detail: Option<String>,
+}
+
 fn openclaw_root() -> PathBuf {
     ["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"]
         .iter()
@@ -142,6 +152,135 @@ fn recent_session_hint(sessions_dir: &Path) -> Option<String> {
         }
     }
     newest.map(|(_, name)| format!("latest session artifact: {}", mask_tail(&name)))
+}
+
+fn parse_gateway_status_payload(stdout: &str) -> OpenClawGatewayStatusProbe {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return OpenClawGatewayStatusProbe {
+            reachable: false,
+            status: Some("warning".into()),
+            detail: Some("gateway status returned invalid JSON".into()),
+        };
+    };
+
+    let runtime_status = value
+        .pointer("/service/runtime/status")
+        .and_then(|v| v.as_str());
+    let runtime_state = value
+        .pointer("/service/runtime/state")
+        .and_then(|v| v.as_str());
+    let config_ok = value
+        .pointer("/service/configAudit/ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let config_issue_count = value
+        .pointer("/service/configAudit/issues")
+        .and_then(|v| v.as_array())
+        .map_or(0, |issues| issues.len());
+    let rpc_ok = value
+        .pointer("/rpc/ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let health_ok = value
+        .pointer("/health/healthy")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(rpc_ok);
+    let stale_gateway_pid_count = value
+        .pointer("/health/staleGatewayPids")
+        .and_then(|v| v.as_array())
+        .map_or(0, |items| items.len());
+
+    let service_running = matches!(runtime_status, Some("running"));
+    let transition_state = matches!(runtime_status, Some("starting" | "restarting"));
+    let warning = (service_running || rpc_ok || transition_state)
+        && (!config_ok
+            || !health_ok
+            || stale_gateway_pid_count > 0
+            || matches!(runtime_state, Some("degraded" | "failed")));
+
+    let status = if warning || transition_state {
+        Some("warning".into())
+    } else if service_running || rpc_ok {
+        Some("running".into())
+    } else {
+        Some("stopped".into())
+    };
+
+    let mut detail_parts = Vec::new();
+    if let Some(runtime_status) = runtime_status {
+        let mut service_part = format!("service {runtime_status}");
+        if let Some(runtime_state) = runtime_state.filter(|state| !state.is_empty()) {
+            service_part.push_str(&format!(" ({runtime_state})"));
+        }
+        detail_parts.push(service_part);
+    }
+    detail_parts.push(if rpc_ok {
+        "rpc reachable".into()
+    } else {
+        "rpc unreachable".into()
+    });
+    if !health_ok {
+        detail_parts.push("health unhealthy".into());
+    }
+    if !config_ok {
+        if config_issue_count > 0 {
+            detail_parts.push(format!("config issues: {config_issue_count}"));
+        } else {
+            detail_parts.push("config issues".into());
+        }
+    }
+    if stale_gateway_pid_count > 0 {
+        detail_parts.push(format!("stale gateway pids: {stale_gateway_pid_count}"));
+    }
+
+    OpenClawGatewayStatusProbe {
+        reachable: rpc_ok,
+        status,
+        detail: (!detail_parts.is_empty()).then(|| detail_parts.join(" | ")),
+    }
+}
+
+fn run_gateway_status_probe() -> (CommandProbeResult, OpenClawGatewayStatusProbe) {
+    match Command::new("openclaw")
+        .args(["gateway", "status", "--json"])
+        .output()
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let parsed = if output.status.success() {
+                parse_gateway_status_payload(&stdout)
+            } else {
+                OpenClawGatewayStatusProbe::default()
+            };
+            (
+                CommandProbeResult {
+                    command: "openclaw gateway status --json".into(),
+                    success: output.status.success(),
+                    stdout_snippet: if stdout.is_empty() {
+                        None
+                    } else {
+                        Some(stdout.chars().take(200).collect())
+                    },
+                    error: if stderr.is_empty() || output.status.success() {
+                        None
+                    } else {
+                        Some(stderr.chars().take(200).collect())
+                    },
+                },
+                parsed,
+            )
+        }
+        Err(error) => (
+            CommandProbeResult {
+                command: "openclaw gateway status --json".into(),
+                success: false,
+                stdout_snippet: None,
+                error: Some(error.to_string()),
+            },
+            OpenClawGatewayStatusProbe::default(),
+        ),
+    }
 }
 
 /// Derive a human-readable origin label and provider from session data
@@ -636,7 +775,7 @@ pub fn probe_with_cache(cache: &mut OpenClawProbeCache) -> OpenClawSnapshot {
     let state_file = root.join("state.json");
 
     let version_probe = run_command_probe("openclaw", &["--version"]);
-    let status_probe = run_command_probe("openclaw", &["status"]);
+    let (gateway_probe, gateway_state) = run_gateway_status_probe();
 
     let sessions_probe = probe_file(&sessions_dir);
     let state_probe = probe_file(&state_file);
@@ -648,7 +787,9 @@ pub fn probe_with_cache(cache: &mut OpenClawProbeCache) -> OpenClawSnapshot {
     OpenClawSnapshot {
         probed_at: Utc::now().to_rfc3339(),
         cli_available: version_probe.success,
-        gateway_status_ok: status_probe.success,
+        gateway_status_ok: gateway_state.reachable,
+        gateway_status: gateway_state.status,
+        gateway_status_detail: gateway_state.detail,
         cli_version: version_probe
             .stdout_snippet
             .as_ref()
@@ -659,7 +800,7 @@ pub fn probe_with_cache(cache: &mut OpenClawProbeCache) -> OpenClawSnapshot {
         recent_session_hint: recent_session_hint(&sessions_dir),
         sessions,
         cron_jobs,
-        command_probes: vec![version_probe, status_probe],
+        command_probes: vec![version_probe, gateway_probe],
         file_probes: vec![sessions_probe, state_probe],
     }
 }
@@ -763,5 +904,49 @@ mod tests {
         assert_eq!(second.1.as_deref(), Some("second question"));
         assert_eq!(second.2, 2);
         assert_eq!(second.3.as_deref(), Some("failed to run"));
+    }
+
+    #[test]
+    fn parse_gateway_status_marks_running_when_rpc_is_reachable_and_healthy() {
+        let parsed = parse_gateway_status_payload(
+            r#"{
+  "service": {
+    "runtime": { "status": "running", "state": "active" },
+    "configAudit": { "ok": true, "issues": [] }
+  },
+  "rpc": { "ok": true },
+  "health": { "healthy": true, "staleGatewayPids": [] }
+}"#,
+        );
+
+        assert!(parsed.reachable);
+        assert_eq!(parsed.status.as_deref(), Some("running"));
+        assert_eq!(
+            parsed.detail.as_deref(),
+            Some("service running (active) | rpc reachable")
+        );
+    }
+
+    #[test]
+    fn parse_gateway_status_marks_warning_when_gateway_is_live_but_unhealthy() {
+        let parsed = parse_gateway_status_payload(
+            r#"{
+  "service": {
+    "runtime": { "status": "running", "state": "degraded" },
+    "configAudit": { "ok": false, "issues": ["port mismatch"] }
+  },
+  "rpc": { "ok": true },
+  "health": { "healthy": false, "staleGatewayPids": [123] }
+}"#,
+        );
+
+        assert!(parsed.reachable);
+        assert_eq!(parsed.status.as_deref(), Some("warning"));
+        assert_eq!(
+            parsed.detail.as_deref(),
+            Some(
+                "service running (degraded) | rpc reachable | health unhealthy | config issues: 1 | stale gateway pids: 1"
+            )
+        );
     }
 }

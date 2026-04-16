@@ -10,12 +10,7 @@ use axum::{
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
-use crate::{
-    build_app,
-    pricing::PricingStore,
-    probe::empty_bootstrap,
-    state::AppState,
-};
+use crate::{build_app, pricing::PricingStore, probe::empty_bootstrap, state::AppState};
 
 pub(crate) struct ServerTestHarness {
     _temp_dir: TempDir,

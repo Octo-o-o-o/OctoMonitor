@@ -105,10 +105,7 @@ mod tests {
     use octomonitor_companion::{request_pairing, ViewerSession};
 
     use super::*;
-    use crate::{
-        pricing::PricingStore,
-        probe::build_bootstrap,
-    };
+    use crate::{pricing::PricingStore, probe::build_bootstrap};
 
     fn test_state(pricing: &PricingStore) -> AppState {
         AppState::new(build_bootstrap(pricing), pricing.clone())

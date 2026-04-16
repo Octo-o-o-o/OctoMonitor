@@ -48,6 +48,15 @@ pub enum Freshness {
     Cold,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum GatewayStatus {
+    Running,
+    Stopped,
+    Warning,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -223,6 +232,8 @@ pub struct AdapterHealth {
     pub tool: ToolKind,
     pub mode: String,
     pub online: bool,
+    pub gateway_status: Option<GatewayStatus>,
+    pub gateway_detail: Option<String>,
     pub last_success_at: Option<String>,
     pub last_error_at: Option<String>,
     pub last_error: Option<String>,
@@ -863,6 +874,8 @@ mod tests {
                     tool: ToolKind::Claude,
                     mode: "hook+statusline".into(),
                     online: true,
+                    gateway_status: None,
+                    gateway_detail: None,
                     last_success_at: Some(now_s.clone()),
                     last_error_at: None,
                     last_error: None,
@@ -872,6 +885,8 @@ mod tests {
                     tool: ToolKind::Codex,
                     mode: "app-server".into(),
                     online: true,
+                    gateway_status: None,
+                    gateway_detail: None,
                     last_success_at: Some(now_s.clone()),
                     last_error_at: Some((now - Duration::hours(1)).to_rfc3339()),
                     last_error: Some("Earlier socket reconnect timeout recovered".into()),
@@ -881,6 +896,8 @@ mod tests {
                     tool: ToolKind::OpenClaw,
                     mode: "gateway+status".into(),
                     online: true,
+                    gateway_status: Some(GatewayStatus::Running),
+                    gateway_detail: Some("service running (active) | rpc reachable".into()),
                     last_success_at: Some(now_s.clone()),
                     last_error_at: None,
                     last_error: None,

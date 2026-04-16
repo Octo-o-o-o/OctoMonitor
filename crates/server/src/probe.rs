@@ -7,8 +7,8 @@ use octomonitor_claude_adapter as claude_adapter;
 use octomonitor_codex_adapter as codex_adapter;
 use octomonitor_core::{
     AdapterHealth, AppConfig, AttentionItem, BootstrapPayload, CommitHistoryPayload, Freshness,
-    HistoryRange, IdentityState, MoneyValue, PendingCron, QuotaValue, RunRecord, RunState,
-    SourceConfidence, SourceInfo, TokenUsage, ToolKind, UsageBucket, UsageHistoryPayload,
+    GatewayStatus, HistoryRange, IdentityState, MoneyValue, PendingCron, QuotaValue, RunRecord,
+    RunState, SourceConfidence, SourceInfo, TokenUsage, ToolKind, UsageBucket, UsageHistoryPayload,
 };
 use octomonitor_hermes_adapter as hermes_adapter;
 use octomonitor_openclaw_adapter as openclaw_adapter;
@@ -136,6 +136,8 @@ fn failed_openclaw_snapshot(reason: String) -> openclaw_adapter::OpenClawSnapsho
         probed_at: Utc::now().to_rfc3339(),
         cli_available: false,
         gateway_status_ok: false,
+        gateway_status: None,
+        gateway_status_detail: None,
         cli_version: None,
         workspace_dir: None,
         sessions_dir_exists: false,
@@ -654,6 +656,8 @@ fn make_adapter_health(
     tool: ToolKind,
     mode: &str,
     online: bool,
+    gateway_status: Option<GatewayStatus>,
+    gateway_detail: Option<String>,
     now: &str,
     first_error: Option<String>,
 ) -> AdapterHealth {
@@ -661,11 +665,96 @@ fn make_adapter_health(
         tool,
         mode: mode.into(),
         online,
+        gateway_status,
+        gateway_detail,
         last_success_at: Some(now.into()),
         last_error_at: None,
         last_error: first_error,
         freshness: Freshness::Hot,
     }
+}
+
+fn gateway_status_label(status: &GatewayStatus) -> &'static str {
+    match status {
+        GatewayStatus::Running => "running",
+        GatewayStatus::Stopped => "stopped",
+        GatewayStatus::Warning => "warning",
+    }
+}
+
+fn map_openclaw_gateway_status(
+    probe: &openclaw_adapter::OpenClawSnapshot,
+) -> (Option<GatewayStatus>, Option<String>) {
+    let status = match probe.gateway_status.as_deref() {
+        Some("running") => Some(GatewayStatus::Running),
+        Some("stopped") => Some(GatewayStatus::Stopped),
+        Some("warning") => Some(GatewayStatus::Warning),
+        _ => None,
+    };
+    (status, probe.gateway_status_detail.clone())
+}
+
+fn hermes_instance_gateway_status(instance: &hermes_adapter::HermesInstance) -> GatewayStatus {
+    if instance.gateway_running {
+        GatewayStatus::Running
+    } else {
+        match instance.gateway_state.as_deref() {
+            Some("stopped") | None => GatewayStatus::Stopped,
+            _ => GatewayStatus::Warning,
+        }
+    }
+}
+
+fn map_hermes_gateway_status(
+    probe: &hermes_adapter::HermesSnapshot,
+) -> (Option<GatewayStatus>, Option<String>) {
+    if probe.instances.is_empty() {
+        return (None, None);
+    }
+
+    let instance_statuses = probe
+        .instances
+        .iter()
+        .map(|instance| {
+            (
+                instance.profile_name.clone(),
+                hermes_instance_gateway_status(instance),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let running_count = instance_statuses
+        .iter()
+        .filter(|(_, status)| matches!(status, GatewayStatus::Running))
+        .count();
+    let stopped_count = instance_statuses
+        .iter()
+        .filter(|(_, status)| matches!(status, GatewayStatus::Stopped))
+        .count();
+    let warning_count = instance_statuses
+        .iter()
+        .filter(|(_, status)| matches!(status, GatewayStatus::Warning))
+        .count();
+
+    let status = if warning_count > 0 || (running_count > 0 && stopped_count > 0) {
+        GatewayStatus::Warning
+    } else if running_count > 0 {
+        GatewayStatus::Running
+    } else {
+        GatewayStatus::Stopped
+    };
+
+    let mut detail = instance_statuses
+        .iter()
+        .take(3)
+        .map(|(profile_name, status)| format!("{profile_name}: {}", gateway_status_label(status)))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if probe.instances.len() > 3 {
+        detail.push_str(&format!(" | +{} more", probe.instances.len() - 3));
+    }
+
+    (Some(status), (!detail.is_empty()).then_some(detail))
 }
 
 fn collect_probe_scan_from_snapshots(
@@ -818,11 +907,17 @@ fn collect_probe_scan_from_snapshots(
         "sessions-scan+probe"
     };
 
+    let (openclaw_gateway_status, openclaw_gateway_detail) =
+        map_openclaw_gateway_status(&openclaw_probe);
+    let (hermes_gateway_status, hermes_gateway_detail) = map_hermes_gateway_status(&hermes_probe);
+
     let adapter_health = vec![
         make_adapter_health(
             ToolKind::Claude,
             "hook+statusline+probe",
             claude_probe.cli_available,
+            None,
+            None,
             &now,
             claude_error,
         ),
@@ -830,6 +925,8 @@ fn collect_probe_scan_from_snapshots(
             ToolKind::Codex,
             "app-server+hook+probe",
             codex_probe.cli_available,
+            None,
+            None,
             &now,
             codex_error,
         ),
@@ -837,6 +934,8 @@ fn collect_probe_scan_from_snapshots(
             ToolKind::OpenClaw,
             openclaw_mode,
             openclaw_probe.cli_available,
+            openclaw_gateway_status,
+            openclaw_gateway_detail,
             &now,
             openclaw_error,
         ),
@@ -844,6 +943,8 @@ fn collect_probe_scan_from_snapshots(
             ToolKind::Hermes,
             hermes_mode,
             hermes_probe.cli_available || !hermes_probe.instances.is_empty(),
+            hermes_gateway_status,
+            hermes_gateway_detail,
             &now,
             hermes_error,
         ),
@@ -1199,8 +1300,14 @@ fn build_run_from_openclaw_session(
             .unwrap_or_default()
     }
 
-    let started_at = session.started_at.map(millis_to_rfc3339).unwrap_or_default();
-    let last_activity_at = session.updated_at.map(millis_to_rfc3339).unwrap_or_default();
+    let started_at = session
+        .started_at
+        .map(millis_to_rfc3339)
+        .unwrap_or_default();
+    let last_activity_at = session
+        .updated_at
+        .map(millis_to_rfc3339)
+        .unwrap_or_default();
     let elapsed = match (session.started_at, session.updated_at) {
         (Some(start), Some(end)) => end.saturating_sub(start),
         _ => 0,
@@ -2390,6 +2497,8 @@ mod tests {
             probed_at: updated_at.to_rfc3339(),
             cli_available: true,
             gateway_status_ok: true,
+            gateway_status: Some("running".into()),
+            gateway_status_detail: None,
             cli_version: None,
             workspace_dir: Some("/tmp/.openclaw".into()),
             sessions_dir_exists: true,
@@ -2404,6 +2513,45 @@ mod tests {
         let run = build_run_from_openclaw_session(&session, &probe);
 
         assert_eq!(run.id, "openclaw-ops-12345678-openclaw-session");
+    }
+
+    #[test]
+    fn hermes_gateway_status_uses_warning_for_mixed_profiles() {
+        let probe = hermes_adapter::HermesSnapshot {
+            probed_at: Utc::now().to_rfc3339(),
+            cli_available: true,
+            gateway_running: true,
+            cli_version: Some("Hermes Agent v0.8.0".into()),
+            instances: vec![
+                hermes_adapter::HermesInstance {
+                    profile_name: "default".into(),
+                    home_dir: "/tmp/.hermes".into(),
+                    gateway_running: false,
+                    gateway_state: Some("stopped".into()),
+                    gateway_platforms: Vec::new(),
+                    config_exists: true,
+                    session_count: 1,
+                },
+                hermes_adapter::HermesInstance {
+                    profile_name: "ops".into(),
+                    home_dir: "/tmp/.hermes/profiles/ops".into(),
+                    gateway_running: true,
+                    gateway_state: Some("running".into()),
+                    gateway_platforms: vec!["telegram".into()],
+                    config_exists: true,
+                    session_count: 2,
+                },
+            ],
+            sessions: Vec::new(),
+            cron_jobs: Vec::new(),
+            command_probes: Vec::new(),
+            file_probes: Vec::new(),
+        };
+
+        let (status, detail) = map_hermes_gateway_status(&probe);
+
+        assert_eq!(status, Some(GatewayStatus::Warning));
+        assert_eq!(detail.as_deref(), Some("default: stopped | ops: running"));
     }
 
     fn openclaw_session(

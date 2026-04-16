@@ -407,24 +407,18 @@ fn apply_codex_line(state: &mut CodexSessionState, line: &str) {
                 match item_type {
                     "function_call" => {
                         // Check if the function_call requires escalated approval
-                        if let Some(args_str) =
-                            payload.get("arguments").and_then(|v| v.as_str())
-                        {
+                        if let Some(args_str) = payload.get("arguments").and_then(|v| v.as_str()) {
                             if args_str.contains("require_escalated") {
                                 if let Some(call_id) =
                                     payload.get("call_id").and_then(|v| v.as_str())
                                 {
-                                    state
-                                        .pending_escalated_calls
-                                        .insert(call_id.to_string());
+                                    state.pending_escalated_calls.insert(call_id.to_string());
                                 }
                             }
                         }
                     }
                     "function_call_output" => {
-                        if let Some(call_id) =
-                            payload.get("call_id").and_then(|v| v.as_str())
-                        {
+                        if let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) {
                             state.pending_escalated_calls.remove(call_id);
                         }
                     }

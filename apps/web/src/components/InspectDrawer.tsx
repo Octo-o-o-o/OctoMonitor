@@ -117,88 +117,90 @@ export function InspectDrawer() {
           </div>
         </div>
 
-        <div className="inspect-grid">
-          <div className="inspect-cell">
-            <span className="inspect-cell-label">{t('drawer.model')}</span>
-            <span className="inspect-cell-value">{selectedRun.model ?? '—'}</span>
-          </div>
-          {selectedRun.tool === 'openClaw' && selectedRun.provider && (
+        <div className="inspect-body">
+          <div className="inspect-grid">
             <div className="inspect-cell">
-              <span className="inspect-cell-label">{t('drawer.provider')}</span>
-              <span className="inspect-cell-value">{selectedRun.provider}</span>
+              <span className="inspect-cell-label">{t('drawer.model')}</span>
+              <span className="inspect-cell-value">{selectedRun.model ?? '—'}</span>
+            </div>
+            {selectedRun.tool === 'openClaw' && selectedRun.provider && (
+              <div className="inspect-cell">
+                <span className="inspect-cell-label">{t('drawer.provider')}</span>
+                <span className="inspect-cell-value">{selectedRun.provider}</span>
+              </div>
+            )}
+            <div className="inspect-cell">
+              <span className="inspect-cell-label">{t('drawer.duration')}</span>
+              <span className="inspect-cell-value">{formatDuration(selectedRun.elapsedMs)}</span>
+            </div>
+            <div className="inspect-cell">
+              <span className="inspect-cell-label">{t('drawer.messages')}</span>
+              <span className="inspect-cell-value">{selectedRun.messageCount}</span>
+            </div>
+            <div className="inspect-cell">
+              <span className="inspect-cell-label">{t('drawer.tokens')}</span>
+              <span className="inspect-cell-value">{formatTokens(selectedRun.tokens.total)}</span>
+            </div>
+            <div className="inspect-cell">
+              <span className="inspect-cell-label">{t('drawer.cost')}</span>
+              <span className="inspect-cell-value">{formatCost(selectedRunCost ?? selectedRun.cost.usd)}</span>
+            </div>
+          </div>
+
+          {selectedRun.originLabel && (
+            <div className="inspect-section">
+              <span className="inspect-section-label">{t('drawer.origin')}</span>
+              <span className="inspect-section-value">{selectedRun.originLabel}</span>
             </div>
           )}
-          <div className="inspect-cell">
-            <span className="inspect-cell-label">{t('drawer.duration')}</span>
-            <span className="inspect-cell-value">{formatDuration(selectedRun.elapsedMs)}</span>
-          </div>
-          <div className="inspect-cell">
-            <span className="inspect-cell-label">{t('drawer.messages')}</span>
-            <span className="inspect-cell-value">{selectedRun.messageCount}</span>
-          </div>
-          <div className="inspect-cell">
-            <span className="inspect-cell-label">{t('drawer.tokens')}</span>
-            <span className="inspect-cell-value">{formatTokens(selectedRun.tokens.total)}</span>
-          </div>
-          <div className="inspect-cell">
-            <span className="inspect-cell-label">{t('drawer.cost')}</span>
-            <span className="inspect-cell-value">{formatCost(selectedRunCost ?? selectedRun.cost.usd)}</span>
-          </div>
-        </div>
 
-        {selectedRun.originLabel && (
-          <div className="inspect-section">
-            <span className="inspect-section-label">{t('drawer.origin')}</span>
-            <span className="inspect-section-value">{selectedRun.originLabel}</span>
-          </div>
-        )}
-
-        {selectedRun.firstQuestion && (
-          <div className="inspect-section">
-            <span className="inspect-section-label">{t('drawer.firstQuestion')}</span>
-            <p className="inspect-question">{selectedRun.firstQuestion}</p>
-          </div>
-        )}
-        {selectedRun.lastQuestion && selectedRun.lastQuestion !== selectedRun.firstQuestion && (
-          <div className="inspect-section">
-            <span className="inspect-section-label">{t('drawer.lastQuestion')}</span>
-            <p className="inspect-question">{selectedRun.lastQuestion}</p>
-          </div>
-        )}
-
-        {(runtimeMode === 'local' && (entriesLoading || entries.length > 0)) && (
-          <div className="inspect-section">
-            <span className="inspect-section-label">{t('drawer.timeline')}</span>
-            <div className="inspect-io-list">
-              {entriesLoading && (
-                <div className="inspect-io-empty">{t('drawer.loadingEntries')}</div>
-              )}
-              {!entriesLoading && entries.map((entry, index) => (
-                <div
-                  key={`${entry.kind}-${entry.timestamp}-${index}`}
-                  className={`inspect-io-item inspect-io-item--${entry.kind}`}
-                >
-                  <div className="inspect-io-meta">
-                    <span className={`inspect-io-kind inspect-io-kind--${entry.kind}`}>
-                      {t(entry.kind === 'input' ? 'drawer.input' : 'drawer.output')}
-                    </span>
-                    <span className="inspect-io-time">{formatDateTime(entry.timestamp)}</span>
-                  </div>
-                  <p className="inspect-io-text">{entry.text}</p>
-                </div>
-              ))}
+          {selectedRun.firstQuestion && (
+            <div className="inspect-section">
+              <span className="inspect-section-label">{t('drawer.firstQuestion')}</span>
+              <p className="inspect-question">{selectedRun.firstQuestion}</p>
             </div>
-          </div>
-        )}
+          )}
+          {selectedRun.lastQuestion && selectedRun.lastQuestion !== selectedRun.firstQuestion && (
+            <div className="inspect-section">
+              <span className="inspect-section-label">{t('drawer.lastQuestion')}</span>
+              <p className="inspect-question">{selectedRun.lastQuestion}</p>
+            </div>
+          )}
 
-        {isError && (
-          <div className="inspect-error">
-            <span className="inspect-error-state">{selectedRun.state}</span>
-            {(selectedRun.errorMessage ?? selectedRun.lastTail) && (
-              <p className="inspect-error-msg">{selectedRun.errorMessage ?? selectedRun.lastTail}</p>
-            )}
-          </div>
-        )}
+          {(runtimeMode === 'local' && (entriesLoading || entries.length > 0)) && (
+            <div className="inspect-section">
+              <span className="inspect-section-label">{t('drawer.timeline')}</span>
+              <div className="inspect-io-list">
+                {entriesLoading && (
+                  <div className="inspect-io-empty">{t('drawer.loadingEntries')}</div>
+                )}
+                {!entriesLoading && entries.map((entry, index) => (
+                  <div
+                    key={`${entry.kind}-${entry.timestamp}-${index}`}
+                    className={`inspect-io-item inspect-io-item--${entry.kind}`}
+                  >
+                    <div className="inspect-io-meta">
+                      <span className={`inspect-io-kind inspect-io-kind--${entry.kind}`}>
+                        {t(entry.kind === 'input' ? 'drawer.input' : 'drawer.output')}
+                      </span>
+                      <span className="inspect-io-time">{formatDateTime(entry.timestamp)}</span>
+                    </div>
+                    <p className="inspect-io-text">{entry.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isError && (
+            <div className="inspect-error">
+              <span className="inspect-error-state">{selectedRun.state}</span>
+              {(selectedRun.errorMessage ?? selectedRun.lastTail) && (
+                <p className="inspect-error-msg">{selectedRun.errorMessage ?? selectedRun.lastTail}</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

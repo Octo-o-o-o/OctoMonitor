@@ -49,7 +49,7 @@ pub struct ClaudeSession {
     pub has_pending_tool_use: bool,
 }
 
-/// Usage quota data from Claude HUD cache
+/// Usage quota data from Claude statusline/legacy cache integrations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeQuota {
@@ -103,6 +103,9 @@ struct ClaudeSessionState {
     last_question: Option<String>,
     completed_active_elapsed_ms: i64,
     pending_user_ts: Option<chrono::DateTime<chrono::FixedOffset>>,
+    counted_assistant_message_ids: HashSet<String>,
+    counted_task_notification_ids: HashSet<String>,
+    external_total_tokens: u64,
     /// True when the last assistant message had tool_use and no tool_result followed.
     has_pending_tool_use: bool,
 }
@@ -218,6 +221,42 @@ fn extract_text_from_content(msg: &serde_json::Value) -> Option<String> {
     None
 }
 
+fn extract_xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    Some(text[start..end].trim())
+}
+
+fn extract_task_notification_usage(text: &str) -> Option<(String, u64)> {
+    let task_id = extract_xml_tag(text, "task-id")?.to_string();
+    let total_tokens = extract_xml_tag(text, "total_tokens")?.parse().ok()?;
+    Some((task_id, total_tokens))
+}
+
+fn extract_assistant_message_key(val: &serde_json::Value) -> Option<String> {
+    val.get("message")
+        .and_then(|message| message.get("id"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| {
+            val.get("requestId")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .or_else(|| val.get("uuid").and_then(|v| v.as_str()).map(String::from))
+}
+
+fn record_task_notification_usage(state: &mut ClaudeSessionState, text: &str) {
+    let Some((task_id, total_tokens)) = extract_task_notification_usage(text) else {
+        return;
+    };
+    if state.counted_task_notification_ids.insert(task_id) {
+        state.external_total_tokens = state.external_total_tokens.saturating_add(total_tokens);
+    }
+}
+
 fn parse_claude_session(
     path: &Path,
     workspace_path: &str,
@@ -240,6 +279,13 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
     }
 
     let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+    if msg_type == "queue-operation" {
+        if let Some(content) = val.get("content").and_then(|v| v.as_str()) {
+            record_task_notification_usage(state, content);
+        }
+        return;
+    }
 
     if let Some(ts) = val.get("timestamp").and_then(|v| v.as_str()) {
         if state.first_timestamp.is_none() {
@@ -274,8 +320,11 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
             if t.starts_with("<local-command-caveat>")
                 || t.starts_with("<system-reminder>")
                 || t.starts_with("<command-name>")
-                || t.starts_with("<task-notification>")
             {
+                return;
+            }
+            if t.starts_with("<task-notification>") {
+                record_task_notification_usage(state, &t);
                 return;
             }
             let truncated: String = t.chars().take(200).collect();
@@ -289,7 +338,7 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
 
     if msg_type == "assistant" {
         // Check if assistant message contains tool_use
-        state.has_pending_tool_use = val
+        let has_tool_use = val
             .get("message")
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_array())
@@ -297,6 +346,9 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
                 arr.iter()
                     .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
             });
+        if has_tool_use {
+            state.has_pending_tool_use = true;
+        }
 
         if let (Some(user_dt), Some(asst_dt)) = (state.pending_user_ts.take(), line_dt) {
             let interval = (asst_dt - user_dt).num_milliseconds().max(0);
@@ -308,26 +360,31 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
         {
             state.model = Some(m);
         }
-        if let Some(usage) = val.get("message").and_then(|msg| msg.get("usage")) {
-            state.input_tokens += usage
-                .get("input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            state.output_tokens += usage
-                .get("output_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            state.cache_read_tokens += usage
-                .get("cache_read_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            state.cache_write_tokens += usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-        }
-        if let Some(cost) = val.get("costUSD").and_then(|v| v.as_f64()) {
-            state.total_cost_usd += cost;
+        let should_count_usage = extract_assistant_message_key(&val)
+            .map(|id| state.counted_assistant_message_ids.insert(id))
+            .unwrap_or(true);
+        if should_count_usage {
+            if let Some(usage) = val.get("message").and_then(|msg| msg.get("usage")) {
+                state.input_tokens += usage
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                state.output_tokens += usage
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                state.cache_read_tokens += usage
+                    .get("cache_read_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                state.cache_write_tokens += usage
+                    .get("cache_creation_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+            }
+            if let Some(cost) = val.get("costUSD").and_then(|v| v.as_f64()) {
+                state.total_cost_usd += cost;
+            }
         }
     }
 }
@@ -346,7 +403,8 @@ fn build_claude_session(
     let total_tokens = state.input_tokens
         + state.output_tokens
         + state.cache_read_tokens
-        + state.cache_write_tokens;
+        + state.cache_write_tokens
+        + state.external_total_tokens;
     let file_modified = fs::metadata(path)
         .ok()
         .and_then(|m| m.modified().ok())
@@ -402,7 +460,7 @@ fn update_cached_claude_session(
     build_claude_session(&cached.state, path, workspace_path, project_name)
 }
 
-fn read_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {
+fn read_legacy_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {
     let cache_path = config_dir.join("plugins/claude-hud/.usage-cache.json");
     let contents = fs::read_to_string(&cache_path).ok()?;
     let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
@@ -453,8 +511,9 @@ pub fn probe_with_cache(cache: &mut ClaudeProbeCache) -> ClaudeSnapshot {
     // Scan real sessions
     let sessions = scan_sessions(&config_dir, Some(cache));
 
-    // Read HUD usage cache for quota
-    let quota = read_hud_usage_cache(&config_dir);
+    // Older third-party HUD integrations wrote subscriber quota to this cache.
+    // Current Claude Code docs recommend statusline `rate_limits` as the live source.
+    let quota = read_legacy_hud_usage_cache(&config_dir);
 
     ClaudeSnapshot {
         probed_at: Utc::now().to_rfc3339(),
@@ -609,5 +668,49 @@ mod tests {
         assert_eq!(reset.total_tokens, 3);
         assert_eq!(reset.cost_usd, Some(0.1));
         assert!(reset.first_question.is_none());
+    }
+
+    #[test]
+    fn assistant_usage_counts_once_per_message_id() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let transcript = temp_dir.path().join("session.jsonl");
+        std::fs::write(
+            &transcript,
+            concat!(
+                "{\"sessionId\":\"s1\",\"type\":\"user\",\"timestamp\":\"2026-04-01T00:00:00Z\",\"message\":{\"content\":\"hello\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"u1\",\"requestId\":\"req1\",\"timestamp\":\"2026-04-01T00:00:05Z\",\"message\":{\"id\":\"msg1\",\"model\":\"claude-3.7\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1},\"content\":[{\"type\":\"thinking\",\"thinking\":\"...\"}]},\"costUSD\":0.5}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"u2\",\"requestId\":\"req1\",\"timestamp\":\"2026-04-01T00:00:05Z\",\"message\":{\"id\":\"msg1\",\"model\":\"claude-3.7\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1},\"content\":[{\"type\":\"text\",\"text\":\"done\"}]},\"costUSD\":0.5}\n"
+            ),
+        )
+        .expect("transcript");
+
+        let workspace = temp_dir.path().display().to_string();
+        let session =
+            parse_claude_session(&transcript, &workspace, "workspace").expect("parse session");
+
+        assert_eq!(session.total_tokens, 18);
+        assert_eq!(session.cost_usd, Some(0.5));
+    }
+
+    #[test]
+    fn task_notification_usage_counts_once_per_task_id() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let transcript = temp_dir.path().join("session.jsonl");
+        std::fs::write(
+            &transcript,
+            concat!(
+                "{\"sessionId\":\"s1\",\"type\":\"assistant\",\"uuid\":\"u1\",\"requestId\":\"req1\",\"timestamp\":\"2026-04-01T00:00:05Z\",\"message\":{\"id\":\"msg1\",\"model\":\"claude-3.7\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":2,\"cache_creation_input_tokens\":1},\"content\":[{\"type\":\"text\",\"text\":\"done\"}]},\"costUSD\":0.5}\n",
+                "{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"timestamp\":\"2026-04-01T00:00:06Z\",\"sessionId\":\"s1\",\"content\":\"<task-notification><task-id>task-1</task-id><usage><total_tokens>42</total_tokens><tool_uses>1</tool_uses><duration_ms>1000</duration_ms></usage></task-notification>\"}\n",
+                "{\"type\":\"user\",\"timestamp\":\"2026-04-01T00:00:07Z\",\"message\":{\"content\":\"<task-notification><task-id>task-1</task-id><usage><total_tokens>42</total_tokens><tool_uses>1</tool_uses><duration_ms>1000</duration_ms></usage></task-notification>\"}}\n"
+            ),
+        )
+        .expect("transcript");
+
+        let workspace = temp_dir.path().display().to_string();
+        let session =
+            parse_claude_session(&transcript, &workspace, "workspace").expect("parse session");
+
+        assert_eq!(session.total_tokens, 60);
+        assert_eq!(session.cost_usd, Some(0.5));
     }
 }

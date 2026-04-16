@@ -11,7 +11,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Manager};
+use tauri::{
+    menu::{AboutMetadata, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
+    AppHandle, Manager, Runtime,
+};
 
 /// Shared handle to the server child process.
 /// Both the Tauri window-destroy handler and the post-run cleanup use this.
@@ -24,6 +27,20 @@ const SERVER_ADDR: &str = "127.0.0.1:46321";
 const SERVER_HEALTH_PATH: &str = "/api/health";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const DESKTOP_BOOT_EVENT: &str = "octomonitor:desktop-boot-status";
+const DESKTOP_MENU_ACTION_EVENT: &str = "octomonitor:desktop-menu-action";
+
+const MENU_APP_PREFERENCES: &str = "app.preferences";
+const MENU_VIEW_ZOOM_IN: &str = "view.zoom_in";
+const MENU_VIEW_ZOOM_OUT: &str = "view.zoom_out";
+const MENU_VIEW_ZOOM_RESET: &str = "view.zoom_reset";
+const MENU_HELP_KEYBOARD_SHORTCUTS: &str = "help.keyboard_shortcuts";
+
+const ACTION_OPEN_SETTINGS: &str = "open-settings";
+const ACTION_TOGGLE_SHORTCUTS: &str = "toggle-shortcuts";
+const ACTION_ZOOM_IN: &str = "zoom-in";
+const ACTION_ZOOM_OUT: &str = "zoom-out";
+const ACTION_ZOOM_RESET: &str = "zoom-reset";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +59,118 @@ enum ChildStatus {
     Missing,
     Exited(String),
     Unknown(String),
+}
+
+fn dispatch_window_script(app: &AppHandle, script: &str) {
+    for window in app.webview_windows().values() {
+        let _ = window.eval(script);
+    }
+}
+
+fn dispatch_custom_event<T: Serialize>(app: &AppHandle, event_name: &str, detail: &T) {
+    let event_name = serde_json::to_string(event_name).unwrap_or_else(|_| "\"unknown\"".into());
+    let detail = serde_json::to_string(detail).unwrap_or_else(|_| "null".into());
+    let script =
+        format!("window.dispatchEvent(new CustomEvent({event_name}, {{ detail: {detail} }}));");
+    dispatch_window_script(app, script.as_str());
+}
+
+fn emit_menu_action(app: &AppHandle, action: &str) {
+    dispatch_custom_event(
+        app,
+        DESKTOP_MENU_ACTION_EVENT,
+        &serde_json::json!({ "action": action }),
+    );
+}
+
+fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    #[cfg(target_os = "macos")]
+    let about_metadata = {
+        let pkg_info = app.package_info();
+        let config = app.config();
+        AboutMetadata {
+            name: Some(pkg_info.name.clone()),
+            version: Some(pkg_info.version.to_string()),
+            copyright: config.bundle.copyright.clone(),
+            authors: config
+                .bundle
+                .publisher
+                .clone()
+                .map(|publisher| vec![publisher]),
+            ..Default::default()
+        }
+    };
+
+    #[cfg(target_os = "macos")]
+    let preferences = MenuItemBuilder::with_id(MENU_APP_PREFERENCES, "Preferences...")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
+    let zoom_in = MenuItemBuilder::with_id(MENU_VIEW_ZOOM_IN, "Zoom In")
+        .accelerator("CmdOrCtrl+=")
+        .build(app)?;
+    let zoom_out = MenuItemBuilder::with_id(MENU_VIEW_ZOOM_OUT, "Zoom Out")
+        .accelerator("CmdOrCtrl+-")
+        .build(app)?;
+    let zoom_reset = MenuItemBuilder::with_id(MENU_VIEW_ZOOM_RESET, "Actual Size")
+        .accelerator("CmdOrCtrl+0")
+        .build(app)?;
+    let keyboard_shortcuts =
+        MenuItemBuilder::with_id(MENU_HELP_KEYBOARD_SHORTCUTS, "Keyboard Shortcuts").build(app)?;
+
+    let mut menu = MenuBuilder::new(app);
+
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = SubmenuBuilder::new(app, app.package_info().name.clone())
+            .about(Some(about_metadata))
+            .separator()
+            .services()
+            .separator()
+            .hide()
+            .hide_others()
+            .separator()
+            .item(&preferences)
+            .separator()
+            .quit()
+            .build()?;
+        menu = menu.item(&app_menu);
+    }
+
+    let file_menu = SubmenuBuilder::new(app, "File").close_window().build()?;
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let mut view_menu = SubmenuBuilder::new(app, "View")
+        .item(&zoom_in)
+        .item(&zoom_out)
+        .item(&zoom_reset);
+    #[cfg(target_os = "macos")]
+    {
+        view_menu = view_menu.separator().fullscreen();
+    }
+    let view_menu = view_menu.build()?;
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .close_window()
+        .build()?;
+    let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&keyboard_shortcuts)
+        .build()?;
+
+    menu.item(&file_menu)
+        .item(&edit_menu)
+        .item(&view_menu)
+        .item(&window_menu)
+        .item(&help_menu)
+        .build()
 }
 
 fn find_server_binary() -> Option<PathBuf> {
@@ -224,12 +353,9 @@ fn push_boot_issue(app: &AppHandle, issue: Option<DesktopBootIssue>) {
     }
 
     let payload = serde_json::to_string(&issue).unwrap_or_else(|_| "null".into());
-    let script = format!(
-        "window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload}; window.dispatchEvent(new CustomEvent('octomonitor:desktop-boot-status', {{ detail: {payload} }}));"
-    );
-    for window in app.webview_windows().values() {
-        let _ = window.eval(script.as_str());
-    }
+    let script = format!("window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload};");
+    dispatch_window_script(app, script.as_str());
+    dispatch_custom_event(app, DESKTOP_BOOT_EVENT, &issue);
 }
 
 fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
@@ -341,6 +467,15 @@ fn main() {
     let shared_for_setup = shared_child.clone();
 
     tauri::Builder::default()
+        .menu(|app| build_app_menu(app))
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            MENU_APP_PREFERENCES => emit_menu_action(app, ACTION_OPEN_SETTINGS),
+            MENU_VIEW_ZOOM_IN => emit_menu_action(app, ACTION_ZOOM_IN),
+            MENU_VIEW_ZOOM_OUT => emit_menu_action(app, ACTION_ZOOM_OUT),
+            MENU_VIEW_ZOOM_RESET => emit_menu_action(app, ACTION_ZOOM_RESET),
+            MENU_HELP_KEYBOARD_SHORTCUTS => emit_menu_action(app, ACTION_TOGGLE_SHORTCUTS),
+            _ => {}
+        })
         .setup(move |app| {
             app.manage(ServerState(shared_for_setup));
             app.manage(DesktopBootState(Mutex::new(None)));
@@ -354,7 +489,7 @@ fn main() {
                 .and_then(|state| state.0.lock().ok()?.clone());
             let payload = serde_json::to_string(&issue).unwrap_or_else(|_| "null".into());
             let script = format!(
-                "window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload}; window.dispatchEvent(new CustomEvent('octomonitor:desktop-boot-status', {{ detail: {payload} }}));"
+                "window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload}; window.dispatchEvent(new CustomEvent('{DESKTOP_BOOT_EVENT}', {{ detail: {payload} }}));"
             );
             let _ = window.eval(script);
         })

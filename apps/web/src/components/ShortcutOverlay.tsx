@@ -2,12 +2,14 @@ import { useEffect } from 'react'
 import { useMonitorStore } from '../store/monitorStore'
 import { useI18n } from '../lib/i18n'
 import { getRuntimeMode } from '../lib/runtimeMode'
+import { isTauriEnvironment } from '../lib/runtimeEnvironment'
 
 export function ShortcutOverlay() {
   const show = useMonitorStore((s) => s.showShortcutHelp)
   const toggle = useMonitorStore((s) => s.toggleShortcutHelp)
   const { t } = useI18n()
   const runtimeMode = getRuntimeMode()
+  const showDesktopShortcuts = isTauriEnvironment()
   const shortcuts = [
     {
       key: runtimeMode === 'remoteViewer' ? '1 / 2' : '1 / 2 / 3 / 4 / 5',
@@ -17,6 +19,11 @@ export function ShortcutOverlay() {
     { key: 'Enter', action: t('shortcut.openDrawer') },
     { key: 'Esc', action: t('shortcut.closeDrawer') },
     { key: '?', action: t('shortcut.toggleHelp') },
+    ...(showDesktopShortcuts ? [
+      { key: 'Cmd / Ctrl + ,', action: t('shortcut.openSettings') },
+      { key: 'Cmd / Ctrl + + / - / 0', action: t('shortcut.zoom') },
+      { key: 'Cmd / Ctrl + Z / X / C / V / A', action: t('shortcut.nativeEdit') },
+    ] : []),
   ] as const
 
   useEffect(() => {

@@ -6,7 +6,7 @@ import { buildVisiblePanels, buildVisibleRunsBySource, summarizeRunsByState } fr
 import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
 import { AttentionBanner } from './AttentionBanner'
 import { MonitorSkeleton } from './Skeleton'
-import type { PendingCron, RunRecord, ToolKind } from '../../lib/types'
+import type { AdapterHealth, PendingCron, RunRecord, ToolKind } from '../../lib/types'
 
 import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
 const sourceAccents: Record<ToolKind, string> = {
@@ -29,6 +29,19 @@ const stateStyles: Record<string, { badge: string; row: string }> = {
 }
 
 const defaultStateStyle = { badge: 'state-done', row: 'state-done' }
+
+function getSourceIndicator(health: AdapterHealth | undefined) {
+  if (health?.gatewayStatus) {
+    return {
+      dotClass: health.gatewayStatus,
+      labelKey: `monitor.gateway.${health.gatewayStatus}` as const,
+    }
+  }
+  return {
+    dotClass: health?.online ? 'online' : 'offline',
+    labelKey: undefined,
+  }
+}
 
 const tagPalette = [
   { bg: 'var(--tag-violet-bg)', text: 'var(--tag-violet-text)' },
@@ -206,7 +219,7 @@ function QuotaBar({ label, pct, loading }: { label: string; pct: number | null |
 function PayAsYouGoBadge() {
   const { t } = useI18n()
   return (
-    <div className="quota-bars">
+    <div className="quota-bars quota-bars-payg">
       <span className="quota-payg">{t('ui.payAsYouGo')}</span>
     </div>
   )
@@ -395,11 +408,23 @@ function SourceColumn({
 
   const hasQuotaConcept = tool !== 'openClaw'
   const subscriptionHasRuns = hasQuotaConcept && !isApiKey && runs.length > 0
-  const quotaLoading = subscriptionHasRuns && !quota
+  const expectsQuotaSource = tool !== 'claude' || Boolean(quota) || runs.some((r) => r.sourceMode === 'claude_statusline')
+  const quotaLoading = subscriptionHasRuns && expectsQuotaSource && !quota
 
   const healthTitle = health
-    ? `${health.mode} | ${health.online ? 'online' : 'offline'} | ${health.freshness}${health.lastError ? ` | ${health.lastError}` : ''}`
+    ? [
+        health.gatewayStatus ? `gateway ${health.gatewayStatus}` : undefined,
+        health.gatewayDetail,
+        health.mode,
+        health.online ? 'online' : 'offline',
+        health.freshness,
+        health.lastError,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .join(' | ')
     : undefined
+  const sourceIndicator = getSourceIndicator(health)
+  const gatewayStatusLabel = sourceIndicator.labelKey ? t(sourceIndicator.labelKey) : undefined
 
   return (
     <div className={`source-column ${sourceAccents[tool]}`}>
@@ -408,19 +433,27 @@ function SourceColumn({
           <div className="source-name-row">
             <h3 className="source-name">{sourceLabels[tool]}</h3>
             <span
-              className={`source-dot ${health?.online ? 'online' : 'offline'}`}
+              className={`source-dot ${sourceIndicator.dotClass}`}
               title={healthTitle}
             />
+            {gatewayStatusLabel && (
+              <span
+                className={`source-gateway-status ${sourceIndicator.dotClass}`}
+                title={healthTitle}
+              >
+                {gatewayStatusLabel}
+              </span>
+            )}
           </div>
           {isApiKey ? (
             <PayAsYouGoBadge />
           ) : quotaLoading ? (
-            <div className="quota-bars">
+            <div className="quota-bars quota-bars-metered">
               <QuotaBar label="5hrs" pct={undefined} loading />
               <QuotaBar label="7days" pct={undefined} loading />
             </div>
           ) : quota ? (
-            <div className="quota-bars">
+            <div className="quota-bars quota-bars-metered">
               <QuotaBar label="5hrs" pct={quota.fiveHourUsedPct} />
               <QuotaBar label="7days" pct={quota.sevenDayUsedPct} />
             </div>

@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    env, fs,
-    path::Path,
-};
+use std::{env, fs, path::Path};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -91,8 +88,16 @@ pub fn detect_tools() -> Vec<ToolCapability> {
             "Claude CLI",
             "hook/statusline monitoring path available",
         ),
-        ("codex", "Codex CLI", "app-server/hook monitoring path available"),
-        ("openclaw", "OpenClaw CLI", "gateway/status monitoring path available"),
+        (
+            "codex",
+            "Codex CLI",
+            "app-server/hook monitoring path available",
+        ),
+        (
+            "openclaw",
+            "OpenClaw CLI",
+            "gateway/status monitoring path available",
+        ),
         (
             "hermes",
             "Hermes Agent CLI (experimental)",

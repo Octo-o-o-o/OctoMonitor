@@ -1,9 +1,5 @@
 import type { BootstrapPayload } from './types'
-
-const isTauri =
-  '__TAURI_INTERNALS__' in window
-  || '__TAURI__' in window
-  || window.location.protocol === 'tauri:'
+import { isTauriEnvironment } from './runtimeEnvironment'
 
 const DEFAULT_CONFIG: BootstrapPayload['config'] = {
   listenHost: '127.0.0.1',
@@ -46,11 +42,11 @@ export function normalizeBootstrapPayload(payload: unknown): BootstrapPayload {
 }
 
 export function getApiBase(): string {
-  return isTauri ? 'http://127.0.0.1:46321' : ''
+  return isTauriEnvironment() ? 'http://127.0.0.1:46321' : ''
 }
 
 export function getWsBase(): string {
-  if (isTauri) {
+  if (isTauriEnvironment()) {
     return 'ws://127.0.0.1:46321'
   }
   return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`

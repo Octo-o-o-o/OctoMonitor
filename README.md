@@ -13,7 +13,7 @@ OctoMonitor gives you a single dashboard to watch all your AI coding sessions in
 - **Token & cost tracking** — per-session and aggregated usage with quota bars
 - **Commit and heatmap views** — practical history views without a separate analytics product layer
 - **Desktop notifications** — get notified when a session needs approval
-- **Keyboard-driven** — `j`/`k` navigation, `1`-`5` tab switching, `?` shortcut help
+- **Keyboard-driven** — app shortcuts plus native desktop actions for Preferences, zoom, and standard edit commands
 - **Dark / Light / E-Ink themes** — plus VS Code theme import
 - **Local-first** — all data stays on your machine; server binds to `127.0.0.1`
 - **Zero-config** — auto-detects installed tools; no database required
@@ -149,6 +149,10 @@ pnpm build:desktop:notarized
 | `Enter` | Open detail drawer |
 | `Esc` | Close drawer |
 | `?` | Show shortcut overlay |
+| `Cmd` / `Ctrl` + `,` | Open Settings in the desktop app |
+| `Cmd` / `Ctrl` + `+` / `-` / `0` | Zoom in / out / reset in the desktop app |
+
+Desktop builds also support native undo, redo, cut, copy, paste, and select-all shortcuts through the system menu bar.
 
 ## Configuration
 
