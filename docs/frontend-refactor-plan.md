@@ -33,8 +33,8 @@
 - 影响：极端数据（无 run / 无 commit）下渲染空白或潜在 `TypeError`。
 - 严重度：高。
 
-#### P0-2　5 处 i18n 动态 key 使用 `as any`
-- 位置：`InspectDrawer.tsx:30`、`MonitorView.tsx:105`、`settings/MonitorSection.tsx:141`、`settings/FilterSection.tsx:60`、`settings/AppearanceSection.tsx:104`。
+#### P0-2　6 处 i18n 动态 key 使用 `as any` / `as never`
+- 位置：`InspectDrawer.tsx:30`、`MonitorView.tsx:105`、`settings/MonitorSection.tsx:141`、`settings/FilterSection.tsx:60`、`settings/AppearanceSection.tsx:92`（`as never`）+ `settings/AppearanceSection.tsx:104`。
 - 现象：`` t(`state.${state}` as any) ``、`` t(`settings.fontSize.${size}` as any) ``。
 - 影响：`RunState` / `FontSize` / `UiDensity` / `FilterMode` / `AgentDisplayFormat` 任一扩容，翻译缺失只在运行时 fallback 为 key 字符串，无编译期提示。
 - 严重度：中。
@@ -80,7 +80,7 @@
 
 ### P2（记录项，本轮不改）
 
-- `ReturnType<typeof getRuntimeMode>` 在 `App.tsx` 出现 5 次 → 低成本顺手做（见 §3.5）。
+- `ReturnType<typeof getRuntimeMode>` 在 `App.tsx` 出现 3 次 → 低成本顺手做（见 §3.5）。
 - `CommitsView.tsx`（494 行）/ `HeatmapView.tsx`（597 行）/ `MonitorView.tsx`（640 行）三个大组件：均有测试覆盖；`MonitorView` 内部子组件（SourceColumn 等）虽职责可拆，但 prop 接口膨胀代价较高。**不在本轮范围**。
 - `i18n.tsx` 675 行：95% 是 `en`/`zh` 翻译表。可拆为独立 JSON/`.ts` 数据文件，但纯机械迁移、无行为变化，留给未来翻译工作流改造一起做。**不在本轮范围**。
 - Heatmap cell 方向键导航 / ShortcutOverlay 焦点管理：无障碍增强，不是"规范性"问题。
@@ -269,7 +269,7 @@ export const DESKTOP_MENU_ACTION_EVENT = 'octomonitor:desktop-menu-action'
 ### PR-2：类型一致性（P0-1、P0-2、§3.5）
 **范围**：
 - `HeatmapSummary.peakCell`/`topDay` → optional；消费处加守卫。
-- 新增 `i18nMaps.ts`（或就近映射表），替换 5 处 `as any`。
+- 新增 `i18nMaps.ts`（或就近映射表），替换 6 处 `as any` / `as never`。
 - `RuntimeMode` 类型别名。
 - `migratePanelConfig` 加去重。
 
