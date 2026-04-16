@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMonitorStore, type FilterMode, type FilterRules } from '../../../store/monitorStore'
 import { useI18n } from '../../../lib/i18n'
+import { filterModeLabelKeys } from '../../../lib/i18nMaps'
 import { allTools, sourceLabels } from '../../../lib/constants'
 import type { ToolKind } from '../../../lib/types'
 
@@ -57,7 +58,7 @@ export function FilterSection() {
                         className={`settings-option small ${filter.mode === mode ? 'active' : ''}`}
                         onClick={() => updateFilter(tool, { mode })}
                       >
-                        {t(`settings.filterMode.${mode}` as any)}
+                        {t(filterModeLabelKeys[mode])}
                       </button>
                     ))}
                   </div>

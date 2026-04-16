@@ -22,7 +22,7 @@ import {
 } from './lib/desktopZoom'
 import { buildVisiblePanels, buildVisibleRunIds, buildVisibleRunsBySource } from './lib/monitor'
 import { isTauriEnvironment } from './lib/runtimeEnvironment'
-import { getRuntimeMode } from './lib/runtimeMode'
+import { getRuntimeMode, type RuntimeMode } from './lib/runtimeMode'
 import { useI18n, type I18nKey } from './lib/i18n'
 
 type DesktopBootIssue = {
@@ -111,7 +111,7 @@ function useWebSocket(
   return connected
 }
 
-function TabContent({ runtimeMode, tab }: { runtimeMode: ReturnType<typeof getRuntimeMode>; tab: string }) {
+function TabContent({ runtimeMode, tab }: { runtimeMode: RuntimeMode; tab: string }) {
   switch (tab) {
     case 'monitor': return <MonitorView />
     case 'usage': return <UsageView />
@@ -122,7 +122,7 @@ function TabContent({ runtimeMode, tab }: { runtimeMode: ReturnType<typeof getRu
   }
 }
 
-function useKeyboardShortcuts(runtimeMode: ReturnType<typeof getRuntimeMode>, activeTab: string) {
+function useKeyboardShortcuts(runtimeMode: RuntimeMode, activeTab: string) {
   const setActiveTab = useMonitorStore((s) => s.setActiveTab)
   const data = useMonitorStore((s) => s.data)
   const monitorPeriod = useMonitorStore((s) => s.settings.monitorPeriod)
@@ -197,7 +197,7 @@ function toDesktopZoomAction(action: DesktopMenuAction): DesktopZoomAction | nul
   }
 }
 
-function useDesktopMenuActions(runtimeMode: ReturnType<typeof getRuntimeMode>) {
+function useDesktopMenuActions(runtimeMode: RuntimeMode) {
   const setActiveTab = useMonitorStore((s) => s.setActiveTab)
   const toggleShortcutHelp = useMonitorStore((s) => s.toggleShortcutHelp)
   const zoomRef = useRef(1)

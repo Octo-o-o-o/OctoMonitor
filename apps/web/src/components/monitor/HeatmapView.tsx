@@ -314,15 +314,16 @@ export const HeatmapView = memo(function HeatmapView() {
 
   const selectedCellKey = pinnedCellKey ?? hoveredCellKey
 
-  const selectedCell = useMemo(
+  const selectedCell = useMemo<HeatmapCell | undefined>(
     () => heatmap.cells.find((cell) => !cell.hidden && cell.key === selectedCellKey) ?? heatmap.summary.peakCell,
     [heatmap, selectedCellKey],
   )
   const selectedCommits = useMemo(
-    () => listCommitsInWindow(activeCommits, selectedCell.startMs, selectedCell.endMs),
+    () => selectedCell ? listCommitsInWindow(activeCommits, selectedCell.startMs, selectedCell.endMs) : [],
     [activeCommits, selectedCell],
   )
   const selectedUsage = useMemo(() => {
+    if (!selectedCell) return { input: 0 }
     const usageBucketIndex = buildUsageBucketIndex(activeUsageBuckets)
     let input = 0
 
@@ -332,10 +333,10 @@ export const HeatmapView = memo(function HeatmapView() {
     }
 
     return { input }
-  }, [activeRuns, activeUsageBuckets, selectedCell.endMs, selectedCell.startMs])
+  }, [activeRuns, activeUsageBuckets, selectedCell])
   const dailySummary = useMemo(
-    () => buildDailySummary(selectedCell.date, activeRuns, activeUsageBuckets, activeCommits, 0),
-    [selectedCell.date, activeRuns, activeUsageBuckets, activeCommits],
+    () => selectedCell ? buildDailySummary(selectedCell.date, activeRuns, activeUsageBuckets, activeCommits, 0) : null,
+    [selectedCell, activeRuns, activeUsageBuckets, activeCommits],
   )
 
   const visibleSidebarCommits = selectedCommits.slice(0, maxSidebarCommits)
@@ -422,16 +423,22 @@ export const HeatmapView = memo(function HeatmapView() {
         </div>
         <div className="summary-stat heatmap-summary-card">
           <span className="summary-label">{t('heatmap.peakCell')}</span>
-          <strong className="summary-value">{compactMetricValue(heatmap.summary.peakCell.value)}</strong>
+          <strong className="summary-value">
+            {heatmap.summary.peakCell ? compactMetricValue(heatmap.summary.peakCell.value) : '—'}
+          </strong>
           <span className="heatmap-summary-hint">
-            {heatmap.summary.peakCell.hour == null ? t('heatmap.peakCellHint.day') : t('heatmap.peakCellHint.hour')}
+            {heatmap.summary.peakCell?.hour == null ? t('heatmap.peakCellHint.day') : t('heatmap.peakCellHint.hour')}
           </span>
         </div>
         <div className="summary-stat heatmap-summary-card">
           <span className="summary-label">{t('heatmap.topDay')}</span>
-          <strong className="summary-value">{compactMetricValue(heatmap.summary.topDay.total)}</strong>
+          <strong className="summary-value">
+            {heatmap.summary.topDay ? compactMetricValue(heatmap.summary.topDay.total) : '—'}
+          </strong>
           <span className="heatmap-summary-hint">
-            {`${shortDate(heatmap.summary.topDay.date, locale)} ${weekdayShort(heatmap.summary.topDay.date, locale)}`}
+            {heatmap.summary.topDay
+              ? `${shortDate(heatmap.summary.topDay.date, locale)} ${weekdayShort(heatmap.summary.topDay.date, locale)}`
+              : '—'}
           </span>
         </div>
         <div className="summary-stat heatmap-summary-card">
@@ -478,7 +485,7 @@ export const HeatmapView = memo(function HeatmapView() {
                       <button
                         key={cell.key}
                         type="button"
-                        className={`heatmap-cell ${selectedCell.key === cell.key ? 'selected' : ''}`}
+                        className={`heatmap-cell ${selectedCell?.key === cell.key ? 'selected' : ''}`}
                         data-level={cell.level}
                         aria-label={`${selectionLabel(cell, locale)} ${exactMetricValue(cell.value)}`}
                         onMouseEnter={() => handleCellHover(cell.key)}
@@ -524,7 +531,7 @@ export const HeatmapView = memo(function HeatmapView() {
                             <button
                               key={cell.key}
                               type="button"
-                              className={`heatmap-cell ${selectedCell.key === cell.key ? 'selected' : ''}`}
+                              className={`heatmap-cell ${selectedCell?.key === cell.key ? 'selected' : ''}`}
                               data-level={cell.level}
                               aria-label={`${selectionLabel(cell, locale)} ${exactMetricValue(cell.value)}`}
                               onMouseEnter={() => handleCellHover(cell.key)}
@@ -549,20 +556,24 @@ export const HeatmapView = memo(function HeatmapView() {
                 {pinnedCellKey ? t('heatmap.selectionPinned') : t('heatmap.selectionPreview')}
               </span>
             </div>
-            <strong className="heatmap-selection-value">{selectionMetricValue(metric, selectedCell.value)}</strong>
-            {metric !== 'input' && (
+            <strong className="heatmap-selection-value">
+              {selectedCell ? selectionMetricValue(metric, selectedCell.value) : '—'}
+            </strong>
+            {selectedCell && metric !== 'input' && (
               <div className="heatmap-selection-supporting">
                 <span className="heatmap-selection-supporting-label">{t(metricLabelKeys.input)}</span>
                 <strong className="heatmap-selection-supporting-value">{exactMetricValue(selectedUsage.input)}</strong>
               </div>
             )}
-            <div className="heatmap-selection-meta">{selectionLabel(selectedCell, locale)}</div>
+            <div className="heatmap-selection-meta">
+              {selectedCell ? selectionLabel(selectedCell, locale) : '—'}
+            </div>
             <div className="heatmap-selection-hint">
-              {selectedCell.hour == null ? t('heatmap.selectedDayHint') : t('heatmap.selectedHourHint')}
+              {selectedCell?.hour == null ? t('heatmap.selectedDayHint') : t('heatmap.selectedHourHint')}
             </div>
           </div>
 
-          <DailySummaryCard data={dailySummary} />
+          {dailySummary && <DailySummaryCard data={dailySummary} />}
 
           <div className="heatmap-commit-card">
             <div className="heatmap-commit-head">

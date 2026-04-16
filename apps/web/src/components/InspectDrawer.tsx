@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMonitorStore, selectSelectedRun } from '../store/monitorStore'
 import { useI18n } from '../lib/i18n'
+import { stateLabelKeys } from '../lib/i18nMaps'
 import { formatTokens, formatCost, formatDuration, formatDateTime } from '../lib/format'
 import { buildUsageBucketIndex } from '../lib/usage'
 import { apiFetch } from '../lib/api'
@@ -24,10 +25,6 @@ const toolColorMap: Record<string, string> = {
   codex: 'var(--codex-accent)',
   openClaw: 'var(--openclaw-accent)',
   hermes: 'var(--hermes-accent)',
-}
-
-function stateLabel(state: string, t: (key: any) => string): string {
-  return t(`state.${state}` as any) ?? state.toUpperCase()
 }
 
 export function InspectDrawer() {
@@ -102,7 +99,7 @@ export function InspectDrawer() {
               <h3 id="inspect-title" className="inspect-project">{selectedRun.projectName}</h3>
               <span className="inspect-path">{selectedRun.workspaceShort || ''}</span>
             </div>
-            <span className={`inspect-state ${stateClass}`}>{stateLabel(selectedRun.state, t)}</span>
+            <span className={`inspect-state ${stateClass}`}>{t(stateLabelKeys[selectedRun.state])}</span>
           </div>
           <div className="inspect-time-row">
             <span className="inspect-time-item">

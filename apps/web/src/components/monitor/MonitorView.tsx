@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMonitorStore, type AgentDisplayFormat } from '../../store/monitorStore'
 import { useI18n } from '../../lib/i18n'
+import { stateLabelKeys } from '../../lib/i18nMaps'
 import { formatTokens, formatDuration, formatLastUpdated, formatAgentTag, getGroupKey } from '../../lib/format'
 import { buildVisiblePanels, buildVisibleRunsBySource, summarizeRunsByState } from '../../lib/monitor'
 import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
@@ -102,8 +103,7 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
   const tag = run.tool === 'openClaw'
     ? formatAgentTag(run, agentDisplayFormat)
     : run.workspaceShort
-  const stateKey = `state.${run.state}` as any
-  const stateLabel = t(stateKey)
+  const stateLabel = t(stateLabelKeys[run.state])
   const style = stateStyles[run.state] ?? defaultStateStyle
   const isError = style.row === 'state-error'
   const isAcknowledged = isError && acknowledgedErrors.has(run.id)

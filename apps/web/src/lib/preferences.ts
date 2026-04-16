@@ -85,10 +85,17 @@ export function migratePanelConfig(panels: PanelEntry[] | undefined): PanelEntry
     return defaultPanelConfig.map((entry) => ({ ...entry }))
   }
 
-  const existing = panels.filter((entry) => allTools.includes(entry.tool))
-  const missing = allTools.filter((tool) => !existing.some((entry) => entry.tool === tool))
+  const seen = new Set<ToolKind>()
+  const existing: PanelEntry[] = []
+  for (const entry of panels) {
+    if (!allTools.includes(entry.tool)) continue
+    if (seen.has(entry.tool)) continue
+    seen.add(entry.tool)
+    existing.push({ ...entry })
+  }
+  const missing = allTools.filter((tool) => !seen.has(tool))
   return [
-    ...existing.map((entry) => ({ ...entry })),
+    ...existing,
     ...missing.map((tool) => ({ tool, enabled: true })),
   ]
 }

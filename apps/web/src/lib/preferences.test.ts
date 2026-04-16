@@ -1,6 +1,7 @@
 import {
   defaultSettings,
   loadFrontendSettings,
+  migratePanelConfig,
   saveFrontendSettings,
 } from './preferences'
 import { STORAGE_KEYS } from './storageKeys'
@@ -37,6 +38,17 @@ describe('frontend preferences', () => {
     expect(settings.panelConfig.map((entry) => entry.tool)).toEqual(['codex', 'claude', 'openClaw', 'hermes'])
     expect(settings.filterRules.codex.patterns).toEqual(['octo'])
     expect(settings.filterRules.claude.mode).toBe('off')
+  })
+
+  it('deduplicates repeated tools in stored panelConfig', () => {
+    const result = migratePanelConfig([
+      { tool: 'codex', enabled: false },
+      { tool: 'codex', enabled: true },
+      { tool: 'claude', enabled: true },
+    ])
+
+    expect(result.map((entry) => entry.tool)).toEqual(['codex', 'claude', 'openClaw', 'hermes'])
+    expect(result.find((entry) => entry.tool === 'codex')?.enabled).toBe(false)
   })
 
   it('persists only the supported preference model', () => {

@@ -1,4 +1,4 @@
-import { buildHeatmapView, getHeatmapScopeSelection, listCommitsInWindow } from './heatmap'
+import { buildHeatmapView, buildSummary, getHeatmapScopeSelection, listCommitsInWindow } from './heatmap'
 import type { CommitRecord, RunRecord, UsageBucket } from './types'
 
 function localIso(year: number, month: number, day: number, hour = 0, minute = 0): string {
@@ -187,6 +187,15 @@ describe('heatmap helpers', () => {
 
     const matched = listCommitsInWindow(commits, dayCell!.startMs, dayCell!.endMs)
     expect(matched.map((commit) => commit.shortSha)).toEqual(['bbb2222', 'aaa1111'])
-    expect(view.summary.topDay.total).toBe(2)
+    expect(view.summary.topDay?.total).toBe(2)
+  })
+
+  it('returns undefined peakCell/topDay when given empty cells and dayTotals', () => {
+    const summary = buildSummary([], [])
+    expect(summary.peakCell).toBeUndefined()
+    expect(summary.topDay).toBeUndefined()
+    expect(summary.total).toBe(0)
+    expect(summary.activeDays).toBe(0)
+    expect(summary.longestStreak).toBe(0)
   })
 })

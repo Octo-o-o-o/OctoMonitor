@@ -1,5 +1,6 @@
 import { useMonitorStore, type AgentDisplayFormat, type MonitorPeriod, type ColumnLayout } from '../../../store/monitorStore'
 import { useI18n } from '../../../lib/i18n'
+import { agentDisplayLabelKeys } from '../../../lib/i18nMaps'
 import { sourceLabels } from '../../../lib/constants'
 
 const periods: MonitorPeriod[] = ['30m', '1h', '2h', '4h', '8h', '24h']
@@ -138,7 +139,7 @@ export function MonitorSection() {
                 className={`agent-display-option ${agentDisplayFormat === fmt ? 'active' : ''}`}
                 onClick={() => updateSettings({ agentDisplayFormat: fmt })}
               >
-                <span className="agent-display-format-label">{t(`settings.agentDisplay.${fmt}` as any)}</span>
+                <span className="agent-display-format-label">{t(agentDisplayLabelKeys[fmt])}</span>
                 <span className="agent-display-example">{agentDisplayExamples[fmt]}</span>
               </button>
             ))}

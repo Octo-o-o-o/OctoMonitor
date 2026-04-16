@@ -1,5 +1,6 @@
 import { useMonitorStore, type FontSize, type UiDensity } from '../../../store/monitorStore'
 import { useI18n, type Locale } from '../../../lib/i18n'
+import { fontSizeLabelKeys, uiDensityLabelKeys } from '../../../lib/i18nMaps'
 import { useTheme, builtinThemeOrder, builtinThemeIcons, builtinThemeLabels } from '../../../lib/theme'
 
 const fontSizeOptions: FontSize[] = ['xsmall', 'small', 'default', 'large', 'xlarge']
@@ -89,7 +90,7 @@ export function AppearanceSection() {
                 className={`settings-option ${uiDensity === density ? 'active' : ''}`}
                 onClick={() => updateSettings({ uiDensity: density })}
               >
-                {t(`settings.uiDensity.${density}` as never)}
+                {t(uiDensityLabelKeys[density])}
               </button>
             ))}
           </div>
@@ -101,7 +102,7 @@ export function AppearanceSection() {
                 className={`settings-option settings-fontsize-${size} ${fontSize === size ? 'active' : ''}`}
                 onClick={() => updateSettings({ fontSize: size })}
               >
-                {t(`settings.fontSize.${size}` as any)}
+                {t(fontSizeLabelKeys[size])}
               </button>
             ))}
           </div>

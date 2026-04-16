@@ -25,8 +25,8 @@ export interface HeatmapDayTotal {
 
 export interface HeatmapSummary {
   total: number
-  peakCell: HeatmapCell
-  topDay: HeatmapDayTotal
+  peakCell?: HeatmapCell
+  topDay?: HeatmapDayTotal
   activeDays: number
   longestStreak: number
 }
@@ -192,20 +192,22 @@ function toLevel(value: number, thresholds: [number, number, number, number]): H
   return 4
 }
 
-function buildSummary(cells: HeatmapCell[], dayTotals: HeatmapDayTotal[]): HeatmapSummary {
+export function buildSummary(cells: HeatmapCell[], dayTotals: HeatmapDayTotal[]): HeatmapSummary {
   const visibleCells = cells.filter((cell) => !cell.hidden)
-  const peakCell = visibleCells.reduce((best, cell) => {
-    if (!best) return cell
-    if (cell.value > best.value) return cell
-    if (cell.value === best.value && cell.startMs > best.startMs) return cell
-    return best
-  }, visibleCells[0])
-  const topDay = dayTotals.reduce((best, day) => {
-    if (!best) return day
-    if (day.total > best.total) return day
-    if (day.total === best.total && day.date.getTime() > best.date.getTime()) return day
-    return best
-  }, dayTotals[0])
+  const peakCell = visibleCells.length === 0
+    ? undefined
+    : visibleCells.reduce((best, cell) => {
+      if (cell.value > best.value) return cell
+      if (cell.value === best.value && cell.startMs > best.startMs) return cell
+      return best
+    })
+  const topDay = dayTotals.length === 0
+    ? undefined
+    : dayTotals.reduce((best, day) => {
+      if (day.total > best.total) return day
+      if (day.total === best.total && day.date.getTime() > best.date.getTime()) return day
+      return best
+    })
 
   let longestStreak = 0
   let currentStreak = 0
