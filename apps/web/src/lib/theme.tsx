@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react'
+import { STORAGE_KEYS } from './storageKeys'
 
 export type ThemeId = 'dark' | 'light' | 'eink' | 'kindle-light' | 'kindle-dark' | string
 
@@ -179,7 +180,7 @@ function parseVSCodeTheme(json: string): { name: string; colors: ThemeColors } |
 
 function loadCustomThemes(): CustomTheme[] {
   try {
-    const raw = localStorage.getItem('octomonitor-custom-themes')
+    const raw = localStorage.getItem(STORAGE_KEYS.customThemes)
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -187,11 +188,15 @@ function loadCustomThemes(): CustomTheme[] {
 }
 
 function saveCustomThemes(themes: CustomTheme[]) {
-  localStorage.setItem('octomonitor-custom-themes', JSON.stringify(themes))
+  try {
+    localStorage.setItem(STORAGE_KEYS.customThemes, JSON.stringify(themes))
+  } catch (err) {
+    console.warn('[OctoMonitor] storage.write.customThemes', err)
+  }
 }
 
 function detectDefaultTheme(): ThemeId {
-  const saved = localStorage.getItem('octomonitor-theme')
+  const saved = localStorage.getItem(STORAGE_KEYS.theme)
   if (saved) return saved
   // Auto-detect E-Ink devices: Kindle, Silk browser, BOOX, reMarkable, NOOK, Kobo
   const ua = navigator.userAgent
@@ -221,7 +226,11 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   }, [themeId, customThemes, applyCurrentTheme])
 
   const setTheme = useCallback((id: ThemeId) => {
-    localStorage.setItem('octomonitor-theme', id)
+    try {
+      localStorage.setItem(STORAGE_KEYS.theme, id)
+    } catch (err) {
+      console.warn('[OctoMonitor] storage.write.theme', err)
+    }
     setThemeId(id)
   }, [])
 

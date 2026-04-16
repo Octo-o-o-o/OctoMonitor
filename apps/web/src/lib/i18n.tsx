@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useState, type PropsWithChildren } from 'react'
+import { STORAGE_KEYS } from './storageKeys'
 
 export type Locale = 'en' | 'zh'
 
@@ -651,7 +652,7 @@ const I18nContext = createContext<I18nContextValue>({
 })
 
 function getInitialLocale(): Locale {
-  const stored = localStorage.getItem('octomonitor-locale')
+  const stored = localStorage.getItem(STORAGE_KEYS.locale)
   if (stored === 'en' || stored === 'zh') return stored
   const browserLang = navigator.language.toLowerCase()
   return browserLang.startsWith('zh') ? 'zh' : 'en'
@@ -661,7 +662,11 @@ export function I18nProvider({ children }: PropsWithChildren) {
   const [locale, setLocaleState] = useState<Locale>(getInitialLocale)
 
   const setLocale = useCallback((l: Locale) => {
-    localStorage.setItem('octomonitor-locale', l)
+    try {
+      localStorage.setItem(STORAGE_KEYS.locale, l)
+    } catch (err) {
+      console.warn('[OctoMonitor] storage.write.locale', err)
+    }
     setLocaleState(l)
   }, [])
 

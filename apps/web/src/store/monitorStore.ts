@@ -5,12 +5,11 @@ import {
   saveFrontendSettings,
   type FrontendSettings,
 } from '../lib/preferences'
-
-const DISMISSED_ATTENTIONS_KEY = 'octomonitor-dismissed-attentions-v2'
+import { STORAGE_KEYS } from '../lib/storageKeys'
 
 function loadDismissedAttentionKeys(): string[] {
   try {
-    const raw = localStorage.getItem(DISMISSED_ATTENTIONS_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.dismissedAttentions)
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -80,7 +79,11 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   dismissAttention: (id) => set((s) => {
     const next = new Set(s.dismissedAttentionKeys)
     next.add(id)
-    localStorage.setItem(DISMISSED_ATTENTIONS_KEY, JSON.stringify([...next]))
+    try {
+      localStorage.setItem(STORAGE_KEYS.dismissedAttentions, JSON.stringify([...next]))
+    } catch (err) {
+      console.warn('[OctoMonitor] storage.write.dismissedAttentions', err)
+    }
     return { dismissedAttentionKeys: next }
   }),
   setActiveTab: (activeTab) => set({ activeTab }),

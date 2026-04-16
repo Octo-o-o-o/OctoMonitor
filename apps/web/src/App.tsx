@@ -12,6 +12,7 @@ import { ShortcutOverlay } from './components/ShortcutOverlay'
 import { RemotePairingGate } from './components/RemotePairingGate'
 import { LoadingScreen } from './components/LoadingScreen'
 import { apiFetch, buildWsUrl, normalizeBootstrapPayload } from './lib/api'
+import { DESKTOP_BOOT_EVENT, DESKTOP_MENU_ACTION_EVENT } from './lib/desktopEvents'
 import {
   applyDesktopZoom,
   loadDesktopZoom,
@@ -43,9 +44,6 @@ type DesktopMenuAction =
 type DesktopMenuActionDetail = {
   action?: DesktopMenuAction
 }
-
-const DESKTOP_BOOT_EVENT = 'octomonitor:desktop-boot-status'
-const DESKTOP_MENU_ACTION_EVENT = 'octomonitor:desktop-menu-action'
 
 function readDesktopBootIssue(): DesktopBootIssue | null {
   const bootIssue = (window as DesktopBootWindow).__OCTOMONITOR_DESKTOP_BOOT__

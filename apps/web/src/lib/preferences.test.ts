@@ -3,6 +3,7 @@ import {
   loadFrontendSettings,
   saveFrontendSettings,
 } from './preferences'
+import { STORAGE_KEYS } from './storageKeys'
 
 describe('frontend preferences', () => {
   beforeEach(() => {
@@ -14,7 +15,7 @@ describe('frontend preferences', () => {
   })
 
   it('migrates legacy settings while preserving supported fields', () => {
-    localStorage.setItem('octomonitor-settings', JSON.stringify({
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify({
       monitorPeriod: '4h',
       usageWindow: 'month',
       uiDensity: 'compact',
@@ -45,7 +46,7 @@ describe('frontend preferences', () => {
       uiDensity: 'spacious',
     })
 
-    expect(JSON.parse(localStorage.getItem('octomonitor-settings') ?? '{}')).toEqual({
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.settings) ?? '{}')).toEqual({
       version: 3,
       ...defaultSettings,
       notificationsEnabled: true,

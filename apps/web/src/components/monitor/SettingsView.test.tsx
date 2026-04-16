@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsView } from './SettingsView'
 import { I18nProvider } from '../../lib/i18n'
+import { STORAGE_KEYS } from '../../lib/storageKeys'
 import { ThemeProvider } from '../../lib/theme'
 
 const remoteAccessState = {
@@ -19,7 +20,7 @@ const remoteAccessState = {
 describe('SettingsView', () => {
   beforeEach(() => {
     localStorage.clear()
-    localStorage.setItem('octomonitor-locale', 'zh')
+    localStorage.setItem(STORAGE_KEYS.locale, 'zh')
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(remoteAccessState), {
         status: 200,

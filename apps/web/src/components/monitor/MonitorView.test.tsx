@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MonitorView } from './MonitorView'
 import { I18nProvider } from '../../lib/i18n'
 import { defaultSettings } from '../../lib/preferences'
+import { STORAGE_KEYS } from '../../lib/storageKeys'
 import type { BootstrapPayload } from '../../lib/types'
 import { useMonitorStore } from '../../store/monitorStore'
 
@@ -53,7 +54,7 @@ function createBootstrap(): BootstrapPayload {
 describe('MonitorView gateway status', () => {
   beforeEach(() => {
     localStorage.clear()
-    localStorage.setItem('octomonitor-locale', 'en')
+    localStorage.setItem(STORAGE_KEYS.locale, 'en')
 
     act(() => {
       useMonitorStore.setState({

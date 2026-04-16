@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '../../../lib/i18n'
 import { apiFetch } from '../../../lib/api'
 
@@ -15,12 +15,35 @@ export function SetupSection() {
   const [capabilities, setCapabilities] = useState<Capability[]>([])
   const [checks, setChecks] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
+    mountedRef.current = true
     Promise.all([
-      apiFetch('/api/installer/detect').then((r) => r.json()).then((d) => setCapabilities(d.capabilities ?? [])).catch(() => {}),
-      apiFetch('/api/installer/doctor').then((r) => r.json()).then((d) => setChecks(d.checks ?? [])).catch(() => {}),
-    ]).finally(() => setLoading(false))
+      apiFetch('/api/installer/detect')
+        .then((r) => r.json())
+        .then((d) => {
+          if (mountedRef.current) {
+            setCapabilities(d.capabilities ?? [])
+          }
+        })
+        .catch((err) => { console.warn('[OctoMonitor] setup.capabilities', err) }),
+      apiFetch('/api/installer/doctor')
+        .then((r) => r.json())
+        .then((d) => {
+          if (mountedRef.current) {
+            setChecks(d.checks ?? [])
+          }
+        })
+        .catch((err) => { console.warn('[OctoMonitor] setup.doctor', err) }),
+    ]).finally(() => {
+      if (mountedRef.current) {
+        setLoading(false)
+      }
+    })
+    return () => {
+      mountedRef.current = false
+    }
   }, [])
 
   return (

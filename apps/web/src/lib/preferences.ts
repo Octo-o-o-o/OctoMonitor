@@ -1,4 +1,5 @@
 import { allTools } from './constants'
+import { STORAGE_KEYS } from './storageKeys'
 import type { ToolKind } from './types'
 
 export type MonitorPeriod = '30m' | '1h' | '2h' | '4h' | '8h' | '24h'
@@ -40,7 +41,6 @@ interface StoredFrontendSettings extends Partial<FrontendSettings> {
   usageWindow?: 'live' | 'day' | 'week' | 'month' | 'all'
 }
 
-const STORAGE_KEY = 'octomonitor-settings'
 const SETTINGS_VERSION = 3
 const allSnapshotWindows: SnapshotWindow[] = ['day', 'week', 'month', 'all']
 
@@ -136,7 +136,7 @@ function freshDefaults(): FrontendSettings {
 
 export function loadFrontendSettings(): FrontendSettings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.settings)
     if (!raw) return freshDefaults()
 
     const parsed = JSON.parse(raw) as StoredFrontendSettings
@@ -162,5 +162,9 @@ export function saveFrontendSettings(settings: FrontendSettings) {
     version: SETTINGS_VERSION,
     ...settings,
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+  try {
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(payload))
+  } catch (err) {
+    console.warn('[OctoMonitor] storage.write.settings', err)
+  }
 }

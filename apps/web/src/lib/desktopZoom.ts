@@ -1,6 +1,6 @@
 import { isTauriEnvironment } from './runtimeEnvironment'
+import { STORAGE_KEYS } from './storageKeys'
 
-const STORAGE_KEY = 'octomonitor-desktop-zoom'
 const DEFAULT_ZOOM = 1
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 3
@@ -25,7 +25,7 @@ export function clampDesktopZoom(value: number): number {
 
 export function loadDesktopZoom(): number {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEYS.desktopZoom)
     if (!raw) return DEFAULT_ZOOM
     return clampDesktopZoom(Number(raw))
   } catch {
@@ -35,9 +35,9 @@ export function loadDesktopZoom(): number {
 
 export function saveDesktopZoom(value: number) {
   try {
-    localStorage.setItem(STORAGE_KEY, String(clampDesktopZoom(value)))
-  } catch {
-    // ignore storage failures
+    localStorage.setItem(STORAGE_KEYS.desktopZoom, String(clampDesktopZoom(value)))
+  } catch (err) {
+    console.warn('[OctoMonitor] storage.write.desktopZoom', err)
   }
 }
 

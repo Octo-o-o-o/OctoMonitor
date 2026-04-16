@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { DESKTOP_MENU_ACTION_EVENT } from './lib/desktopEvents'
 import { I18nProvider } from './lib/i18n'
 import { ThemeProvider } from './lib/theme'
 import type { BootstrapPayload } from './lib/types'
@@ -75,7 +76,7 @@ describe('App', () => {
     render(<I18nProvider><ThemeProvider><App /></ThemeProvider></I18nProvider>)
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('octomonitor:desktop-menu-action', {
+      window.dispatchEvent(new CustomEvent(DESKTOP_MENU_ACTION_EVENT, {
         detail: { action: 'open-settings' },
       }))
     })
@@ -87,7 +88,7 @@ describe('App', () => {
     render(<I18nProvider><ThemeProvider><App /></ThemeProvider></I18nProvider>)
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('octomonitor:desktop-menu-action', {
+      window.dispatchEvent(new CustomEvent(DESKTOP_MENU_ACTION_EVENT, {
         detail: { action: 'toggle-shortcuts' },
       }))
     })
