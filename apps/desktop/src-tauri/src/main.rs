@@ -5,7 +5,7 @@ use std::{
     env,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -54,6 +54,22 @@ struct SpawnResult {
     launch_error: Option<String>,
 }
 
+impl SpawnResult {
+    fn running(child: Child) -> Self {
+        Self {
+            child: Some(child),
+            launch_error: None,
+        }
+    }
+
+    fn failed(message: String) -> Self {
+        Self {
+            child: None,
+            launch_error: Some(message),
+        }
+    }
+}
+
 enum ChildStatus {
     Running,
     Missing,
@@ -67,12 +83,18 @@ fn dispatch_window_script(app: &AppHandle, script: &str) {
     }
 }
 
+fn to_json_or<T: Serialize>(value: &T, fallback: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| fallback.into())
+}
+
+fn custom_event_script<T: Serialize>(event_name: &str, detail: &T) -> String {
+    let event_name = to_json_or(&event_name, "\"unknown\"");
+    let detail = to_json_or(detail, "null");
+    format!("window.dispatchEvent(new CustomEvent({event_name}, {{ detail: {detail} }}));")
+}
+
 fn dispatch_custom_event<T: Serialize>(app: &AppHandle, event_name: &str, detail: &T) {
-    let event_name = serde_json::to_string(event_name).unwrap_or_else(|_| "\"unknown\"".into());
-    let detail = serde_json::to_string(detail).unwrap_or_else(|_| "null".into());
-    let script =
-        format!("window.dispatchEvent(new CustomEvent({event_name}, {{ detail: {detail} }}));");
-    dispatch_window_script(app, script.as_str());
+    dispatch_window_script(app, &custom_event_script(event_name, detail));
 }
 
 fn emit_menu_action(app: &AppHandle, action: &str) {
@@ -81,6 +103,17 @@ fn emit_menu_action(app: &AppHandle, action: &str) {
         DESKTOP_MENU_ACTION_EVENT,
         &serde_json::json!({ "action": action }),
     );
+}
+
+/// Build the script that seeds `window.__OCTOMONITOR_DESKTOP_BOOT__` and then
+/// dispatches the boot-status custom event so the web UI sees both the cached
+/// value and a fresh event notification.
+fn boot_issue_script(issue: &Option<DesktopBootIssue>) -> String {
+    let payload = to_json_or(issue, "null");
+    format!(
+        "window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload}; \
+         window.dispatchEvent(new CustomEvent('{DESKTOP_BOOT_EVENT}', {{ detail: {payload} }}));"
+    )
 }
 
 fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -220,7 +253,7 @@ fn new_server_command(program: &std::ffi::OsStr) -> Command {
 }
 
 fn spawn_server() -> SpawnResult {
-    // Try to find the pre-built server binary first
+    // Try to find the pre-built server binary first.
     if let Some(binary) = find_server_binary() {
         return match new_server_command(binary.as_os_str())
             .env("OCTOMONITOR_NO_OPEN", "1")
@@ -228,28 +261,24 @@ fn spawn_server() -> SpawnResult {
             .stderr(Stdio::null())
             .spawn()
         {
-            Ok(child) => SpawnResult {
-                child: Some(child),
-                launch_error: None,
-            },
-            Err(error) => SpawnResult {
-                child: None,
-                launch_error: Some(format!(
-                    "Desktop shell found `{}` but could not launch it: {error}",
-                    binary.display()
-                )),
-            },
+            Ok(child) => SpawnResult::running(child),
+            Err(error) => SpawnResult::failed(format!(
+                "Desktop shell found `{}` but could not launch it: {error}",
+                binary.display()
+            )),
         };
     }
 
-    // Debug-only fallback: use cargo run (requires source tree + toolchain)
+    // Debug-only fallback: use `cargo run` from the workspace root. This
+    // requires the source tree + toolchain, so it is never compiled into
+    // release builds.
     #[cfg(debug_assertions)]
     {
         let workspace_root = env::current_exe()
             .ok()
             .and_then(|exe| {
-                // Navigate from target/debug up to workspace root
-                exe.parent()?.parent()?.parent().map(|p| p.to_path_buf())
+                // Navigate from target/debug up to the workspace root.
+                exe.parent()?.parent()?.parent().map(Path::to_path_buf)
             })
             .unwrap_or_else(|| PathBuf::from("."));
 
@@ -261,29 +290,20 @@ fn spawn_server() -> SpawnResult {
             .stderr(Stdio::null())
             .spawn()
         {
-            Ok(child) => SpawnResult {
-                child: Some(child),
-                launch_error: None,
-            },
-            Err(error) => SpawnResult {
-                child: None,
-                launch_error: Some(format!(
-                    "Desktop shell could not run `cargo run -p octomonitor-server`: {error}"
-                )),
-            },
+            Ok(child) => SpawnResult::running(child),
+            Err(error) => SpawnResult::failed(format!(
+                "Desktop shell could not run `cargo run -p octomonitor-server`: {error}"
+            )),
         }
     }
 
     #[cfg(not(debug_assertions))]
     {
         eprintln!("octomonitor-server binary not found; server will not start");
-        SpawnResult {
-            child: None,
-            launch_error: Some(
-                "Bundled `octomonitor-server` binary was not found and no local server was started."
-                    .into(),
-            ),
-        }
+        SpawnResult::failed(
+            "Bundled `octomonitor-server` binary was not found and no local server was started."
+                .into(),
+        )
     }
 }
 
@@ -352,10 +372,7 @@ fn push_boot_issue(app: &AppHandle, issue: Option<DesktopBootIssue>) {
         }
     }
 
-    let payload = serde_json::to_string(&issue).unwrap_or_else(|_| "null".into());
-    let script = format!("window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload};");
-    dispatch_window_script(app, script.as_str());
-    dispatch_custom_event(app, DESKTOP_BOOT_EVENT, &issue);
+    dispatch_window_script(app, &boot_issue_script(&issue));
 }
 
 fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
@@ -409,17 +426,20 @@ fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
             }
 
             if !timeout_reported && Instant::now() >= deadline {
-                let issue = DesktopBootIssue {
-                    title: if launch_error.is_some() {
-                        "Desktop server unavailable".into()
-                    } else {
-                        "Local server did not become ready".into()
-                    },
-                    message: launch_error.as_deref().unwrap_or(
-                        "Desktop shell could not confirm that http://127.0.0.1:46321/api/health became ready within 8 seconds. OctoMonitor is still warming up in the background; if this banner persists, retry or start `cargo run -p octomonitor-server` manually.",
-                    ).into(),
+                let (title, message) = match launch_error.as_deref() {
+                    Some(err) => ("Desktop server unavailable", err.to_owned()),
+                    None => (
+                        "Local server did not become ready",
+                        "Desktop shell could not confirm that http://127.0.0.1:46321/api/health became ready within 8 seconds. OctoMonitor is still warming up in the background; if this banner persists, retry or start `cargo run -p octomonitor-server` manually.".to_owned(),
+                    ),
                 };
-                push_boot_issue(&app, Some(issue));
+                push_boot_issue(
+                    &app,
+                    Some(DesktopBootIssue {
+                        title: title.into(),
+                        message,
+                    }),
+                );
                 timeout_reported = true;
 
                 if matches!(inspect_server_process(&app), ChildStatus::Missing) {
@@ -467,7 +487,7 @@ fn main() {
     let shared_for_setup = shared_child.clone();
 
     tauri::Builder::default()
-        .menu(|app| build_app_menu(app))
+        .menu(build_app_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_APP_PREFERENCES => emit_menu_action(app, ACTION_OPEN_SETTINGS),
             MENU_VIEW_ZOOM_IN => emit_menu_action(app, ACTION_ZOOM_IN),
@@ -487,11 +507,7 @@ fn main() {
                 .app_handle()
                 .try_state::<DesktopBootState>()
                 .and_then(|state| state.0.lock().ok()?.clone());
-            let payload = serde_json::to_string(&issue).unwrap_or_else(|_| "null".into());
-            let script = format!(
-                "window.__OCTOMONITOR_DESKTOP_BOOT__ = {payload}; window.dispatchEvent(new CustomEvent('{DESKTOP_BOOT_EVENT}', {{ detail: {payload} }}));"
-            );
-            let _ = window.eval(script);
+            let _ = window.eval(boot_issue_script(&issue));
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {

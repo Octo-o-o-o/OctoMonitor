@@ -61,7 +61,7 @@ fn ensure_referenced_assets(dist_dir: &std::path::Path) {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.extension().is_some_and(|ext| ext == "html") {
+        if path.extension().is_none_or(|ext| ext != "html") {
             continue;
         }
         let Ok(contents) = fs::read_to_string(&path) else {

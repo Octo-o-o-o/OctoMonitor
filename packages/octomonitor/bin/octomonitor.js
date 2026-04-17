@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 const { execFileSync } = require("child_process");
-const os = require("os");
 
 const PLATFORMS = {
   "darwin-arm64": "octomonitor-darwin-arm64",
@@ -10,10 +9,11 @@ const PLATFORMS = {
   "win32-x64": "@clawbutler/octomonitor-win32-x64",
 };
 
-function getBinaryPath() {
-  const key = `${os.platform()}-${os.arch()}`;
+function resolveBinary() {
+  const { platform, arch } = process;
+  const key = `${platform}-${arch}`;
   const pkg = PLATFORMS[key];
-  const binName = os.platform() === "win32" ? "octomonitor-server.exe" : "octomonitor-server";
+
   if (!pkg) {
     console.error(
       `Unsupported platform: ${key}\nSupported: ${Object.keys(PLATFORMS).join(", ")}`
@@ -21,6 +21,7 @@ function getBinaryPath() {
     process.exit(1);
   }
 
+  const binName = platform === "win32" ? "octomonitor-server.exe" : "octomonitor-server";
   try {
     return require.resolve(`${pkg}/bin/${binName}`);
   } catch {
@@ -33,14 +34,14 @@ function getBinaryPath() {
   }
 }
 
-const bin = getBinaryPath();
-
 try {
-  execFileSync(bin, process.argv.slice(2), {
+  execFileSync(resolveBinary(), process.argv.slice(2), {
     stdio: "inherit",
     env: process.env,
   });
-} catch (e) {
-  if (e.status !== null) process.exit(e.status);
-  throw e;
+} catch (err) {
+  // execFileSync populates `status` with the child's exit code when it exits
+  // non-zero; other errors (ENOENT, EACCES, etc.) leave status nullish.
+  if (typeof err.status === "number") process.exit(err.status);
+  throw err;
 }
