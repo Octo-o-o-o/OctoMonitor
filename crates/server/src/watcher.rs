@@ -6,23 +6,25 @@ use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use crate::platform::home_dir;
 use crate::state::AppState;
 
+/// Resolve `var` as a path, falling back to `home/<fallback>`.
+fn env_path_or(home: &std::path::Path, vars: &[&str], fallback: &str) -> PathBuf {
+    for var in vars {
+        if let Ok(value) = std::env::var(var) {
+            return PathBuf::from(value);
+        }
+    }
+    home.join(fallback)
+}
+
 /// Directories to watch for each adapter, relative to home.
 fn watch_dirs() -> Vec<PathBuf> {
     let home = home_dir().unwrap_or_else(|| PathBuf::from("."));
 
-    let claude_base = std::env::var("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".claude"));
-    let codex_base = std::env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".codex"));
-    let openclaw_base = std::env::var("OPENCLAW_STATE_DIR")
-        .or_else(|_| std::env::var("OPENCLAW_HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".openclaw"));
-    let hermes_base = std::env::var("HERMES_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".hermes"));
+    let claude_base = env_path_or(&home, &["CLAUDE_CONFIG_DIR"], ".claude");
+    let codex_base = env_path_or(&home, &["CODEX_HOME"], ".codex");
+    let openclaw_base =
+        env_path_or(&home, &["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"], ".openclaw");
+    let hermes_base = env_path_or(&home, &["HERMES_HOME"], ".hermes");
 
     let mut dirs = vec![
         claude_base.join("projects"),

@@ -712,7 +712,7 @@ fn map_hermes_gateway_status(
         return (None, None);
     }
 
-    let instance_statuses = probe
+    let instance_statuses: Vec<(String, GatewayStatus)> = probe
         .instances
         .iter()
         .map(|instance| {
@@ -721,24 +721,22 @@ fn map_hermes_gateway_status(
                 hermes_instance_gateway_status(instance),
             )
         })
-        .collect::<Vec<_>>();
+        .collect();
 
-    let running_count = instance_statuses
-        .iter()
-        .filter(|(_, status)| matches!(status, GatewayStatus::Running))
-        .count();
-    let stopped_count = instance_statuses
-        .iter()
-        .filter(|(_, status)| matches!(status, GatewayStatus::Stopped))
-        .count();
-    let warning_count = instance_statuses
-        .iter()
-        .filter(|(_, status)| matches!(status, GatewayStatus::Warning))
-        .count();
+    let mut running = 0usize;
+    let mut stopped = 0usize;
+    let mut warning = 0usize;
+    for (_, status) in &instance_statuses {
+        match status {
+            GatewayStatus::Running => running += 1,
+            GatewayStatus::Stopped => stopped += 1,
+            GatewayStatus::Warning => warning += 1,
+        }
+    }
 
-    let status = if warning_count > 0 || (running_count > 0 && stopped_count > 0) {
+    let status = if warning > 0 || (running > 0 && stopped > 0) {
         GatewayStatus::Warning
-    } else if running_count > 0 {
+    } else if running > 0 {
         GatewayStatus::Running
     } else {
         GatewayStatus::Stopped
@@ -755,6 +753,37 @@ fn map_hermes_gateway_status(
     }
 
     (Some(status), (!detail.is_empty()).then_some(detail))
+}
+
+fn first_probe_error(probes: &[claude_adapter::CommandProbeResult]) -> Option<String> {
+    probes
+        .iter()
+        .find(|probe| !probe.success)
+        .and_then(|probe| probe.error.clone())
+}
+
+fn cli_auth_mode_label(cli_available: bool) -> &'static str {
+    if cli_available {
+        "configured"
+    } else {
+        "missing-cli"
+    }
+}
+
+fn cli_auth_mode(cli_available: bool) -> Option<String> {
+    Some(cli_auth_mode_label(cli_available).into())
+}
+
+fn gateway_auth_mode_label(gateway_ok: bool) -> &'static str {
+    if gateway_ok {
+        "gateway"
+    } else {
+        "sessions-scan"
+    }
+}
+
+fn gateway_auth_mode(gateway_ok: bool) -> Option<String> {
+    Some(gateway_auth_mode_label(gateway_ok).into())
 }
 
 fn collect_probe_scan_from_snapshots(
@@ -880,26 +909,10 @@ fn collect_probe_scan_from_snapshots(
         "sessions-scan+probe"
     };
 
-    let claude_error = claude_probe
-        .command_probes
-        .iter()
-        .find(|p| !p.success)
-        .and_then(|p| p.error.clone());
-    let codex_error = codex_probe
-        .command_probes
-        .iter()
-        .find(|p| !p.success)
-        .and_then(|p| p.error.clone());
-    let openclaw_error = openclaw_probe
-        .command_probes
-        .iter()
-        .find(|p| !p.success)
-        .and_then(|p| p.error.clone());
-    let hermes_error = hermes_probe
-        .command_probes
-        .iter()
-        .find(|p| !p.success)
-        .and_then(|p| p.error.clone());
+    let claude_error = first_probe_error(&claude_probe.command_probes);
+    let codex_error = first_probe_error(&codex_probe.command_probes);
+    let openclaw_error = first_probe_error(&openclaw_probe.command_probes);
+    let hermes_error = first_probe_error(&hermes_probe.command_probes);
 
     let hermes_mode = if hermes_probe.gateway_running {
         "gateway+sessions+probe"
@@ -1055,14 +1068,7 @@ fn build_run_from_claude_session(
         agent_name: None,
         agent_display_name: None,
         account_alias: Some("local-probe".into()),
-        auth_mode: Some(
-            if probe.cli_available {
-                "configured"
-            } else {
-                "missing-cli"
-            }
-            .into(),
-        ),
+        auth_mode: cli_auth_mode(probe.cli_available),
         auth_verified: probe.cli_available,
         session_id: Some(session.session_id.clone()),
         thread_id: None,
@@ -1169,14 +1175,7 @@ fn build_run_from_codex_session(
         agent_name: None,
         agent_display_name: None,
         account_alias: Some("local-probe".into()),
-        auth_mode: Some(
-            if probe.cli_available {
-                "configured"
-            } else {
-                "missing-cli"
-            }
-            .into(),
-        ),
+        auth_mode: cli_auth_mode(probe.cli_available),
         auth_verified: probe.cli_available,
         session_id: None,
         thread_id: Some(session.session_id.clone()),
@@ -1333,14 +1332,7 @@ fn build_run_from_openclaw_session(
         agent_name: Some(session.agent_name.clone()),
         agent_display_name: session.agent_display_name.clone(),
         account_alias: Some("local-probe".into()),
-        auth_mode: Some(
-            if probe.gateway_status_ok {
-                "gateway"
-            } else {
-                "sessions-scan"
-            }
-            .into(),
-        ),
+        auth_mode: gateway_auth_mode(probe.gateway_status_ok),
         auth_verified: probe.cli_available,
         session_id: None,
         thread_id: None,
@@ -1456,14 +1448,7 @@ fn build_run_from_hermes_session(
         agent_name: Some(session.profile_name.clone()),
         agent_display_name: session.display_name.clone(),
         account_alias: Some("local-probe".into()),
-        auth_mode: Some(
-            if instance_gw {
-                "gateway"
-            } else {
-                "sessions-scan"
-            }
-            .into(),
-        ),
+        auth_mode: gateway_auth_mode(instance_gw),
         auth_verified: probe.cli_available,
         session_id: Some(session.session_id.clone()),
         thread_id: None,
@@ -1566,7 +1551,7 @@ fn build_probe_placeholder_run(params: ProbeRunParams) -> RunRecord {
         source_mode: params.source_mode,
         project_name: params.project_name.into(),
         workspace_path: params.workspace_path,
-        workspace_short: params.workspace_short.into(),
+        workspace_short: params.workspace_short,
         model: None,
         provider: Some(params.provider.into()),
         agent_name: Some("local-probe".into()),
@@ -1620,11 +1605,7 @@ fn build_probe_run_from_claude(probe: &claude_adapter::ClaudeSnapshot) -> RunRec
             .unwrap_or_else(|| "~/.claude".into()),
         workspace_short: "~/.claude".into(),
         provider: "claude",
-        auth_mode: if probe.cli_available {
-            "configured"
-        } else {
-            "missing-cli"
-        },
+        auth_mode: cli_auth_mode_label(probe.cli_available),
         auth_verified: probe.cli_available,
         state: if probe.cli_available {
             RunState::Idle
@@ -1657,11 +1638,7 @@ fn build_probe_run_from_codex(probe: &codex_adapter::CodexSnapshot) -> RunRecord
             .unwrap_or_else(|| "~/.codex".into()),
         workspace_short: "~/.codex".into(),
         provider: "openai",
-        auth_mode: if probe.cli_available {
-            "configured"
-        } else {
-            "missing-cli"
-        },
+        auth_mode: cli_auth_mode_label(probe.cli_available),
         auth_verified: probe.cli_available,
         state: if probe.history_exists {
             RunState::Idle
@@ -1698,11 +1675,7 @@ fn build_probe_run_from_openclaw(probe: &openclaw_adapter::OpenClawSnapshot) -> 
             .unwrap_or_else(|| "~/.openclaw".into()),
         workspace_short: "~/.openclaw".into(),
         provider: "openclaw",
-        auth_mode: if probe.gateway_status_ok {
-            "gateway"
-        } else {
-            "sessions-scan"
-        },
+        auth_mode: gateway_auth_mode_label(probe.gateway_status_ok),
         auth_verified: probe.cli_available,
         state: if probe.gateway_status_ok || probe.sessions_dir_exists {
             RunState::Idle
@@ -1746,11 +1719,7 @@ fn build_probe_run_from_hermes(probe: &hermes_adapter::HermesSnapshot) -> RunRec
         workspace_path: resolved_home,
         workspace_short: short,
         provider: "hermes",
-        auth_mode: if probe.gateway_running {
-            "gateway"
-        } else {
-            "sessions-scan"
-        },
+        auth_mode: gateway_auth_mode_label(probe.gateway_running),
         auth_verified: probe.cli_available,
         state: if probe.gateway_running || !probe.instances.is_empty() {
             RunState::Idle
@@ -2009,6 +1978,43 @@ pub fn tool_key(tool: &ToolKind) -> &'static str {
         ToolKind::Hermes => "hermes",
     }
 }
+
+/// Resolve a Codex worktree cwd back to its canonical project root.
+///
+/// Codex creates git worktrees at `~/.codex/worktrees/{hash}/{name}`.
+/// The `.git` file inside such a worktree contains a `gitdir:` line
+/// pointing back to the main repo's `.git/worktrees/…` directory.
+/// We walk up from that gitdir to find the real project root.
+///
+/// Falls back to the original path on any failure.
+pub fn resolve_worktree_cwd(cwd: &str) -> String {
+    // Fast path: only attempt resolution for paths that look like Codex worktrees
+    if !cwd.contains("/.codex/worktrees/") && !cwd.contains("\\.codex\\worktrees\\") {
+        return cwd.to_string();
+    }
+
+    let dot_git = std::path::Path::new(cwd).join(".git");
+    // In a worktree, .git is a *file* (not a directory) containing "gitdir: …"
+    if dot_git.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&dot_git) {
+            if let Some(gitdir) = content.trim().strip_prefix("gitdir: ") {
+                let gitdir_path = std::path::Path::new(gitdir);
+                // gitdir points to e.g. /real/project/.git/worktrees/name
+                // Walk up to find the parent of `.git`
+                for ancestor in gitdir_path.ancestors() {
+                    if ancestor.file_name().is_some_and(|n| n == ".git") {
+                        if let Some(project_root) = ancestor.parent() {
+                            return project_root.to_string_lossy().to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cwd.to_string()
+}
+
+pub use crate::platform::shorten_path;
 
 #[cfg(test)]
 mod tests {
@@ -2698,40 +2704,3 @@ mod tests {
         assert!(result.contains("timed out"));
     }
 }
-
-/// Resolve a Codex worktree cwd back to its canonical project root.
-///
-/// Codex creates git worktrees at `~/.codex/worktrees/{hash}/{name}`.
-/// The `.git` file inside such a worktree contains a `gitdir:` line
-/// pointing back to the main repo's `.git/worktrees/…` directory.
-/// We walk up from that gitdir to find the real project root.
-///
-/// Falls back to the original path on any failure.
-pub fn resolve_worktree_cwd(cwd: &str) -> String {
-    // Fast path: only attempt resolution for paths that look like Codex worktrees
-    if !cwd.contains("/.codex/worktrees/") && !cwd.contains("\\.codex\\worktrees\\") {
-        return cwd.to_string();
-    }
-
-    let dot_git = std::path::Path::new(cwd).join(".git");
-    // In a worktree, .git is a *file* (not a directory) containing "gitdir: …"
-    if dot_git.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&dot_git) {
-            if let Some(gitdir) = content.trim().strip_prefix("gitdir: ") {
-                let gitdir_path = std::path::Path::new(gitdir);
-                // gitdir points to e.g. /real/project/.git/worktrees/name
-                // Walk up to find the parent of `.git`
-                for ancestor in gitdir_path.ancestors() {
-                    if ancestor.file_name().is_some_and(|n| n == ".git") {
-                        if let Some(project_root) = ancestor.parent() {
-                            return project_root.to_string_lossy().to_string();
-                        }
-                    }
-                }
-            }
-        }
-    }
-    cwd.to_string()
-}
-
-pub use crate::platform::shorten_path;

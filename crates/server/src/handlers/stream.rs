@@ -15,13 +15,7 @@ pub async fn stream(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 }
 
 async fn stream_socket(mut socket: WebSocket, state: AppState) {
-    let payload = state.bootstrap.read().await.clone();
-    let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
-    if socket
-        .send(Message::Text(msg.to_string().into()))
-        .await
-        .is_err()
-    {
+    if send_snapshot(&mut socket, &state).await.is_err() {
         return;
     }
 
@@ -34,15 +28,10 @@ async fn stream_socket(mut socket: WebSocket, state: AppState) {
                     Err(RecvError::Closed) => break,
                     Err(RecvError::Lagged(_)) | Ok(_) => {}
                 }
+                // Drain backlog so we only resend the latest snapshot.
                 while rx.try_recv().is_ok() {}
 
-                let payload = state.bootstrap.read().await.clone();
-                let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
-                if socket
-                    .send(Message::Text(msg.to_string().into()))
-                    .await
-                    .is_err()
-                {
+                if send_snapshot(&mut socket, &state).await.is_err() {
                     break;
                 }
             }
@@ -60,4 +49,10 @@ async fn stream_socket(mut socket: WebSocket, state: AppState) {
             }
         }
     }
+}
+
+async fn send_snapshot(socket: &mut WebSocket, state: &AppState) -> Result<(), axum::Error> {
+    let payload = state.bootstrap.read().await.clone();
+    let msg = serde_json::json!({"type": "snapshot.replace", "payload": payload});
+    socket.send(Message::Text(msg.to_string().into())).await
 }

@@ -137,26 +137,14 @@ fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
             Err(_) => continue,
         };
 
-        let timestamp = val
-            .get("timestamp")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let kind = val
-            .get("type")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
+        let timestamp = json_str(&val, "timestamp").to_string();
 
-        match kind {
+        match json_str(&val, "type") {
             "event_msg" => {
                 let Some(payload) = val.get("payload") else {
                     continue;
                 };
-                match payload
-                    .get("type")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default()
-                {
+                match json_str(payload, "type") {
                     "user_message" => {
                         flush_pending_output(&mut entries, &mut pending_output);
                         if let Some(text) = payload.get("message").and_then(|value| value.as_str())
@@ -186,15 +174,8 @@ fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
                 let Some(payload) = val.get("payload") else {
                     continue;
                 };
-                let payload_type = payload
-                    .get("type")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default();
-                let role = payload
-                    .get("role")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default();
-                if payload_type == "message" && role == "assistant" {
+                if json_str(payload, "type") == "message" && json_str(payload, "role") == "assistant"
+                {
                     if let Some(text) = payload
                         .get("content")
                         .and_then(|c| extract_string_or_text_blocks(c, &["output_text"]))
@@ -215,6 +196,14 @@ fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
     entries
 }
 
+/// Read `value[key]` as a string, defaulting to `""` when missing or non-string.
+fn json_str<'a>(value: &'a serde_json::Value, key: &str) -> &'a str {
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+}
+
 fn parse_claude_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
     let mut entries = Vec::new();
     let mut pending_output: Option<InspectEntry> = None;
@@ -225,17 +214,9 @@ fn parse_claude_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
             Err(_) => continue,
         };
 
-        let timestamp = val
-            .get("timestamp")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let record_type = val
-            .get("type")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
+        let timestamp = json_str(&val, "timestamp").to_string();
 
-        match record_type {
+        match json_str(&val, "type") {
             "user" => {
                 let Some(message) = val.get("message") else {
                     continue;
@@ -280,24 +261,16 @@ fn parse_openclaw_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
             Err(_) => continue,
         };
 
-        if val.get("type").and_then(|value| value.as_str()) != Some("message") {
+        if json_str(&val, "type") != "message" {
             continue;
         }
 
         let Some(message) = val.get("message") else {
             continue;
         };
-        let role = message
-            .get("role")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
-        let timestamp = val
-            .get("timestamp")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string();
+        let timestamp = json_str(&val, "timestamp").to_string();
 
-        match role {
+        match json_str(message, "role") {
             "user" => {
                 let Some(text) = extract_content_text(message) else {
                     continue;
