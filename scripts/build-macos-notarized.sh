@@ -2,34 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PRODUCT_NAME="$(ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-config = json.loads(Path(os.environ["ROOT_DIR"], "apps/desktop/src-tauri/tauri.conf.json").read_text())
-print(config["productName"])
-PY
-)"
-SIGNING_IDENTITY="$(ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-config = json.loads(Path(os.environ["ROOT_DIR"], "apps/desktop/src-tauri/tauri.conf.json").read_text())
-print(config["bundle"]["macOS"]["signingIdentity"])
-PY
-)"
+TAURI_CONF="$ROOT_DIR/apps/desktop/src-tauri/tauri.conf.json"
+
+PRODUCT_NAME="$(node -p "require('$TAURI_CONF').productName")"
+SIGNING_IDENTITY="$(node -p "require('$TAURI_CONF').bundle.macOS.signingIdentity")"
 VERSION="$(node -p "require('$ROOT_DIR/apps/desktop/package.json').version")"
 
 case "$(uname -m)" in
-  arm64)
-    BUNDLE_ARCH="aarch64"
-    ;;
-  x86_64)
-    BUNDLE_ARCH="x64"
-    ;;
-  *)
-    BUNDLE_ARCH="$(uname -m)"
-    ;;
+  arm64)  BUNDLE_ARCH="aarch64" ;;
+  x86_64) BUNDLE_ARCH="x64" ;;
+  *)      BUNDLE_ARCH="$(uname -m)" ;;
 esac
 
 APPLE_PASSWORD_VALUE="${APPLE_PASSWORD:-${APPLE_APP_SPECIFIC_PASSWORD:-}}"
@@ -56,7 +38,6 @@ APP_PATH="$ROOT_DIR/target/release/bundle/macos/$PRODUCT_NAME.app"
 ZIP_PATH="$ROOT_DIR/target/release/bundle/macos/$PRODUCT_NAME-notarize.zip"
 DMG_PATH="$ROOT_DIR/target/release/bundle/dmg/${PRODUCT_NAME}_${VERSION}_${BUNDLE_ARCH}.dmg"
 DMG_STAGE_DIR="$(mktemp -d "$ROOT_DIR/target/release/bundle/dmg/${PRODUCT_NAME}.stage.XXXXXX")"
-APP_EXEC_PATH=""
 
 cleanup() {
   rm -rf "$DMG_STAGE_DIR"
@@ -152,6 +133,7 @@ codesign_with_retry "$DMG_PATH"
 submit_with_retry "$DMG_PATH"
 staple_with_retry "$DMG_PATH"
 
+APP_EXEC_PATH=""
 for candidate in "$APP_PATH"/Contents/MacOS/*; do
   if [[ -f "$candidate" ]]; then
     APP_EXEC_PATH="$candidate"

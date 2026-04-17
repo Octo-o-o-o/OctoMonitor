@@ -11,29 +11,28 @@ PACKAGES=(
 for spec in "${PACKAGES[@]}"; do
   IFS=":" read -r pkg bin_name <<< "$spec"
   bin_path="${pkg}/bin/${bin_name}"
-  if [ ! -x "$bin_path" ]; then
-    if [ "${bin_name}" = "octomonitor-server.exe" ] && [ -f "$bin_path" ]; then
-      continue
-    fi
-    echo "Missing packaged binary: ${bin_path}"
-    echo "Build each platform package first, or use the GitHub release workflow to assemble cross-platform npm artifacts."
-    exit 1
+
+  if [[ -x "$bin_path" ]]; then
+    continue
   fi
+
+  # Windows binaries may lack the executable bit on non-Windows filesystems.
+  if [[ "$bin_name" == "octomonitor-server.exe" && -f "$bin_path" ]]; then
+    continue
+  fi
+
+  echo "Missing packaged binary: ${bin_path}"
+  echo "Build each platform package first, or use the GitHub release workflow to assemble cross-platform npm artifacts."
+  exit 1
 done
 
 for spec in "${PACKAGES[@]}"; do
   IFS=":" read -r pkg _ <<< "$spec"
   echo "==> Publishing ${pkg}..."
-  (
-    cd "$pkg"
-    npm publish --access public
-  )
+  ( cd "$pkg" && npm publish --access public )
 done
 
 echo "==> Publishing octomonitor (main package)..."
-(
-  cd packages/octomonitor
-  npm publish --access public
-)
+( cd packages/octomonitor && npm publish --access public )
 
 echo "Done! Users can now run: npx octomonitor"

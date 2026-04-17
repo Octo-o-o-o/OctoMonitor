@@ -26,7 +26,7 @@
 - `crates/companion`: pairing/session logic
 
 ## Current State
-- `cargo test --workspace` passes (18 tests)
+- `cargo test --workspace` passes (122 tests)
 - `pnpm --filter @octomonitor/web test --run` passes
 - `pnpm --filter @octomonitor/web build` passes
 - `pnpm test:a11y` passes (reports saved to `apps/web/test-results/`)

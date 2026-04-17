@@ -3,34 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DESKTOP_DIR="$ROOT_DIR/apps/desktop"
-PRODUCT_NAME="$(ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-config = json.loads(Path(os.environ["ROOT_DIR"], "apps/desktop/src-tauri/tauri.conf.json").read_text())
-print(config["productName"])
-PY
-)"
-SIGNING_IDENTITY="$(ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-config = json.loads(Path(os.environ["ROOT_DIR"], "apps/desktop/src-tauri/tauri.conf.json").read_text())
-print(config["bundle"]["macOS"]["signingIdentity"])
-PY
-)"
+TAURI_CONF="$ROOT_DIR/apps/desktop/src-tauri/tauri.conf.json"
+
+PRODUCT_NAME="$(node -p "require('$TAURI_CONF').productName")"
+SIGNING_IDENTITY="$(node -p "require('$TAURI_CONF').bundle.macOS.signingIdentity")"
 VERSION="$(node -p "require('$ROOT_DIR/apps/desktop/package.json').version")"
 
 case "$(uname -m)" in
-  arm64)
-    BUNDLE_ARCH="aarch64"
-    ;;
-  x86_64)
-    BUNDLE_ARCH="x64"
-    ;;
-  *)
-    BUNDLE_ARCH="$(uname -m)"
-    ;;
+  arm64)  BUNDLE_ARCH="aarch64" ;;
+  x86_64) BUNDLE_ARCH="x64" ;;
+  *)      BUNDLE_ARCH="$(uname -m)" ;;
 esac
 
 APP_PATH="$ROOT_DIR/target/release/bundle/macos/$PRODUCT_NAME.app"
