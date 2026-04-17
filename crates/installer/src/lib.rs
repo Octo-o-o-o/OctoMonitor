@@ -13,6 +13,40 @@ pub struct ToolCapability {
     pub notes: String,
 }
 
+struct ToolSpec {
+    name: &'static str,
+    label: &'static str,
+    mode: &'static str,
+    capability: &'static str,
+}
+
+const TOOLS: &[ToolSpec] = &[
+    ToolSpec {
+        name: "claude",
+        label: "Claude CLI",
+        mode: "statusline+hooks",
+        capability: "hook/statusline monitoring path available",
+    },
+    ToolSpec {
+        name: "codex",
+        label: "Codex CLI",
+        mode: "app-server+hooks",
+        capability: "app-server/hook monitoring path available",
+    },
+    ToolSpec {
+        name: "openclaw",
+        label: "OpenClaw CLI",
+        mode: "gateway+status",
+        capability: "gateway/status monitoring path available",
+    },
+    ToolSpec {
+        name: "hermes",
+        label: "Hermes Agent CLI (experimental)",
+        mode: "gateway+sessions",
+        capability: "gateway/sessions monitoring path available",
+    },
+];
+
 fn command_exists(name: &str) -> bool {
     let candidate = Path::new(name);
     if candidate.components().count() > 1 {
@@ -24,8 +58,7 @@ fn command_exists(name: &str) -> bool {
     };
 
     for dir in env::split_paths(&paths) {
-        let direct = dir.join(name);
-        if is_executable(&direct) {
+        if is_executable(&dir.join(name)) {
             return true;
         }
 
@@ -71,65 +104,36 @@ fn windows_path_exts() -> Vec<String> {
         .collect()
 }
 
-fn tool_mode(tool: &str) -> &'static str {
-    match tool {
-        "claude" => "statusline+hooks",
-        "codex" => "app-server+hooks",
-        "openclaw" => "gateway+status",
-        "hermes" => "gateway+sessions",
-        _ => "custom",
-    }
-}
-
 pub fn detect_tools() -> Vec<ToolCapability> {
-    [
-        (
-            "claude",
-            "Claude CLI",
-            "hook/statusline monitoring path available",
-        ),
-        (
-            "codex",
-            "Codex CLI",
-            "app-server/hook monitoring path available",
-        ),
-        (
-            "openclaw",
-            "OpenClaw CLI",
-            "gateway/status monitoring path available",
-        ),
-        (
-            "hermes",
-            "Hermes Agent CLI (experimental)",
-            "gateway/sessions monitoring path available",
-        ),
-    ]
-    .into_iter()
-    .map(|(name, label, capability)| {
-        let detected = command_exists(name);
-        ToolCapability {
-            tool: name,
-            detected,
-            mode: tool_mode(name),
-            notes: if detected {
-                format!("{label} detected; {capability}")
-            } else {
-                format!("{label} not found on PATH")
-            },
-        }
-    })
-    .collect()
+    TOOLS
+        .iter()
+        .map(|spec| {
+            let detected = command_exists(spec.name);
+            ToolCapability {
+                tool: spec.name,
+                detected,
+                mode: spec.mode,
+                notes: if detected {
+                    format!("{} detected; {}", spec.label, spec.capability)
+                } else {
+                    format!("{} not found on PATH", spec.label)
+                },
+            }
+        })
+        .collect()
 }
 
 pub fn doctor_report() -> Vec<String> {
     let tools = detect_tools();
     let detected = tools.iter().filter(|tool| tool.detected).count();
+    let total = tools.len();
+
     let mut checks = vec![
         "No database configured — expected for local-first mode".to_string(),
         "Companion access disabled by default until config changes".to_string(),
         "Environment & Doctor is read-only — no tool config files are modified automatically"
             .to_string(),
-        format!("Detected {detected}/4 monitored CLIs on current PATH"),
+        format!("Detected {detected}/{total} monitored CLIs on current PATH"),
     ];
     checks.extend(tools.into_iter().map(|tool| {
         if tool.detected {

@@ -13,9 +13,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use chrono::{DateTime, Utc};
 use octomonitor_companion::{
-    claim_pairing, pairing_matches, session_is_expired, touch_viewer_session, PairingRecord,
+    claim_pairing, pairing_is_expired, pairing_matches, session_is_expired, touch_viewer_session,
 };
 use octomonitor_core::{
     AppConfig, AttentionItem, BootstrapPayload, CommitRecord, CompletionRecord, IdentityState,
@@ -512,12 +511,6 @@ fn build_viewer_cookie(secret: &str) -> String {
         "{REMOTE_COOKIE_NAME}={secret}; HttpOnly; Path=/; SameSite=Lax; Max-Age={}",
         30 * 24 * 60 * 60
     )
-}
-
-fn pairing_is_expired(record: &PairingRecord) -> bool {
-    DateTime::parse_from_rfc3339(&record.expires_at)
-        .map(|value| value.with_timezone(&Utc) < Utc::now())
-        .unwrap_or(true)
 }
 
 #[cfg(test)]

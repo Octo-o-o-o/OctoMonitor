@@ -25,13 +25,24 @@ pub struct ViewerSession {
     pub expires_at: String,
 }
 
+const PAIRING_TTL: Duration = Duration::minutes(10);
+const SESSION_TTL: Duration = Duration::days(30);
+const PAIRING_CODE_LEN: usize = 8;
+
+/// Returns `true` when `timestamp` is missing, unparseable, or in the past.
+fn is_past(timestamp: &str) -> bool {
+    DateTime::parse_from_rfc3339(timestamp)
+        .map(|dt| dt.with_timezone(&Utc) < Utc::now())
+        .unwrap_or(true)
+}
+
 pub fn request_pairing(label: Option<&str>) -> PairingRecord {
     let now = Utc::now();
     let token = Uuid::new_v4().to_string();
     let code: String = token
         .chars()
         .filter(|ch| *ch != '-')
-        .take(8)
+        .take(PAIRING_CODE_LEN)
         .flat_map(char::to_uppercase)
         .collect();
 
@@ -40,24 +51,15 @@ pub fn request_pairing(label: Option<&str>) -> PairingRecord {
         token,
         code,
         requested_at: now.to_rfc3339(),
-        expires_at: (now + Duration::minutes(10)).to_rfc3339(),
+        expires_at: (now + PAIRING_TTL).to_rfc3339(),
         approved: false,
         claimed_at: None,
         label: label.unwrap_or("New companion device").to_string(),
     }
 }
 
-pub fn approve_pairing(record: &PairingRecord) -> Option<PairingRecord> {
-    let expires_at = DateTime::parse_from_rfc3339(&record.expires_at)
-        .ok()?
-        .with_timezone(&Utc);
-    if expires_at < Utc::now() {
-        return None;
-    }
-    Some(PairingRecord {
-        approved: true,
-        ..record.clone()
-    })
+pub fn pairing_is_expired(record: &PairingRecord) -> bool {
+    is_past(&record.expires_at)
 }
 
 pub fn pairing_matches(record: &PairingRecord, input: &str) -> bool {
@@ -70,10 +72,7 @@ pub fn claim_pairing(
     record: &PairingRecord,
     device_label: Option<&str>,
 ) -> Option<(PairingRecord, ViewerSession)> {
-    let expires_at = DateTime::parse_from_rfc3339(&record.expires_at)
-        .ok()?
-        .with_timezone(&Utc);
-    if expires_at < Utc::now() || record.claimed_at.is_some() {
+    if pairing_is_expired(record) || record.claimed_at.is_some() {
         return None;
     }
 
@@ -84,25 +83,24 @@ pub fn claim_pairing(
         claimed_at: Some(paired_at.clone()),
         ..record.clone()
     };
+    let label = device_label
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or(&record.label)
+        .to_string();
     let session = ViewerSession {
         id: Uuid::new_v4().to_string(),
         secret: Uuid::new_v4().to_string(),
-        label: device_label
-            .filter(|l| !l.trim().is_empty())
-            .unwrap_or(&record.label)
-            .to_string(),
+        label,
         last_seen_at: Some(paired_at.clone()),
         paired_at,
-        expires_at: (now + Duration::days(30)).to_rfc3339(),
+        expires_at: (now + SESSION_TTL).to_rfc3339(),
     };
 
     Some((updated, session))
 }
 
 pub fn session_is_expired(session: &ViewerSession) -> bool {
-    DateTime::parse_from_rfc3339(&session.expires_at)
-        .map(|dt| dt < Utc::now())
-        .unwrap_or(true)
+    is_past(&session.expires_at)
 }
 
 pub fn touch_viewer_session(session: &ViewerSession) -> ViewerSession {
@@ -115,14 +113,16 @@ pub fn touch_viewer_session(session: &ViewerSession) -> ViewerSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn request_generates_token() {
         let record = request_pairing(None);
         assert!(!record.token.is_empty());
-        assert_eq!(record.code.len(), 8);
+        assert_eq!(record.code.len(), PAIRING_CODE_LEN);
     }
+
     #[test]
-    fn expired_pairing_cannot_be_approved() {
+    fn expired_pairing_cannot_be_claimed() {
         let record = PairingRecord {
             id: "id".into(),
             token: "t".into(),
@@ -133,7 +133,8 @@ mod tests {
             claimed_at: None,
             label: "x".into(),
         };
-        assert!(approve_pairing(&record).is_none());
+        assert!(pairing_is_expired(&record));
+        assert!(claim_pairing(&record, None).is_none());
     }
 
     #[test]
