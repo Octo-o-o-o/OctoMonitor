@@ -18,6 +18,16 @@ export const periodToMs: Record<MonitorPeriod, number> = {
   '24h': 24 * 60 * 60_000,
 }
 
+/** Full-word labels for the monitor period presets (e.g. "1 hour"). */
+export const monitorPeriodLongLabels: Record<MonitorPeriod, string> = {
+  '30m': '30 min',
+  '1h': '1 hour',
+  '2h': '2 hours',
+  '4h': '4 hours',
+  '8h': '8 hours',
+  '24h': '24 hours',
+}
+
 function sortRunsForMonitor(runs: RunRecord[]): RunRecord[] {
   const order: Record<string, number> = { active: 0, waitingApproval: 1 }
   return [...runs].sort((a, b) => {

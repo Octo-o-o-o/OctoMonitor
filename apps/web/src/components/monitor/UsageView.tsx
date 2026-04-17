@@ -13,8 +13,7 @@ import { UsageSkeleton } from './Skeleton'
 import type { ToolKind, UsageHistoryPayload } from '../../lib/types'
 import { DateRangePicker } from './DateRangePicker'
 
-const sourceOrder: ToolKind[] = ['claude', 'codex', 'openClaw', 'hermes']
-import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
+import { allTools, sourceLabelsUpper as sourceLabels } from '../../lib/constants'
 
 function accentClass(tool: ToolKind): string {
   if (tool === 'openClaw') return 'openclaw'
@@ -129,7 +128,7 @@ export function UsageView() {
       tagMap[tool][tag].cost += usage.costUsd ?? 0
     }
 
-    for (const tool of sourceOrder) {
+    for (const tool of allTools) {
       const entries = tagMap[tool] ?? {}
       const items = Object.entries(entries)
         .map(([tag, val]) => ({ tag, tokens: val.tokens, cost: val.cost }))
@@ -139,7 +138,7 @@ export function UsageView() {
       map[tool].totalCost = items.reduce((sum, item) => sum + item.cost, 0)
     }
 
-    return sourceOrder.map((tool) => map[tool])
+    return allTools.map((tool) => map[tool])
   }, [agentDisplayFormat, runUsageSlices])
 
   const totals = useMemo(() => {

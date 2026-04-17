@@ -1,8 +1,8 @@
 import type { SnapshotWindow } from '../../store/monitorStore'
-import { useI18n } from '../../lib/i18n'
+import { useI18n, type I18nKey } from '../../lib/i18n'
 
 const windows: SnapshotWindow[] = ['day', 'week', 'month', 'all']
-const labelKeys: Record<SnapshotWindow, 'stat.day' | 'stat.week' | 'stat.month' | 'stat.all'> = {
+const labelKeys: Record<SnapshotWindow, I18nKey> = {
   day: 'stat.day',
   week: 'stat.week',
   month: 'stat.month',

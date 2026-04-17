@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react'
 import { useMonitorStore, type AgentDisplayFormat } from '../../store/monitorStore'
 import { useI18n } from '../../lib/i18n'
 import { stateLabelKeys } from '../../lib/i18nMaps'
-import { formatTokens, formatDuration, formatLastUpdated, formatAgentTag, getGroupKey } from '../../lib/format'
-import { buildVisiblePanels, buildVisibleRunsBySource, summarizeRunsByState } from '../../lib/monitor'
+import { formatTokens, formatDuration, formatLastUpdated, formatAgentHandle, formatAgentTag, getGroupKey } from '../../lib/format'
+import { buildVisiblePanels, buildVisibleRunsBySource, monitorPeriodLongLabels, summarizeRunsByState } from '../../lib/monitor'
 import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
 import { AttentionBanner } from './AttentionBanner'
 import { MonitorSkeleton } from './Skeleton'
@@ -327,13 +327,7 @@ function formatCronAgent(
   nameMap: Map<string, string>,
 ): string | undefined {
   if (!cron.agentId) return undefined
-  const id = cron.agentId
-  const name = cron.agentDisplayName ?? nameMap.get(id)
-  switch (format) {
-    case 'name': return name ? `@${name}` : `@${id}`
-    case 'id:name': return name ? `@${id}:${name}` : `@${id}`
-    default: return `@${id}`
-  }
+  return formatAgentHandle(cron.agentId, cron.agentDisplayName ?? nameMap.get(cron.agentId), format)
 }
 
 function CronList({ crons }: { crons: PendingCron[] }) {
@@ -484,7 +478,7 @@ function SourceColumn({
         {grouped.done.length > 0 && (
           <div className="done-divider">
             <span className="done-divider-label">
-              {t('monitor.doneIn').replace('{period}', periodDisplayLabels[monitorPeriod] ?? monitorPeriod)}
+              {t('monitor.doneIn').replace('{period}', monitorPeriodLongLabels[monitorPeriod] ?? monitorPeriod)}
             </span>
           </div>
         )}
@@ -521,11 +515,6 @@ function MobileSourceTabs({
       ))}
     </div>
   )
-}
-
-const periodDisplayLabels: Record<string, string> = {
-  '30m': '30 min', '1h': '1 hour', '2h': '2 hours',
-  '4h': '4 hours', '8h': '8 hours', '24h': '24 hours',
 }
 
 export function MonitorView() {

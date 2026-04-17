@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../../lib/i18n'
+import { endOfDay, startOfDay } from '../../lib/dateRange'
 
 export interface DateRange {
   from: Date
@@ -18,18 +19,6 @@ const PRESET_DAYS: Record<FixedPresetKey, number> = {
   '30d': 30,
   '90d': 90,
   '180d': 180,
-}
-
-function startOfDay(d: Date): Date {
-  const r = new Date(d)
-  r.setHours(0, 0, 0, 0)
-  return r
-}
-
-function endOfDay(d: Date): Date {
-  const r = new Date(d)
-  r.setHours(23, 59, 59, 999)
-  return r
 }
 
 function isSameDay(a: Date, b: Date): boolean {

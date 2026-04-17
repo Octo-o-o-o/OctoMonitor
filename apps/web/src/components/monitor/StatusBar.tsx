@@ -1,5 +1,5 @@
 import { useMonitorStore, type ActiveTab, type MonitorPeriod } from '../../store/monitorStore'
-import { useI18n, type Locale } from '../../lib/i18n'
+import { useI18n } from '../../lib/i18n'
 import { buildUsageDateRange } from '../../lib/dateRange'
 import { formatTokens } from '../../lib/format'
 import { buildMonitorStateStats, periodToMs } from '../../lib/monitor'
@@ -243,7 +243,7 @@ export function StatusBar({ runtimeMode, wsConnected }: { runtimeMode: RuntimeMo
           <div className="toolbar-actions">
             <button
               className="toolbar-btn"
-              onClick={() => setLocale(locale === 'en' ? 'zh' : 'en' as Locale)}
+              onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}
               title={t('settings.language')}
               type="button"
             >

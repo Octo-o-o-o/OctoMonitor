@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react'
 import { STORAGE_KEYS } from './storageKeys'
 
-export type ThemeId = 'dark' | 'light' | 'eink' | 'kindle-light' | 'kindle-dark' | string
+export type BuiltinThemeId = 'dark' | 'light' | 'eink' | 'kindle-light' | 'kindle-dark'
+export type ThemeId = BuiltinThemeId | (string & {})
 
 /** Ordered list of built-in themes for cycling */
 export const builtinThemeOrder: ThemeId[] = ['dark', 'light', 'eink', 'kindle-light', 'kindle-dark']

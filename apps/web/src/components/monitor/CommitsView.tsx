@@ -47,10 +47,6 @@ function formatShare(score: number) {
   return `${Math.round(score * 100)}%`
 }
 
-function getLinkedRun(runsById: Map<string, RunRecord>, link: CommitAttributionLink): RunRecord | undefined {
-  return runsById.get(link.runId)
-}
-
 function safeLinks(commit: CommitRecord): CommitAttributionLink[] {
   return Array.isArray(commit.links) ? commit.links : []
 }
@@ -449,7 +445,7 @@ export const CommitsView = memo(function CommitsView() {
                                 </span>
                               </div>
                               {links.map((link) => {
-                                const linkedRun = getLinkedRun(runsById, link)
+                                const linkedRun = runsById.get(link.runId)
                                 const linkWorktree = linkedRun?.vcs?.worktreeName ?? linkedRun?.workspaceShort
 
                                 return (

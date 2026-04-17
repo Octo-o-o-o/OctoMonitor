@@ -1,5 +1,5 @@
 import { useMonitorStore, type FontSize, type UiDensity } from '../../../store/monitorStore'
-import { useI18n, type Locale } from '../../../lib/i18n'
+import { useI18n } from '../../../lib/i18n'
 import { fontSizeLabelKeys, uiDensityLabelKeys } from '../../../lib/i18nMaps'
 import { useTheme, builtinThemeOrder, builtinThemeIcons, builtinThemeLabels } from '../../../lib/theme'
 
@@ -65,13 +65,13 @@ export function AppearanceSection() {
           <div className="settings-grid-2">
             <button
               className={`settings-option ${locale === 'en' ? 'active' : ''}`}
-              onClick={() => setLocale('en' as Locale)}
+              onClick={() => setLocale('en')}
             >
               English
             </button>
             <button
               className={`settings-option ${locale === 'zh' ? 'active' : ''}`}
-              onClick={() => setLocale('zh' as Locale)}
+              onClick={() => setLocale('zh')}
             >
               {'\u4E2D\u6587'}
             </button>

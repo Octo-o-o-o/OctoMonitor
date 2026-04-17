@@ -44,15 +44,21 @@ export function formatLastUpdated(iso: string): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${time}`
 }
 
-export function formatAgentTag(run: RunRecord, format: AgentDisplayFormat): string {
-  if (!run.agentName) return run.workspaceShort
-  const id = run.agentName
-  const name = run.agentDisplayName
+export function formatAgentHandle(
+  id: string,
+  name: string | null | undefined,
+  format: AgentDisplayFormat,
+): string {
   switch (format) {
     case 'name': return name ? `@${name}` : `@${id}`
     case 'id:name': return name ? `@${id}:${name}` : `@${id}`
     default: return `@${id}`
   }
+}
+
+export function formatAgentTag(run: RunRecord, format: AgentDisplayFormat): string {
+  if (!run.agentName) return run.workspaceShort
+  return formatAgentHandle(run.agentName, run.agentDisplayName, format)
 }
 
 export function getGroupKey(run: RunRecord, agentDisplayFormat: AgentDisplayFormat): string {

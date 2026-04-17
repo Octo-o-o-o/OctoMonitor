@@ -16,6 +16,7 @@ import type { CommitHistoryPayload, CommitRecord, RunRecord, UsageBucket, UsageH
 import { HeatmapSkeleton } from './Skeleton'
 import { buildUsageBucketIndex, intervalOverlapMs, sliceRunUsage } from '../../lib/usage'
 import { buildDailySummary, type DailySummaryData } from '../../lib/dailySummary'
+import { parseMs } from '../../lib/dateRange'
 
 const scopeOrder: HeatmapScope[] = ['week', 'month', 'total']
 const metricOrder: HeatmapMetric[] = ['input', 'token', 'commit']
@@ -44,11 +45,6 @@ const surfaceHintKeys: Record<HeatmapScope, I18nKey> = {
 type ScopeCache = {
   usage?: UsageHistoryPayload
   commits?: CommitHistoryPayload
-}
-
-function parseMs(value: string): number | undefined {
-  const ms = Date.parse(value)
-  return Number.isFinite(ms) ? ms : undefined
 }
 
 function filterRunsForRange(runs: RunRecord[], fromMs: number, toMs: number): RunRecord[] {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMonitorStore, selectSelectedRun } from '../store/monitorStore'
 import { useI18n } from '../lib/i18n'
 import { stateLabelKeys } from '../lib/i18nMaps'
@@ -33,7 +33,6 @@ export function InspectDrawer() {
   const usageBuckets = useMonitorStore((s) => s.data?.usageBuckets)
   const selectRun = useMonitorStore((s) => s.selectRun)
   const { t } = useI18n()
-  const panelRef = useRef<HTMLDivElement>(null)
   const [entries, setEntries] = useState<InspectEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const runtimeMode = getRuntimeMode()
@@ -91,7 +90,7 @@ export function InspectDrawer() {
     <div className="inspect-overlay" onClick={(e) => {
       if (e.target === e.currentTarget) selectRun(undefined)
     }}>
-      <div className="inspect-panel" ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="inspect-title">
+      <div className="inspect-panel" role="dialog" aria-modal="true" aria-labelledby="inspect-title">
         <div className="inspect-header">
           <div className="inspect-title-row">
             <div className="inspect-title-left">

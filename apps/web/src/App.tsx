@@ -61,18 +61,18 @@ function useWebSocket(
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   useEffect(() => {
-    const state = { socket: null as WebSocket | null, unmounted: false }
     if (!enabled) {
       setConnected(false)
-      return () => {
-        state.unmounted = true
-      }
+      return
     }
 
+    let unmounted = false
+    let socket: WebSocket | null = null
+
     function connect() {
-      if (state.unmounted) return
+      if (unmounted) return
       const ws = new WebSocket(buildWsUrl('/api/stream'))
-      state.socket = ws
+      socket = ws
 
       ws.onopen = () => {
         retryRef.current = 0
@@ -90,7 +90,7 @@ function useWebSocket(
       ws.onclose = () => {
         setConnected(false)
         onStatusChange(false)
-        if (state.unmounted) return
+        if (unmounted) return
         const delay = Math.min(1000 * 2 ** retryRef.current, 30_000)
         retryRef.current++
         timerRef.current = setTimeout(connect, delay)
@@ -102,9 +102,9 @@ function useWebSocket(
 
     connect()
     return () => {
-      state.unmounted = true
+      unmounted = true
       clearTimeout(timerRef.current)
-      state.socket?.close()
+      socket?.close()
     }
   }, [enabled, onMessage, onStatusChange])
 

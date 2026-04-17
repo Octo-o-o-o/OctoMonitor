@@ -2,12 +2,9 @@ import { useMonitorStore, type AgentDisplayFormat, type MonitorPeriod, type Colu
 import { useI18n } from '../../../lib/i18n'
 import { agentDisplayLabelKeys } from '../../../lib/i18nMaps'
 import { sourceLabels } from '../../../lib/constants'
+import { monitorPeriodLongLabels } from '../../../lib/monitor'
 
 const periods: MonitorPeriod[] = ['30m', '1h', '2h', '4h', '8h', '24h']
-const periodLabels: Record<MonitorPeriod, string> = {
-  '30m': '30 min', '1h': '1 hour', '2h': '2 hours',
-  '4h': '4 hours', '8h': '8 hours', '24h': '24 hours',
-}
 const columnLayouts: ColumnLayout[] = ['fixed', 'adaptive']
 const columnLayoutLabels: Record<ColumnLayout, string> = {
   fixed: 'Fixed (Equal)', adaptive: 'Adaptive',
@@ -44,7 +41,7 @@ export function MonitorSection() {
                 className={`settings-option ${monitorPeriod === p ? 'active' : ''}`}
                 onClick={() => updateSettings({ monitorPeriod: p })}
               >
-                {periodLabels[p]}
+                {monitorPeriodLongLabels[p]}
               </button>
             ))}
           </div>
