@@ -8,8 +8,9 @@ use std::{
 };
 
 pub use octomonitor_adapter_common::{
-    mask_value, probe_file, read_jsonl_delta, resolve_home_dir, run_command_probe,
-    AdapterDescriptor, CommandProbeResult, FileProbeResult, JsonlCursor,
+    capitalize, file_signature, format_cron_expr, mask_value, probe_file, read_jsonl_delta,
+    resolve_env_or_home, run_command_probe, AdapterDescriptor, CommandProbeResult, FileProbeResult,
+    JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -107,11 +108,7 @@ struct CachedSessionsFile {
 // ---------------------------------------------------------------------------
 
 fn hermes_root() -> PathBuf {
-    std::env::var("HERMES_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| resolve_home_dir(".hermes"))
+    resolve_env_or_home(&["HERMES_HOME"], ".hermes")
 }
 
 /// Discover all Hermes instances: default + profiles.
@@ -171,8 +168,7 @@ fn check_gateway_status(home: &Path) -> (bool, Option<String>, Vec<String>) {
     let pid_alive = fs::read_to_string(&pid_file)
         .ok()
         .and_then(|s| s.trim().parse::<u32>().ok())
-        .map(|pid| is_process_alive(pid))
-        .unwrap_or(false);
+        .is_some_and(is_process_alive);
 
     let running =
         pid_alive && !matches!(state.as_deref(), Some("stopped") | Some("startup_failed"));
@@ -222,14 +218,6 @@ fn derive_origin(entry: &serde_json::Value) -> (Option<String>, Option<String>) 
     };
 
     (label, provider)
-}
-
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
 }
 
 fn parse_sessions_json(
@@ -331,11 +319,6 @@ fn parse_sessions_json(
     }
 
     Some(result)
-}
-
-fn file_signature(path: &Path) -> Option<(u64, Option<SystemTime>)> {
-    let metadata = fs::metadata(path).ok()?;
-    Some((metadata.len(), metadata.modified().ok()))
 }
 
 fn load_cached_sessions(
@@ -459,84 +442,50 @@ fn cron_to_human(schedule: &serde_json::Value) -> String {
     }
 }
 
-fn format_cron_expr(expr: &str, tz: &str) -> String {
-    let parts: Vec<&str> = expr.split_whitespace().collect();
-    if parts.len() < 5 {
-        return format!("{} ({})", expr, tz);
-    }
-    let (min, hour, _dom, _mon, dow) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
-
-    let time_str = if hour != "*" && min != "*" {
-        format!("{:0>2}:{:0>2}", hour, min)
-    } else {
-        return format!("{} ({})", expr, tz);
+fn scan_cron_jobs(home: &Path, profile_name: &str) -> Vec<HermesCronJob> {
+    let Ok(contents) = fs::read_to_string(home.join("cron").join("jobs.json")) else {
+        return vec![];
+    };
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return vec![];
+    };
+    let Some(jobs) = val.get("jobs").and_then(|j| j.as_array()) else {
+        return vec![];
     };
 
-    if dow == "*" {
-        return format!("Daily {time_str}");
-    }
+    jobs.iter()
+        .filter_map(|j| {
+            let id = j.get("id")?.as_str()?.to_string();
+            let name = j.get("name")?.as_str()?.to_string();
+            let enabled = j.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    let dow_str: String = dow
-        .split(',')
-        .map(|d| match d {
-            "0" => "Sun",
-            "1" => "Mon",
-            "2" => "Tue",
-            "3" => "Wed",
-            "4" => "Thu",
-            "5" => "Fri",
-            "6" => "Sat",
-            other => other,
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!("{dow_str} {time_str}")
-}
+            let schedule = j.get("schedule")?;
+            let schedule_human = cron_to_human(schedule);
 
-fn scan_cron_jobs(home: &Path, profile_name: &str) -> Vec<HermesCronJob> {
-    scan_cron_jobs_inner(home, profile_name).unwrap_or_default()
-}
+            let expr = schedule
+                .get("cron")
+                .and_then(|v| v.as_str())
+                .or_else(|| j.get("schedule_display").and_then(|v| v.as_str()))
+                .or_else(|| schedule.get("kind").and_then(|v| v.as_str()))
+                .unwrap_or("unknown")
+                .to_string();
+            let tz = schedule
+                .get("timezone")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UTC")
+                .to_string();
 
-fn scan_cron_jobs_inner(home: &Path, profile_name: &str) -> Option<Vec<HermesCronJob>> {
-    let contents = fs::read_to_string(home.join("cron").join("jobs.json")).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
-    let jobs = val.get("jobs").and_then(|j| j.as_array())?;
-
-    Some(
-        jobs.iter()
-            .filter_map(|j| {
-                let id = j.get("id")?.as_str()?.to_string();
-                let name = j.get("name")?.as_str()?.to_string();
-                let enabled = j.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-
-                let schedule = j.get("schedule")?;
-                let schedule_human = cron_to_human(schedule);
-
-                let expr = schedule
-                    .get("cron")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| j.get("schedule_display").and_then(|v| v.as_str()))
-                    .or_else(|| schedule.get("kind").and_then(|v| v.as_str()))
-                    .unwrap_or("unknown")
-                    .to_string();
-                let tz = schedule
-                    .get("timezone")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("UTC")
-                    .to_string();
-
-                Some(HermesCronJob {
-                    id,
-                    name,
-                    enabled,
-                    profile_name: profile_name.to_string(),
-                    schedule_expr: expr,
-                    schedule_tz: tz,
-                    schedule_human,
-                })
+            Some(HermesCronJob {
+                id,
+                name,
+                enabled,
+                profile_name: profile_name.to_string(),
+                schedule_expr: expr,
+                schedule_tz: tz,
+                schedule_human,
             })
-            .collect(),
-    )
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

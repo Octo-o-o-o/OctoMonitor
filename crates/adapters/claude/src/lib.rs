@@ -2,13 +2,14 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    env, fs,
+    fs,
     path::{Path, PathBuf},
 };
 
 pub use octomonitor_adapter_common::{
-    mask_value, probe_file, read_jsonl_delta, resolve_home_dir, run_command_probe,
-    AdapterDescriptor, CommandProbeResult, FileProbeResult, JsonlCursor,
+    latest_file_name, mask_value, probe_file, read_jsonl_delta, resolve_env_or_home,
+    run_command_probe, truncate_chars, AdapterDescriptor, CommandProbeResult, FileProbeResult,
+    JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -115,9 +116,7 @@ fn mask_secret(value: &str) -> String {
 }
 
 fn claude_config_dir() -> PathBuf {
-    env::var("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| resolve_home_dir(".claude"))
+    resolve_env_or_home(&["CLAUDE_CONFIG_DIR"], ".claude")
 }
 
 /// Decode project folder name back to workspace path.
@@ -327,7 +326,7 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
                 record_task_notification_usage(state, &t);
                 return;
             }
-            let truncated: String = t.chars().take(200).collect();
+            let truncated = truncate_chars(&t, 200);
             state.message_count += 1;
             if state.first_question.is_none() {
                 state.first_question = Some(truncated.clone());
@@ -537,19 +536,8 @@ pub fn probe() -> ClaudeSnapshot {
 
 fn find_recent_session(config_dir: &Path) -> Option<String> {
     let transcripts_dir = config_dir.join("transcripts");
-    let mut newest: Option<(std::time::SystemTime, String)> = None;
-    for entry in fs::read_dir(&transcripts_dir).ok()?.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "jsonl") {
-            if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
-                    newest = Some((modified, name));
-                }
-            }
-        }
-    }
-    newest.map(|(_, name)| format!("most recent transcript: {}", mask_secret(&name)))
+    let name = latest_file_name(&transcripts_dir, Some("jsonl"))?;
+    Some(format!("most recent transcript: {}", mask_secret(&name)))
 }
 
 #[cfg(test)]

@@ -2,14 +2,14 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    env, fs,
+    fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
 };
 
 pub use octomonitor_adapter_common::{
-    probe_file, read_jsonl_delta, resolve_home_dir, run_command_probe, AdapterDescriptor,
-    CommandProbeResult, FileProbeResult, JsonlCursor,
+    probe_file, read_jsonl_delta, resolve_env_or_home, run_command_probe, truncate_chars,
+    AdapterDescriptor, CommandProbeResult, FileProbeResult, JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -114,27 +114,27 @@ struct CodexSessionState {
 }
 
 fn codex_config_dir() -> PathBuf {
-    env::var("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| resolve_home_dir(".codex"))
+    resolve_env_or_home(&["CODEX_HOME"], ".codex")
+}
+
+fn apply_thread_index_line(names: &mut HashMap<String, String>, line: &str) {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
+    };
+    if let (Some(id), Some(name)) = (
+        val.get("id").and_then(|v| v.as_str()),
+        val.get("thread_name").and_then(|v| v.as_str()),
+    ) {
+        names.insert(id.to_string(), truncate_chars(name, 80));
+    }
 }
 
 fn load_thread_index(config_dir: &Path) -> HashMap<String, String> {
     let mut index = HashMap::new();
     let index_path = config_dir.join("session_index.jsonl");
     if let Ok(file) = fs::File::open(&index_path) {
-        let reader = BufReader::new(file);
-        for line in reader.lines().map_while(Result::ok) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-                if let (Some(id), Some(name)) = (
-                    val.get("id").and_then(|v| v.as_str()),
-                    val.get("thread_name").and_then(|v| v.as_str()),
-                ) {
-                    // Truncate thread name to first 80 chars for display
-                    let name_short: String = name.chars().take(80).collect();
-                    index.insert(id.to_string(), name_short);
-                }
-            }
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            apply_thread_index_line(&mut index, &line);
         }
     }
     index
@@ -161,15 +161,7 @@ fn load_thread_index_with_cache(
         cache.names.clear();
     }
     for line in delta.lines {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-            if let (Some(id), Some(name)) = (
-                val.get("id").and_then(|v| v.as_str()),
-                val.get("thread_name").and_then(|v| v.as_str()),
-            ) {
-                let name_short: String = name.chars().take(80).collect();
-                cache.names.insert(id.to_string(), name_short);
-            }
-        }
+        apply_thread_index_line(&mut cache.names, &line);
     }
     cache.names.clone()
 }
@@ -394,7 +386,7 @@ fn apply_codex_line(state: &mut CodexSessionState, line: &str) {
             }
             state.message_count += 1;
             if let Some(t) = val.get("payload").and_then(extract_text_content) {
-                let truncated: String = t.chars().take(200).collect();
+                let truncated = truncate_chars(&t, 200);
                 if state.first_question.is_none() {
                     state.first_question = Some(truncated.clone());
                 }
@@ -511,14 +503,11 @@ pub fn probe_with_cache(cache: &mut CodexProbeCache) -> CodexSnapshot {
 
     let config_exists = config_probe.exists || config_json_probe.exists;
 
-    let recent_history_hint = if history_probe.exists {
-        history_probe
-            .modified_at
-            .as_ref()
-            .map(|t| format!("history last modified: {}", t))
-    } else {
-        None
-    };
+    let recent_history_hint = history_probe
+        .exists
+        .then_some(history_probe.modified_at.as_ref())
+        .flatten()
+        .map(|t| format!("history last modified: {t}"));
 
     // Scan real session files
     let sessions = scan_sessions(&config_dir, Some(cache));
