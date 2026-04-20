@@ -1,6 +1,6 @@
 # OctoMonitor
 
-[中文说明](README.zh.md)
+[中文说明](README.zh.md) · [Documentation Map](docs/README.md)
 
 **Local-first unified monitor for Claude Code, Codex, OpenClaw, and Hermes (experimental).**
 
@@ -29,7 +29,7 @@ For end users who want a packaged build instead of running from source:
 - **Homebrew service / local server** — `brew install Octo-o-o-o/octomonitor/octomonitor`
 - **npm package** — `npm install -g octomonitor` or `npx octomonitor`
 
-The Homebrew and npm packages install the local `octomonitor-server` binary. The npm release line now covers macOS, Linux x64, and Windows x64. The desktop `.dmg` is distributed separately through GitHub Releases and remains macOS-only. If you prefer the short Homebrew name later, run `brew tap Octo-o-o-o/octomonitor` first and then use `brew install octomonitor`.
+The Homebrew and npm packages install an `octomonitor` command backed by the local server binary. The npm release line now covers macOS, Linux x64, and Windows x64. The desktop `.dmg` is distributed separately through GitHub Releases and remains macOS-only. If you prefer the short Homebrew name later, run `brew tap Octo-o-o-o/octomonitor` first and then use `brew install octomonitor`.
 
 ## Quickstart
 
@@ -84,6 +84,15 @@ Or for development:
 ```bash
 cargo tauri dev
 ```
+
+## Remote Viewer
+
+OctoMonitor keeps the full admin surface on `127.0.0.1:46321`. Remote access is opt-in and starts a separate read-only viewer only when you enable it.
+
+1. Open `Settings -> Remote Access` in the local app or localhost web UI.
+2. Enable remote access. OctoMonitor starts the paired viewer on port `46322` and shows advertised LAN / private-network addresses.
+3. Generate a pairing code, open one of the advertised addresses on another device, and enter the code there.
+4. Paired viewers are limited to `Monitor / Usage` and use a short-lived cookie session.
 
 ## Architecture
 
@@ -156,7 +165,7 @@ Desktop builds also support native undo, redo, cut, copy, paste, and select-all 
 
 ## Configuration
 
-Server-side remote access state is persisted to `~/.octomonitor/config.json` and survives restarts. Frontend display preferences (theme, density, filters, notifications) are stored in `localStorage`.
+The local admin surface stays on `127.0.0.1:46321`. If remote access is enabled, OctoMonitor also starts a separate read-only viewer on `0.0.0.0:46322` and advertises reachable URLs in Settings. Server-side remote access state is persisted to `~/.octomonitor/config.json` and survives restarts. Frontend display preferences (theme, density, filters, notifications) are stored in `localStorage`.
 
 The Environment / Doctor screen exposes detection and diagnostics only. It does not rewrite Claude Code, Codex, OpenClaw, or Hermes configuration files.
 

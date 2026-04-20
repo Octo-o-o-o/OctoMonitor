@@ -2,13 +2,15 @@
 
 Thanks for your interest in OctoMonitor! This guide will help you get up and running.
 
+Current user-facing product docs live in [README.md](README.md), [README.zh.md](README.zh.md), and [docs/README.md](docs/README.md). Historical plans and superseded design notes live under `docs/history/`.
+
 ## Development Setup
 
 ### Prerequisites
 
 - **Rust** 1.75+ via [rustup](https://rustup.rs/)
 - **Node.js** 20+ with **pnpm** 10+
-- At least one supported tool installed (Claude Code, Codex, or OpenClaw)
+- At least one supported tool installed (Claude Code, Codex, OpenClaw, or Hermes in experimental mode)
 
 ### First-time setup
 
@@ -58,38 +60,42 @@ pnpm release:check            # Full pre-release gate
                                │ WebSocket
                     ┌──────────▼──────────────────┐
                     │      Axum HTTP/WS Server     │
-                    │     (crates/server)           │
-                    │  state · config · probe ·     │
-                    │  handlers/* · static_files    │
-                    └──┬───────┬───────┬───────────┘
-                       │       │       │  adapter trait
-              ┌────────▼┐  ┌──▼────┐  ┌▼──────────┐
-              │ Claude   │  │ Codex │  │ OpenClaw   │
-              │ Adapter  │  │Adapter│  │ Adapter    │
-              └──────────┘  └───────┘  └───────────┘
-                 reads          reads       reads
-              JSONL logs    JSONL logs   session files
+                    │     (crates/server)          │
+                    │ local API + remote viewer    │
+                    │ probe · watcher · handlers/* │
+                    └──┬────────┬────────┬────────┘
+                       │        │        │
+              ┌────────▼┐  ┌────▼───┐  ┌─▼────────┐  ┌────────▼┐
+              │ Claude   │  │ Codex  │  │ OpenClaw │  │ Hermes   │
+              │ Adapter  │  │ Adapter│  │ Adapter  │  │ Adapter  │
+              └──────────┘  └────────┘  └──────────┘  └──────────┘
+                 reads          reads        reads         reads
+              JSONL logs    JSONL logs   sessions +    sessions +
+                                         gateway data  gateway data
 ```
 
 ### Crate Responsibilities
 
 | Crate | Purpose |
 |-------|---------|
-| `core` | Domain types (`RunRecord`, `BootstrapPayload`, etc.), `ts-rs` exports, demo data |
-| `server` | Axum server: state management, config persistence, probe refresh loop, route handlers, WebSocket streaming |
+| `core` | Domain types (`RunRecord`, `BootstrapPayload`, history payloads, remote access state), `ts-rs` exports |
+| `server` | Axum local API, read-only remote viewer surface, config persistence, probe refresh, file watching, route handlers, WebSocket streaming |
+| `adapters/common` | Shared adapter utilities such as path resolution and command/file probe helpers |
 | `adapters/claude` | Parses Claude Code JSONL session logs |
 | `adapters/codex` | Parses Codex JSONL session logs |
-| `adapters/openclaw` | Parses OpenClaw session files and API |
-| `installer` | Tool detection, install planning, doctor checks, rollback |
+| `adapters/openclaw` | Parses OpenClaw sessions, gateway state, and cron metadata |
+| `adapters/hermes` | Parses Hermes sessions, gateway state, profiles, and cron metadata |
+| `installer` | Tool detection and doctor diagnostics only; it does not rewrite tool config files |
 | `companion` | Pairing codes and cookie-backed remote viewer sessions |
 
 ### Data Flow
 
-1. **Probe refresh** (every 15s): `std::thread::scope` runs all three adapter probes in parallel
-2. **State update**: probe results merged into `AppState.bootstrap` via `tokio::sync::RwLock`
-3. **Broadcast**: `state.signal_change()` sends a notification through `tokio::sync::broadcast`
-4. **WebSocket push**: local and remote read-only clients receive a fresh `snapshot.replace` frame
-5. **Frontend**: Zustand store replaces data atomically; React re-renders affected components
+1. **Bootstrap refresh**: server startup uses a blocking scan across all four adapters to build the initial snapshot
+2. **Background updates**: active runs refresh every 30s, idle state refreshes every 120s, and file-system or ingest events can wake the probe immediately
+3. **State update**: probe results merge into `AppState.bootstrap` via `tokio::sync::RwLock`; derived history and commit views refresh separately
+4. **Broadcast**: `state.signal_change()` notifies local UI and paired remote viewers
+5. **WebSocket push**: clients receive `snapshot.replace` frames over `/api/stream`; remote viewers get the redacted variant on port `46322`
+6. **Frontend**: Zustand store replaces data atomically; remote viewer mode hides local-only controls
 
 ### Frontend Structure
 
@@ -103,6 +109,8 @@ apps/web/src/
 │   ├── monitor/
 │   │   ├── MonitorView.tsx    # Three-column session dashboard
 │   │   ├── UsageView.tsx      # Token/cost analytics
+│   │   ├── CommitsView.tsx    # Recent commit history + attribution
+│   │   ├── HeatmapView.tsx    # Historical activity heatmap + local summary
 │   │   ├── SettingsView.tsx   # Settings (delegates to settings/*)
 │   │   ├── StatusBar.tsx      # Top bar with WS status + stats
 │   │   ├── Skeleton.tsx       # Loading skeletons
@@ -111,17 +119,21 @@ apps/web/src/
 │   │   └── settings/          # Settings sections including remote access
 │   ├── InspectDrawer.tsx      # Session detail side panel
 │   ├── RemotePairingGate.tsx  # Remote viewer unlock flow
+│   ├── LoadingScreen.tsx      # Desktop/web boot and reconnect states
 │   ├── ErrorBoundary.tsx      # Crash recovery
 │   └── ShortcutOverlay.tsx    # Keyboard shortcut help
 ├── lib/
 │   ├── types.ts         # Re-exports ts-rs bindings from crates/core
 │   ├── i18n.tsx         # Compile-time safe i18n (en/zh)
-│   ├── format.ts        # Shared formatTokens/formatCost
+│   ├── api.ts           # Same-origin fetch helpers + WS URL builder
+│   ├── format.ts        # Shared formatters
 │   ├── monitor.ts       # Visible-run selectors shared by UI and shortcuts
 │   ├── preferences.ts   # Frontend preference schema + migration
 │   ├── runtimeMode.ts   # local vs remoteViewer runtime split
-│   ├── theme.tsx        # Theme management + VS Code import
-│   └── mockData.ts      # Test fixtures
+│   ├── desktopEvents.ts # Native desktop event names
+│   ├── storageKeys.ts   # Browser storage key registry
+│   ├── i18nMaps.ts      # Typed label maps for enum-backed strings
+│   └── theme.tsx        # Theme management + VS Code import
 └── styles.css           # Global styles + Tailwind @theme tokens
 ```
 
@@ -150,6 +162,7 @@ apps/web/src/
 - Never expose secrets or render raw tokens
 - WebSocket is the primary live channel; no Tauri events for data flow
 - Gateway/official APIs beat derived file scans
+- Local admin APIs stay on loopback; the remote viewer is a separate opt-in read-only surface
 - Config files go in `~/.octomonitor/`
 
 ## Pull Request Guidelines
@@ -163,11 +176,11 @@ apps/web/src/
 ## Adding a New Adapter
 
 1. Create a new crate in `crates/adapters/<name>/`
-2. Implement a `probe()` function that returns a snapshot struct
-3. Add the tool to `ToolKind` enum in `crates/core/src/lib.rs`
-4. Wire the probe into `crates/server/src/probe.rs` inside `std::thread::scope`
-5. Add a panel entry in the frontend store's `defaultPanelConfig`
-6. Add i18n keys for the new tool name
+2. Implement `descriptor()`, `probe()`, and any cache helpers your adapter needs
+3. Add the tool to `ToolKind` in [`crates/core/src/lib.rs`](/Users/wangyixiao/WorkSpace/OctoMonitor/crates/core/src/lib.rs)
+4. Wire the adapter into [`crates/server/src/probe.rs`](/Users/wangyixiao/WorkSpace/OctoMonitor/crates/server/src/probe.rs) and [`crates/server/src/watcher.rs`](/Users/wangyixiao/WorkSpace/OctoMonitor/crates/server/src/watcher.rs) if it has watchable local state
+5. Extend installer detect/doctor output if the tool should appear in Environment & Doctor
+6. Update frontend constants, default panel/filter settings, and i18n labels for the new tool
 
 ## Questions?
 

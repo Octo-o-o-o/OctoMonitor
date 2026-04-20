@@ -1,6 +1,7 @@
 # OctoMonitor Design
 
 > 2026-04-16 update: this is a historical pre-simplification design note. The current shipped scope is defined by `README.md` and `docs/simplification-plan-2026-04-15.md`.
+> 2026-04-20 update: this file is retained for historical context only. Current documentation entry points are `README.md`, `README.zh.md`, `CONTRIBUTING.md`, and `docs/README.md`.
 
 ## Product Goal
 Build a local-first mission control dashboard for Claude Code, Codex, and OpenClaw across desktop, localhost web, and companion read-only layouts.

@@ -3862,8 +3862,9 @@ input, textarea, select { font: inherit; }
 
 /* ============================================================
    Kindle E-ink Theme Overrides
-   Per Guidelines.md: no bold 700+, no box-shadow, no gradient,
-   larger spacing, 16px base font, transition-colors duration-300
+   Based on the archived Kindle design guidelines: no bold 700+,
+   no box-shadow, no gradient, larger spacing, 16px base font,
+   transition-colors duration-300
    ============================================================ */
 
 /* Shared Kindle rules for both light and dark */

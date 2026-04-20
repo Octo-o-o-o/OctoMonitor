@@ -1,6 +1,7 @@
 # Hermes Agent Adapter 实施计划
 
 > 2026-04-16 更新：本文件中的 workflow 相关步骤已失效。`Workflows` 产品线已在简化方案中删除，当前 Hermes 只需要接入 adapter / probe / monitor / usage / installer 这条主线。
+> 状态：历史实施记录。Hermes 适配器已经落地，当前仓库不再按这份分阶段计划推进。
 
 ## Phase 1: Core 层 ToolKind 扩展
 

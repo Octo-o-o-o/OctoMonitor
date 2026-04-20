@@ -1,5 +1,7 @@
 # Kindle E-ink Design System Guidelines
 
+> Status: historical visual exploration for the E-Ink theme. It is not the source of truth for the current shipped UI, and some examples intentionally describe ideas that were never implemented verbatim.
+
 本设计系统专为电子墨水屏（E-ink）优化，完全无彩色依赖，通过黑白灰色阶、几何纹理和描边样式区分数据，实现色盲友好和 Kindle 阅读器般的极简质感。
 
 ---
@@ -320,7 +322,7 @@
 └── theme-toggle.tsx
 
 /guidelines/
-└── Guidelines.md      # 本设计规范文档
+└── docs/history/kindle-eink-design-system-guidelines.md  # 本设计规范文档（现已归档）
 ```
 
 ---

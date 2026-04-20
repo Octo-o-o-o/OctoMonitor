@@ -2,6 +2,7 @@
 
 > 2026-04-16 起草。对象：`apps/web/src`（React 19 + Zustand + Vite + Tailwind v4，**纯 CSR，无 SSR**）。
 > 目标：修正真实存在的规范/可维护性问题，给出**最小必要**的改动，不追求理想态。
+> 状态：历史审阅记录。文中列出的清理项已经落地，当前行为说明请回到 `README.md`、`CONTRIBUTING.md` 和代码本身。
 
 > 本文档经过一次内部 review（2026-04-16），已删除虚假问题（原 P1-4）与过度设计（原 `reportError` 独立文件、原 `I18nKeyOf` 误用、`safeStorage` 的 SSR 分支），修正了夸大描述（原 P0-3 对 InspectDrawer/WS 的指控），并补全遗漏项（i18n.tsx、MonitorView 拆分判断、PR 顺序）。
 

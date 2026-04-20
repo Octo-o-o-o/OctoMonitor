@@ -2,6 +2,7 @@
 
 > Status: **Approved** — 2026-03-31
 > Goal: Make the project open-source-ready for discerning vibe coding users who care about both UI aesthetics and code quality.
+> 2026-04-20 update: retained as a historical plan. If it disagrees with current behavior, prefer `README.md`, `README.zh.md`, `CONTRIBUTING.md`, and `docs/README.md`.
 
 ## Current State Assessment
 

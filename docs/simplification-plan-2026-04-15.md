@@ -3,6 +3,7 @@
 > 日期：2026-04-15
 > 依据：完整阅读当前仓库，并逐点评估此前的 `opus` 临时方案与独立审阅结论后形成的最终版
 > 目标：去掉偏离主线或重复建设的部分，同时避免把真正有产品价值、能体现差异化的能力砍得过头
+> 状态：当前仍作为范围收敛的决策记录保留；实际行为说明请以 `README.md`、`README.zh.md`、`CONTRIBUTING.md` 和 `docs/README.md` 为准。
 
 ## 0. 先说结论
 
@@ -395,19 +396,15 @@
 
 ## 6. 文档最终建议形态
 
-主层只保留：
+主入口保留：
 
 - `README.md`
 - `README.zh.md`
-- `docs/design.md`
-- `docs/architecture-upgrade.md`
-- `docs/design-hermes-adapter.md`
-- `docs/impl-plan-hermes-adapter.md`
+- `CONTRIBUTING.md`
+- `docs/README.md`
 - `docs/simplification-plan-2026-04-15.md`
 
-其余原则：
-
-- 过时方案、demo HTML、重复精简方案不再保留在主层
+历史设计、实施计划和视觉探索统一归档到 `docs/history/`。
 - 文档里“现行事实”和“历史方案”必须分开
 
 ## 7. 实施顺序

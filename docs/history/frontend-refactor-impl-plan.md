@@ -1,7 +1,8 @@
 # 前端规范化改进 —— 分步实施计划
 
-> 配套方案：`docs/frontend-refactor-plan.md`（2026-04-16）
+> 配套方案：`docs/history/frontend-refactor-plan.md`（2026-04-16）
 > 执行方式：两个 Phase，每个 Phase 独立可回滚。Phase 间有文件重叠（`preferences.ts` 等），**顺序不可调**。
+> 状态：历史实施记录。这里的改动已经在仓库中落地，保留它仅用于回看当时的拆分方式。
 
 ## 执行总则
 

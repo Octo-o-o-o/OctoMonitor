@@ -1,6 +1,6 @@
 # OctoMonitor
 
-[English](README.md)
+[English](README.md) · [文档索引](docs/README.md)
 
 **面向 Claude Code、Codex、OpenClaw 与 Hermes（实验性）的本地优先统一监控面板。**
 
@@ -29,7 +29,7 @@ OctoMonitor 用一个统一仪表盘实时查看你的 AI 编码会话状态，�
 - **Homebrew 服务 / 本地服务端**：`brew install Octo-o-o-o/octomonitor/octomonitor`
 - **npm 包**：安装命令为 `npm install -g octomonitor` 或 `npx octomonitor`
 
-Homebrew 和 npm 分发的是本地 `octomonitor-server` 二进制；npm 现已覆盖 macOS、Linux x64 和 Windows x64。桌面 `.dmg` 会单独通过 GitHub Releases 分发，当前仍仅提供 macOS 桌面包。如果你后续想使用短命令，可以先执行 `brew tap Octo-o-o-o/octomonitor`，再运行 `brew install octomonitor`。
+Homebrew 和 npm 分发会安装一个 `octomonitor` 命令，底层由本地服务端二进制驱动；npm 现已覆盖 macOS、Linux x64 和 Windows x64。桌面 `.dmg` 会单独通过 GitHub Releases 分发，当前仍仅提供 macOS 桌面包。如果你后续想使用短命令，可以先执行 `brew tap Octo-o-o-o/octomonitor`，再运行 `brew install octomonitor`。
 
 ## 快速开始
 
@@ -82,6 +82,15 @@ pnpm build:desktop:notarized
 ```bash
 cargo tauri dev
 ```
+
+## 远程只读 Viewer
+
+OctoMonitor 的完整管理面始终留在 `127.0.0.1:46321`。远程访问默认关闭，只有在你显式开启后才会启动单独的只读 viewer。
+
+1. 在本机应用或 localhost Web UI 中打开 `Settings -> Remote Access`。
+2. 开启远程访问后，OctoMonitor 会在 `46322` 端口启动配对 viewer，并显示局域网 / 私网可访问地址。
+3. 生成配对码，在另一台设备上打开上述地址并输入配对码。
+4. 已配对 viewer 只开放 `Monitor / Usage`，并通过短期 cookie 会话访问。
 
 ## 架构
 
@@ -154,7 +163,7 @@ pnpm build:desktop:notarized
 
 ## 配置
 
-远程访问相关配置会保存在 `~/.octomonitor/config.json`，重启后仍然有效。前端显示偏好（主题、密度、筛选条件、通知等）保存在 `localStorage`。
+本地管理面固定在 `127.0.0.1:46321`。如果开启远程访问，OctoMonitor 还会在 `0.0.0.0:46322` 启动一个单独的只读 viewer，并在 Settings 中展示可访问地址。远程访问相关配置会保存在 `~/.octomonitor/config.json`，重启后仍然有效。前端显示偏好（主题、密度、筛选条件、通知等）保存在 `localStorage`。
 
 当前“环境与诊断”页面只提供检测与 doctor 能力，不会自动改写 Claude Code、Codex、OpenClaw 或 Hermes 的配置文件。
 
