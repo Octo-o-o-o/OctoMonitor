@@ -27,12 +27,14 @@
 
 ## Current State
 - Local admin surface stays on `127.0.0.1:46321`; optional remote read-only viewer uses `0.0.0.0:46322` when enabled
-- `cargo run -p octomonitor-server` exposes bootstrap/history/config/installer/remote/ingest/stream APIs on the local surface
-- Web UI exposes `Monitor / Usage / Commits / Heatmap / Settings`; paired remote viewers expose `Monitor / Usage`
+- `cargo run -p octomonitor-server` exposes bootstrap/history/config/installer/remote/ingest/stream/inspect/events/resume-command APIs on the local surface
+- `GET /api/runs/{run_id}/events?cursor&limit` (Codex only) returns structured JSONL events via byte-offset cursor; `GET /api/runs/{run_id}/resume-command` returns an advisory `codex resume <thread_id>` string for Codex runs. Both are main-router only — `build_remote_router` never exposes them
+- Web UI exposes `Monitor / Usage / Commits / Heatmap / Settings`; paired remote viewers expose `Monitor / Usage`. Monitor has a quick-filter bar (All / Attention / Active) + search (`/` to focus); InspectDrawer shows a Codex event timeline in local mode and falls back to the legacy `/inspect` entries for other tools
+- Codex adapter parses JSONL into structured events (`crates/adapters/codex/src/events.rs`) and surfaces a progress hint (`progress_kind / progress_reason / recent_tools / turn_open`) consumed by `probe.rs::classify_codex_session_state`
 - Server bootstrap blends local adapter probes with in-memory live ingest updates; config patches survive probe refresh cycles
 - Web UI has WS reconnect with exponential backoff and a LIVE/OFFLINE status indicator
 - Desktop finds the server binary relative to itself in release builds; only falls back to `cargo run` in debug builds
-- Current documentation entry points: `README.md`, `README.zh.md`, `CONTRIBUTING.md`, `docs/README.md`
+- Current documentation entry points: `README.md`, `README.zh.md`, `CONTRIBUTING.md`, `docs/README.md`, and `docs/implementation-plan-monitoring-inspiration.md` for the latest multi-phase plan and its review notes
 
 ## Rules
 - No database
