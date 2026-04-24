@@ -393,7 +393,7 @@ pub enum CodexProgressKind {
 5. `progress_kind == Waiting`（非 approval，纯观察到 user_message 挂起）-> 沿用 age-based：< 2min `Active`，< 10min `Idle`，否则 `Completed`。
 6. `progress_kind == Unknown` 或字段缺失 -> fallback 到现有 age-based 规则（`age < 2min` Active，`< 10min` Idle，否则 Completed）。
 
-`turn_open` 语义：parser 扫描尾部事件窗口时，若观察到 `UserMessage` 后未见到对应的终结事件（`TokenCount` / `TaskComplete` / `TurnAborted` / `AssistantMessage` 配对），则置 true；否则 false。这是 "用户发完消息、等 assistant 回应" 的窗口。
+`turn_open` 语义（实测依据调整）：优先以 `task_started` / `task_complete` / `turn_aborted` / `task_aborted` 的成对匹配为准。`apply_codex_line` 维护一个简单计数器：`task_started` 累加、匹配的 `task_complete` / `turn_aborted` / `task_aborted` 递减；计数 > 0 即 `turn_open = true`。`user_message → token_count` 启发式作为 fallback（当 session 里完全没有 task marker 时）。这样能避免"tool call 之间短暂 gap"被误判为 turn_open=false。
 
 `last_tail`：
 

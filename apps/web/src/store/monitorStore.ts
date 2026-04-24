@@ -32,6 +32,8 @@ export type {
 
 export type ConnectionStatus = 'connecting' | 'live' | 'offline'
 
+export type MonitorQuickFilter = 'all' | 'attention' | 'active'
+
 interface MonitorState {
   data: BootstrapPayload | null
   selectedRunId?: string
@@ -43,6 +45,8 @@ interface MonitorState {
   settings: FrontendSettings
   acknowledgedErrors: Set<string>
   dismissedAttentionKeys: Set<string>
+  monitorQuickFilter: MonitorQuickFilter
+  monitorSearch: string
   setData: (data: BootstrapPayload | null) => void
   setConfig: (config: AppConfig) => void
   selectRun: (id?: string) => void
@@ -54,6 +58,8 @@ interface MonitorState {
   setActiveTab: (tab: ActiveTab) => void
   setSettingsOpen: (open: boolean) => void
   updateSettings: (patch: Partial<FrontendSettings>) => void
+  setMonitorQuickFilter: (filter: MonitorQuickFilter) => void
+  setMonitorSearch: (value: string) => void
 }
 
 export const useMonitorStore = create<MonitorState>((set, get) => ({
@@ -65,6 +71,8 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   settings: loadFrontendSettings(),
   acknowledgedErrors: new Set<string>(),
   dismissedAttentionKeys: new Set<string>(loadDismissedAttentionKeys()),
+  monitorQuickFilter: 'all',
+  monitorSearch: '',
   setData: (data) => set({ data }),
   setConfig: (config) => set((s) => (s.data ? { data: { ...s.data, config } } : {})),
   selectRun: (selectedRunId) => set({ selectedRunId }),
@@ -93,6 +101,8 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     saveFrontendSettings(next)
     set({ settings: next })
   },
+  setMonitorQuickFilter: (monitorQuickFilter) => set({ monitorQuickFilter }),
+  setMonitorSearch: (monitorSearch) => set({ monitorSearch }),
 }))
 
 /** Selector: derive the selected run from data + selectedRunId */

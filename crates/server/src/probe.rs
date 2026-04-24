@@ -1209,7 +1209,7 @@ fn build_run_from_codex_session(
         },
         state: classify_codex_session_state(session),
         last_action: Some(display_title.clone()),
-        last_tail: None,
+        last_tail: codex_last_tail(session),
         pending_approval: session.has_pending_approval,
         first_question: first_question_display,
         last_question: Some(display_title),
@@ -1252,20 +1252,52 @@ fn build_run_from_codex_session(
 }
 
 fn classify_codex_session_state(session: &codex_adapter::CodexSession) -> RunState {
-    if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&session.last_activity_at) {
-        let age = Utc::now().signed_duration_since(last);
-        // If there are unmatched function_calls with require_escalated,
-        // the session is waiting for the user to approve a tool execution.
-        if session.has_pending_approval && age.num_minutes() < 30 {
-            return RunState::WaitingApproval;
-        }
-        if age.num_minutes() < 2 {
-            return RunState::Active;
-        } else if age.num_minutes() < 10 {
-            return RunState::Idle;
-        }
+    let age_minutes = chrono::DateTime::parse_from_rfc3339(&session.last_activity_at)
+        .ok()
+        .map(|last| {
+            Utc::now()
+                .signed_duration_since(last)
+                .num_minutes()
+                .max(0)
+        });
+
+    // 1. pending approval wins while fresh enough to matter.
+    if session.has_pending_approval && age_minutes.map_or(true, |m| m < 30) {
+        return RunState::WaitingApproval;
     }
-    RunState::Completed
+
+    // 2. explicit progress hints from the adapter.
+    match session.progress_kind {
+        codex_adapter::CodexProgressKind::Running => {
+            if age_minutes.map_or(true, |m| m < 5) {
+                return RunState::Active;
+            }
+            // stuck "running" with no activity — fall through to age-based.
+        }
+        codex_adapter::CodexProgressKind::Completed => return RunState::Completed,
+        codex_adapter::CodexProgressKind::Aborted => return RunState::Error,
+        codex_adapter::CodexProgressKind::Waiting | codex_adapter::CodexProgressKind::Unknown => {}
+    }
+
+    // 3. age-based fallback.
+    match age_minutes {
+        Some(m) if m < 2 => RunState::Active,
+        Some(m) if m < 10 => RunState::Idle,
+        _ => RunState::Completed,
+    }
+}
+
+/// Produce a short (≤ 80 chars) status line for the Monitor list. Returns
+/// `None` when the adapter did not surface a progress reason (fallback uses
+/// existing defaults).
+fn codex_last_tail(session: &codex_adapter::CodexSession) -> Option<String> {
+    session.progress_reason.as_ref().map(|reason| {
+        if reason.chars().count() <= 80 {
+            reason.clone()
+        } else {
+            reason.chars().take(79).collect::<String>() + "…"
+        }
+    })
 }
 
 fn classify_openclaw_session_state(session: &openclaw_adapter::OpenClawSession) -> RunState {
@@ -2482,6 +2514,10 @@ mod tests {
             message_count: 1,
             active_elapsed_ms: 10_000,
             has_pending_approval: false,
+            progress_kind: codex_adapter::CodexProgressKind::Unknown,
+            progress_reason: None,
+            recent_tools: Vec::new(),
+            turn_open: false,
         };
         let probe = codex_adapter::CodexSnapshot {
             probed_at: "2026-04-01T08:10:00Z".into(),
@@ -2711,5 +2747,108 @@ mod tests {
         .await;
 
         assert!(result.contains("timed out"));
+    }
+
+    fn codex_session_at_age(age_minutes: i64) -> codex_adapter::CodexSession {
+        let last =
+            Utc::now() - chrono::Duration::minutes(age_minutes);
+        codex_adapter::CodexSession {
+            session_id: "sid".into(),
+            thread_name: None,
+            cwd: None,
+            model: None,
+            cli_version: None,
+            transcript_path: String::new(),
+            started_at: last.to_rfc3339(),
+            last_activity_at: last.to_rfc3339(),
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            five_hour_used_pct: None,
+            seven_day_used_pct: None,
+            five_hour_resets_at: None,
+            seven_day_resets_at: None,
+            plan_type: None,
+            first_question: None,
+            last_question: None,
+            message_count: 0,
+            active_elapsed_ms: 0,
+            has_pending_approval: false,
+            progress_kind: codex_adapter::CodexProgressKind::Unknown,
+            progress_reason: None,
+            recent_tools: Vec::new(),
+            turn_open: false,
+        }
+    }
+
+    #[test]
+    fn classify_codex_running_becomes_active_when_fresh() {
+        let mut s = codex_session_at_age(0);
+        s.progress_kind = codex_adapter::CodexProgressKind::Running;
+        assert_eq!(classify_codex_session_state(&s), RunState::Active);
+    }
+
+    #[test]
+    fn classify_codex_running_falls_back_to_idle_when_stuck() {
+        let mut s = codex_session_at_age(6);
+        s.progress_kind = codex_adapter::CodexProgressKind::Running;
+        // After 5 min without activity the "running" hint is stale — fall back
+        // to age-based (6 min < 10 min → Idle).
+        assert_eq!(classify_codex_session_state(&s), RunState::Idle);
+    }
+
+    #[test]
+    fn classify_codex_completed_maps_to_completed() {
+        let mut s = codex_session_at_age(0);
+        s.progress_kind = codex_adapter::CodexProgressKind::Completed;
+        assert_eq!(classify_codex_session_state(&s), RunState::Completed);
+    }
+
+    #[test]
+    fn classify_codex_aborted_maps_to_error() {
+        let mut s = codex_session_at_age(0);
+        s.progress_kind = codex_adapter::CodexProgressKind::Aborted;
+        assert_eq!(classify_codex_session_state(&s), RunState::Error);
+    }
+
+    #[test]
+    fn classify_codex_waiting_approval_takes_priority_over_progress() {
+        let mut s = codex_session_at_age(1);
+        s.progress_kind = codex_adapter::CodexProgressKind::Running;
+        s.has_pending_approval = true;
+        assert_eq!(classify_codex_session_state(&s), RunState::WaitingApproval);
+    }
+
+    #[test]
+    fn classify_codex_unknown_uses_age_based_fallback() {
+        let s = codex_session_at_age(15);
+        // progress_kind = Unknown, age = 15 min → Completed
+        assert_eq!(classify_codex_session_state(&s), RunState::Completed);
+    }
+
+    #[test]
+    fn codex_last_tail_returns_reason_verbatim_when_short() {
+        let mut s = codex_session_at_age(0);
+        s.progress_reason = Some("Running tool: shell".into());
+        assert_eq!(
+            codex_last_tail(&s).as_deref(),
+            Some("Running tool: shell")
+        );
+    }
+
+    #[test]
+    fn codex_last_tail_truncates_to_80_chars() {
+        let mut s = codex_session_at_age(0);
+        s.progress_reason = Some("x".repeat(200));
+        let tail = codex_last_tail(&s).unwrap();
+        assert_eq!(tail.chars().count(), 80);
+        assert!(tail.ends_with('…'));
+    }
+
+    #[test]
+    fn codex_last_tail_none_when_no_reason() {
+        let s = codex_session_at_age(0);
+        assert!(codex_last_tail(&s).is_none());
     }
 }

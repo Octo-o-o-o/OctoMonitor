@@ -5101,3 +5101,51 @@ input, textarea, select { font: inherit; }
   font-size: var(--font-size-sm);
   font-style: italic;
 }
+
+.monitor-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin: 0 0 8px 0;
+  border: 1px solid var(--shell-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--shell-glass) 75%, transparent);
+}
+.monitor-filter-chips {
+  display: flex;
+  gap: 6px;
+}
+.monitor-filter-chip {
+  padding: 4px 12px;
+  border: 1px solid var(--shell-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.monitor-filter-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.monitor-filter-chip--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg, white);
+}
+.monitor-filter-search {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: var(--surface, transparent);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  min-width: 180px;
+}
+.monitor-filter-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}

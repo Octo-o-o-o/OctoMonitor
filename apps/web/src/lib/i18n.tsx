@@ -255,6 +255,12 @@ const en = {
   'toast.copied': 'Copied',
   'toast.copyFailed': 'Copy failed',
 
+  // monitor filter bar
+  'monitorFilter.all': 'All',
+  'monitorFilter.attention': 'Attention',
+  'monitorFilter.active': 'Active',
+  'monitorFilter.searchPlaceholder': 'Search project / workspace / question…',
+
   // unit
   'unit.tok': 'tok',
   'unit.tokens': 'tokens',
@@ -578,6 +584,11 @@ const zh: Record<I18nKey, string> = {
 
   'toast.copied': '已复制',
   'toast.copyFailed': '复制失败',
+
+  'monitorFilter.all': '全部',
+  'monitorFilter.attention': '需关注',
+  'monitorFilter.active': '运行中',
+  'monitorFilter.searchPlaceholder': '搜索项目 / 工作区 / 提问…',
 
   'unit.tok': 'tok',
   'unit.tokens': 'tokens',

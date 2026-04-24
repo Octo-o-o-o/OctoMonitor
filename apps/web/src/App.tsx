@@ -181,6 +181,18 @@ function useKeyboardShortcuts(runtimeMode: RuntimeMode, activeTab: string) {
             toggleShortcutHelp()
             break
           }
+          case '/': {
+            if (activeTab !== 'monitor') break
+            const searchInput = document.querySelector<HTMLInputElement>(
+              '.monitor-filter-search',
+            )
+            if (searchInput) {
+              e.preventDefault()
+              searchInput.focus()
+              searchInput.select()
+            }
+            break
+          }
         }
       }
     }

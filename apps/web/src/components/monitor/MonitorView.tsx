@@ -4,8 +4,10 @@ import { useI18n } from '../../lib/i18n'
 import { stateLabelKeys } from '../../lib/i18nMaps'
 import { formatTokens, formatDuration, formatLastUpdated, formatAgentHandle, formatAgentTag, getGroupKey } from '../../lib/format'
 import { buildVisiblePanels, buildVisibleRunsBySource, monitorPeriodLongLabels, summarizeRunsByState } from '../../lib/monitor'
+import { applyMonitorFilters } from '../../lib/monitorFilters'
 import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
 import { AttentionBanner } from './AttentionBanner'
+import { MonitorFilterBar } from './MonitorFilterBar'
 import { MonitorSkeleton } from './Skeleton'
 import type { AdapterHealth, PendingCron, RunRecord, ToolKind } from '../../lib/types'
 
@@ -533,12 +535,22 @@ export function MonitorView() {
     [panelConfig],
   )
 
+  const quickFilter = useMonitorStore((s) => s.monitorQuickFilter)
+  const searchQuery = useMonitorStore((s) => s.monitorSearch)
+
   const sessionsBySource = useMemo(() => {
     if (!data) {
       return { claude: [], codex: [], openClaw: [], hermes: [] } satisfies Record<ToolKind, RunRecord[]>
     }
-    return buildVisibleRunsBySource(data.runs, filterRules, monitorPeriod)
-  }, [data, monitorPeriod, filterRules])
+    const base = buildVisibleRunsBySource(data.runs, filterRules, monitorPeriod)
+    if (quickFilter === 'all' && searchQuery.trim() === '') return base
+    return {
+      claude: applyMonitorFilters(base.claude, quickFilter, searchQuery),
+      codex: applyMonitorFilters(base.codex, quickFilter, searchQuery),
+      openClaw: applyMonitorFilters(base.openClaw, quickFilter, searchQuery),
+      hermes: applyMonitorFilters(base.hermes, quickFilter, searchQuery),
+    }
+  }, [data, monitorPeriod, filterRules, quickFilter, searchQuery])
 
   const hasVisibleRuns = visiblePanels.some((tool) => sessionsBySource[tool].length > 0)
 
@@ -583,6 +595,7 @@ export function MonitorView() {
         </div>
       )}
       <AttentionBanner items={data.attentions} />
+      <MonitorFilterBar />
       {!hasVisibleRuns && (
         <div className="empty-state-panel">
           <strong>{t('monitor.emptyTitle')}</strong>
