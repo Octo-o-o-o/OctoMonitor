@@ -5149,3 +5149,90 @@ input, textarea, select { font: inherit; }
   outline: none;
   border-color: var(--accent);
 }
+
+.inspect-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.inspect-event {
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--shell-glass) 65%, transparent);
+}
+.inspect-event--error {
+  border-color: var(--danger);
+}
+.inspect-event-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+.inspect-event-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--accent);
+}
+.inspect-event-tool {
+  font-family: var(--font-mono, monospace);
+}
+.inspect-event-exit {
+  font-family: var(--font-mono, monospace);
+}
+.inspect-event-exit--err {
+  color: var(--danger);
+}
+.inspect-event-preview {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  word-break: break-word;
+}
+.inspect-event-command {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  word-break: break-all;
+}
+.inspect-event-text-wrap {
+  margin-top: 6px;
+}
+.inspect-event-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+.inspect-event-text--clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.inspect-event-toggle {
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--shell-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.inspect-event-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

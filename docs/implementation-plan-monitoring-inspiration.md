@@ -464,7 +464,6 @@ GET /api/runs/{run_id}/events?cursor=<u64>&limit=<usize>
 
 ```json
 {
-  "supported": true,
   "tool": "codex",
   "events": [],
   "cursor": 12345,
@@ -476,8 +475,8 @@ GET /api/runs/{run_id}/events?cursor=<u64>&limit=<usize>
 
 - 只挂 `main.rs::build_app`。
 - 不挂 `remote_access::build_remote_router`。
-- 非 Codex run 返回 `supported: false`、空 events。
-- Codex run 复用 transcript path resolution。
+- 前端对非 Codex run **直接不调此端点**（走旧 `/inspect`），因此后端对非 Codex run 也只返回空 `events` + `cursor: 0`，不用额外 `supported` 字段；回帖保留 `tool` 字段用于客户端侧校验。
+- Codex run 复用 `inspect.rs::resolve_transcript_path`（提升为 `pub(crate)`，不新开文件）。
 - `limit` clamp 到 `1..=300`，默认 120。
 - 使用 Phase 1 的 `read_tail_events` 和 `dedupe_adjacent`。
 - 不使用当前 inspect handler 的全文件扫描路径。
@@ -518,20 +517,20 @@ UI：
 
 后端测试：
 
-- Codex run returns supported events。
-- non-Codex run returns supported false。
+- Codex run returns events（整合 Phase 1 parser）。
+- non-Codex run returns empty events（不是 404）。
 - missing run -> 404。
 - limit clamp。
-- remote router unknown events path -> 404。
-- transcript missing -> supported true + empty events 或明确 error，二选一并测试。
+- remote router 不注册此路径 -> fallback 命中静态文件或 404。
+- transcript missing -> 200 + empty events。
 
 前端测试：
 
 - Codex local 模式走 events。
-- non-Codex local 模式走 inspect。
+- non-Codex local 模式继续走 inspect（InspectDrawer 内 `run.tool === 'codex'` 分支）。
 - remote 模式不请求 events。
-- interval cleanup。
-- cursor 增量合并。
+- drawer 关闭 / 切换 run 时 interval 清理（通过 fake timers 验证）。
+- cursor 增量合并：两次请求后事件按时间顺序、无重复。
 
 验收：
 

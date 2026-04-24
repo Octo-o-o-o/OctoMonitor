@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMonitorStore, selectSelectedRun } from '../store/monitorStore'
 import { useI18n } from '../lib/i18n'
 import { stateLabelKeys } from '../lib/i18nMaps'
@@ -18,6 +18,59 @@ interface ResumeCommandPayload {
   command: string | null
   tool: string
   note: string | null
+}
+
+type CodexEventKind =
+  | 'userMessage'
+  | 'assistantMessage'
+  | 'reasoning'
+  | 'toolCall'
+  | 'toolOutput'
+  | 'webSearch'
+  | 'tokenCount'
+  | 'taskStarted'
+  | 'taskComplete'
+  | 'taskAborted'
+  | 'turnAborted'
+  | 'context'
+
+interface CodexEvent {
+  kind: CodexEventKind
+  timestamp: string
+  turnId?: string | null
+  title: string
+  preview: string
+  text?: string | null
+  toolName?: string | null
+  command?: string | null
+  exitCode?: number | null
+  callId?: string | null
+}
+
+interface EventsPayload {
+  tool: string
+  events: CodexEvent[]
+  cursor: number
+  reset: boolean
+}
+
+const MAX_TIMELINE_EVENTS = 300
+const EVENT_POLL_MS = 2000
+
+function eventSignature(e: CodexEvent): string {
+  return [e.kind, e.timestamp, e.callId ?? '', e.preview].join('|')
+}
+
+function mergeEvents(prev: CodexEvent[], incoming: CodexEvent[]): CodexEvent[] {
+  if (incoming.length === 0) return prev
+  const seen = new Set(prev.map(eventSignature))
+  const fresh = incoming.filter((e) => !seen.has(eventSignature(e)))
+  if (fresh.length === 0) return prev
+  const combined = [...prev, ...fresh]
+  if (combined.length > MAX_TIMELINE_EVENTS) {
+    return combined.slice(combined.length - MAX_TIMELINE_EVENTS)
+  }
+  return combined
 }
 
 const errorStates = new Set(['error', 'gatewayOffline', 'limitExceeded', 'contextExceeded'])
@@ -43,7 +96,15 @@ export function InspectDrawer() {
   const [entries, setEntries] = useState<InspectEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<ResumeCommandPayload | null>(null)
+  const [events, setEvents] = useState<CodexEvent[]>([])
+  const [eventsLoading, setEventsLoading] = useState(false)
+  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set())
+  const cursorRef = useRef<number | undefined>(undefined)
+  const timelineRef = useRef<HTMLDivElement | null>(null)
+  const nearBottomRef = useRef(true)
   const runtimeMode = getRuntimeMode()
+
+  const useCodexEvents = runtimeMode === 'local' && selectedRun?.tool === 'codex'
   const usageBucketIndex = useMemo(
     () => buildUsageBucketIndex(usageBuckets ?? []),
     [usageBuckets],
@@ -85,12 +146,13 @@ export function InspectDrawer() {
     return () => { cancelled = true }
   }, [runtimeMode, selectedRun])
 
+  // Legacy inspect fetch for non-Codex runs (Claude / OpenClaw).
   useEffect(() => {
     let cancelled = false
     setEntries([])
     setEntriesLoading(false)
 
-    if (!selectedRun || runtimeMode === 'remoteViewer') {
+    if (!selectedRun || runtimeMode === 'remoteViewer' || useCodexEvents) {
       return () => { cancelled = true }
     }
 
@@ -109,7 +171,108 @@ export function InspectDrawer() {
     })()
 
     return () => { cancelled = true }
-  }, [runtimeMode, selectedRun])
+  }, [runtimeMode, selectedRun, useCodexEvents])
+
+  // Codex events fetch + polling loop.
+  useEffect(() => {
+    if (!selectedRun || !useCodexEvents) {
+      setEvents([])
+      cursorRef.current = undefined
+      return () => { /* no cleanup */ }
+    }
+
+    const runId = selectedRun.id
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    setEvents([])
+    setEventsLoading(true)
+    cursorRef.current = undefined
+
+    async function fetchOnce(): Promise<void> {
+      const cursor = cursorRef.current
+      const url = cursor === undefined
+        ? `/api/runs/${encodeURIComponent(runId)}/events?limit=${MAX_TIMELINE_EVENTS}`
+        : `/api/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}&limit=${MAX_TIMELINE_EVENTS}`
+      try {
+        const response = await apiFetch(url)
+        if (!response.ok) return
+        const payload = await response.json() as EventsPayload
+        if (cancelled) return
+        if (payload.reset) {
+          cursorRef.current = payload.cursor
+          setEvents(payload.events.slice(-MAX_TIMELINE_EVENTS))
+          return
+        }
+        cursorRef.current = payload.cursor
+        setEvents((prev) => mergeEvents(prev, payload.events))
+      } catch {
+        // best-effort; the next poll will retry
+      }
+    }
+
+    function schedule() {
+      if (cancelled) return
+      if (document.hidden) return
+      if (selectedRun?.state !== 'active') return
+      timer = setTimeout(tick, EVENT_POLL_MS)
+    }
+
+    async function tick() {
+      if (cancelled) return
+      await fetchOnce()
+      if (!cancelled) schedule()
+    }
+
+    function onVisibility() {
+      if (cancelled) return
+      if (!document.hidden && selectedRun?.state === 'active') {
+        void (async () => {
+          await fetchOnce()
+          schedule()
+        })()
+      }
+    }
+
+    void (async () => {
+      await fetchOnce()
+      if (!cancelled) setEventsLoading(false)
+      schedule()
+    })()
+
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [selectedRun, useCodexEvents])
+
+  // Near-bottom scroll lock: stay pinned to the newest event unless the
+  // user has scrolled upward.
+  useEffect(() => {
+    const el = timelineRef.current
+    if (!el) return
+    if (nearBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [events])
+
+  function handleTimelineScroll() {
+    const el = timelineRef.current
+    if (!el) return
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    nearBottomRef.current = distance < 40
+  }
+
+  function toggleEventExpansion(id: string) {
+    setExpandedEventIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   if (!selectedRun) return null
 
@@ -249,7 +412,67 @@ export function InspectDrawer() {
             </div>
           )}
 
-          {(runtimeMode === 'local' && (entriesLoading || entries.length > 0)) && (
+          {useCodexEvents && (eventsLoading || events.length > 0) && (
+            <div className="inspect-section">
+              <span className="inspect-section-label">{t('drawer.timeline')}</span>
+              <div
+                className="inspect-event-list"
+                ref={timelineRef}
+                onScroll={handleTimelineScroll}
+              >
+                {eventsLoading && events.length === 0 && (
+                  <div className="inspect-io-empty">{t('drawer.loadingEntries')}</div>
+                )}
+                {events.map((ev, index) => {
+                  const id = `${ev.timestamp}-${ev.callId ?? ''}-${index}`
+                  const isError = ev.exitCode != null && ev.exitCode !== 0
+                  const expanded = expandedEventIds.has(id)
+                  const hasLongText = Boolean(ev.text && ev.text.length > 400)
+                  return (
+                    <div
+                      key={id}
+                      className={`inspect-event inspect-event--${ev.kind}${isError ? ' inspect-event--error' : ''}`}
+                    >
+                      <div className="inspect-event-meta">
+                        <span className="inspect-event-kind">{ev.kind}</span>
+                        <span className="inspect-event-time">{formatDateTime(ev.timestamp)}</span>
+                        {ev.toolName && (
+                          <span className="inspect-event-tool">{ev.toolName}</span>
+                        )}
+                        {ev.exitCode != null && (
+                          <span className={`inspect-event-exit${isError ? ' inspect-event-exit--err' : ''}`}>
+                            exit {ev.exitCode}
+                          </span>
+                        )}
+                      </div>
+                      <div className="inspect-event-preview">{ev.preview}</div>
+                      {ev.command && (
+                        <code className="inspect-event-command">{ev.command}</code>
+                      )}
+                      {ev.text && (
+                        <div className="inspect-event-text-wrap">
+                          <div className={`inspect-event-text${!expanded && hasLongText ? ' inspect-event-text--clamped' : ''}`}>
+                            {ev.text}
+                          </div>
+                          {hasLongText && (
+                            <button
+                              type="button"
+                              className="inspect-event-toggle"
+                              onClick={() => toggleEventExpansion(id)}
+                            >
+                              {expanded ? t('drawer.collapse') : t('drawer.expand')}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {!useCodexEvents && runtimeMode === 'local' && (entriesLoading || entries.length > 0) && (
             <div className="inspect-section">
               <span className="inspect-section-label">{t('drawer.timeline')}</span>
               <div className="inspect-io-list">

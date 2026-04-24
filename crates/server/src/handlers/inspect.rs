@@ -76,7 +76,7 @@ fn load_run_entries(run: &RunRecord) -> Vec<InspectEntry> {
     }
 }
 
-fn resolve_transcript_path(run: &RunRecord) -> Option<PathBuf> {
+pub(crate) fn resolve_transcript_path(run: &RunRecord) -> Option<PathBuf> {
     run.transcript_path
         .as_deref()
         .map(expand_home_path)
