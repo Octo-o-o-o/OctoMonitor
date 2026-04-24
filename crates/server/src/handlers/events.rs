@@ -186,9 +186,8 @@ mod tests {
         assert_eq!(payload.tool, ToolKind::Codex);
     }
 
-    #[test]
-    fn limit_constants_are_sane() {
-        assert!(TEST_DEFAULT_LIMIT <= TEST_MAX_LIMIT);
-        assert!(TEST_MAX_LIMIT <= TEST_DEFAULT_MAX_EVENTS);
-    }
+    // These const assertions are checked at compile time; they would otherwise
+    // trip clippy::assertions_on_constants in a runtime `#[test]`.
+    const _: () = assert!(TEST_DEFAULT_LIMIT <= TEST_MAX_LIMIT);
+    const _: () = assert!(TEST_MAX_LIMIT <= TEST_DEFAULT_MAX_EVENTS);
 }

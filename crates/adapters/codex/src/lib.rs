@@ -366,7 +366,7 @@ fn apply_codex_line(state: &mut CodexSessionState, line: &str) {
         }
         "event_msg" => {
             if let Some(payload) = val.get("payload") {
-                apply_event_msg(state, timestamp, payload, &val);
+                apply_event_msg(state, timestamp, payload);
             }
         }
         "turn_complete" | "assistant_message" | "assistant_msg" => {
@@ -393,7 +393,6 @@ fn apply_event_msg(
     state: &mut CodexSessionState,
     timestamp: Option<&str>,
     payload: &serde_json::Value,
-    full_envelope: &serde_json::Value,
 ) {
     let event_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
     match event_type {
@@ -443,7 +442,6 @@ fn apply_event_msg(
         }
         "user_message" => {
             handle_user_message(state, timestamp, Some(payload));
-            let _ = full_envelope; // silence unused warning in this branch
         }
         "agent_message" => {
             let line_dt = timestamp.and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
@@ -452,13 +450,11 @@ fn apply_event_msg(
             }
             state.last_completed_ok = true;
             state.last_aborted = false;
-            if let Some(preview) = payload
-                .get("message")
-                .and_then(|v| v.as_str())
-                .map(|m| truncate_chars(m, 80))
-            {
-                state.progress_reason = Some(preview);
-            }
+            // Safety: last_tail must be a short *status* line, not assistant
+            // content. We intentionally do NOT echo message text here —
+            // that would leak up to 80 chars of model output into the run
+            // list. See docs/implementation-plan-monitoring-inspiration.md §8#4.
+            state.progress_reason = Some("Assistant replied".to_string());
         }
         "task_started" => {
             state.has_task_markers = true;
@@ -472,12 +468,9 @@ fn apply_event_msg(
             state.open_tasks = state.open_tasks.saturating_sub(1);
             state.last_completed_ok = true;
             state.last_aborted = false;
-            let preview = payload
-                .get("last_agent_message")
-                .and_then(|v| v.as_str())
-                .map(|m| truncate_chars(m, 80))
-                .unwrap_or_else(|| "Task complete".to_string());
-            state.progress_reason = Some(preview);
+            // Safety: never echo `last_agent_message` into last_tail — same
+            // reasoning as agent_message above.
+            state.progress_reason = Some("Task complete".to_string());
         }
         "task_aborted" | "turn_aborted" => {
             state.has_task_markers = true;
@@ -913,7 +906,31 @@ mod tests {
             CodexProgressKind::Completed
         );
         assert!(!codex_turn_open(&state));
-        assert_eq!(state.progress_reason.as_deref(), Some("Done"));
+        // progress_reason must be a fixed status line — never the assistant's
+        // message. Even the assistant's 80-char preview is off-limits.
+        assert_eq!(state.progress_reason.as_deref(), Some("Task complete"));
+    }
+
+    #[test]
+    fn progress_reason_does_not_leak_agent_message_content() {
+        // Regression: earlier iterations echoed up to 80 chars of agent_message
+        // / last_agent_message into last_tail, which violates the safety
+        // boundary in §8 #4 of the plan.
+        let mut state = CodexSessionState::default();
+        apply_lines(
+            &mut state,
+            &[
+                r#"{"type":"session_meta","timestamp":"2026-04-24T00:00:00Z","payload":{"id":"s1"}}"#,
+                r#"{"type":"event_msg","timestamp":"2026-04-24T00:00:01Z","payload":{"type":"user_message","message":"go"}}"#,
+                r#"{"type":"event_msg","timestamp":"2026-04-24T00:00:02Z","payload":{"type":"agent_message","message":"secret-api-key=abcdef sensitive-value"}}"#,
+            ],
+        );
+        let reason = state.progress_reason.as_deref().unwrap_or("");
+        assert!(
+            !reason.contains("secret-api-key"),
+            "progress_reason leaked agent content: {reason:?}"
+        );
+        assert_eq!(reason, "Assistant replied");
     }
 
     #[test]

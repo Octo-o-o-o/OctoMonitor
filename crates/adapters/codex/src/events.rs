@@ -459,7 +459,6 @@ pub fn parse_exec_output(raw: &str) -> ExecOutput {
         if stripped.trim_end() == "Output:" {
             body_start = Some(idx + 1);
         }
-        let _ = idx;
     }
 
     let body = if let Some(start_line) = body_start {

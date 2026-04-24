@@ -17,7 +17,7 @@ fn main() {
         let cwd_short = s
             .cwd
             .as_deref()
-            .and_then(|c| c.split('/').last())
+            .and_then(|c| c.rsplit('/').next())
             .unwrap_or("?");
         println!(
             "  [{}] id={} cwd={} tokens={} 5h={:?} 7d={:?}",

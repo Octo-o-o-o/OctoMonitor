@@ -1262,17 +1262,22 @@ fn classify_codex_session_state(session: &codex_adapter::CodexSession) -> RunSta
         });
 
     // 1. pending approval wins while fresh enough to matter.
-    if session.has_pending_approval && age_minutes.map_or(true, |m| m < 30) {
+    if session.has_pending_approval && age_minutes.is_none_or(|m| m < 30) {
         return RunState::WaitingApproval;
     }
 
     // 2. explicit progress hints from the adapter.
     match session.progress_kind {
         codex_adapter::CodexProgressKind::Running => {
-            if age_minutes.map_or(true, |m| m < 5) {
+            if age_minutes.is_none_or(|m| m < 5) {
                 return RunState::Active;
             }
-            // stuck "running" with no activity — fall through to age-based.
+            // `Running` with no activity for > 5min is almost always a stuck
+            // turn (session crashed before task_complete landed, or the CLI
+            // froze). Report Idle so the user can tell it's not fresh, but
+            // don't let it fall through to the age-based branch — that would
+            // incorrectly map "stuck running" to `Completed` after 10 min.
+            return RunState::Idle;
         }
         codex_adapter::CodexProgressKind::Completed => return RunState::Completed,
         codex_adapter::CodexProgressKind::Aborted => return RunState::Error,
@@ -2793,8 +2798,21 @@ mod tests {
     fn classify_codex_running_falls_back_to_idle_when_stuck() {
         let mut s = codex_session_at_age(6);
         s.progress_kind = codex_adapter::CodexProgressKind::Running;
-        // After 5 min without activity the "running" hint is stale — fall back
-        // to age-based (6 min < 10 min → Idle).
+        // `Running` with no activity > 5 min is treated as stuck and reported
+        // as Idle directly — we must NOT fall through to the age-based branch,
+        // which would misreport "stuck running" sessions as Completed after
+        // 10 min.
+        assert_eq!(classify_codex_session_state(&s), RunState::Idle);
+    }
+
+    #[test]
+    fn classify_codex_running_stays_idle_past_ten_minutes() {
+        // Regression: the previous implementation fell through to age-based
+        // after 5 min, so a 15-minute-stuck Running session would be
+        // misreported as Completed. Now it stays Idle until the adapter
+        // emits a terminal marker.
+        let mut s = codex_session_at_age(15);
+        s.progress_kind = codex_adapter::CodexProgressKind::Running;
         assert_eq!(classify_codex_session_state(&s), RunState::Idle);
     }
 
