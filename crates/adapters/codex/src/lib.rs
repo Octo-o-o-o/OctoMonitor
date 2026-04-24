@@ -12,6 +12,12 @@ pub use octomonitor_adapter_common::{
     AdapterDescriptor, CommandProbeResult, FileProbeResult, JsonlCursor,
 };
 
+pub mod events;
+pub use events::{
+    dedupe_adjacent, parse_exec_output, parse_session_event_line, read_tail_events, CodexEvent,
+    CodexEventKind, ExecOutput, TailReadResult, DEFAULT_MAX_EVENTS, DEFAULT_TAIL_BYTE_LIMIT,
+};
+
 pub fn descriptor() -> AdapterDescriptor {
     AdapterDescriptor {
         tool: "codex",
@@ -591,11 +597,12 @@ pub fn choose_codex_display_title(
     thread_name: Option<&str>,
     session_id: &str,
 ) -> String {
-    for candidate in [last_question, first_question, thread_name] {
-        if let Some(value) = candidate {
-            if !looks_noisy_title(value) {
-                return value.to_string();
-            }
+    for value in [last_question, first_question, thread_name]
+        .into_iter()
+        .flatten()
+    {
+        if !looks_noisy_title(value) {
+            return value.to_string();
         }
     }
 

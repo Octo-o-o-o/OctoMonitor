@@ -241,7 +241,7 @@ pub struct CodexEvent {
 - `command` 最多 400 字符。
 - 去除 ANSI 控制序列。
 - `timestamp` 使用 JSONL 原始字符串（Codex 侧已是 RFC 3339 / ISO 8601）；无 timestamp 时填空字符串，不伪造。
-- `turn_id` 目前 Codex JSONL 无稳定字段，可先一律填 `None`；若后续 `turn_context` 事件里出现再补。保留 `Option<String>` 使结构向前兼容。
+- `turn_id` 在 `event_msg.task_started` / `task_complete` / `turn_aborted` 载荷中存在；其他事件无则置 `None`。（实测 2026-04 session 分布确认。）
 
 ### 3.2 函数
 
@@ -275,7 +275,26 @@ pub struct TailReadResult {
 }
 ```
 
-`parse_exec_output` 的策略：`raw` 通常是 Codex `function_call_output.payload.output` 的 JSON 字符串。先尝试 `serde_json::from_str`；成功则取 `output.output` / `output.metadata.exit_code`；失败则把 `raw` 整体当作 body，`command`/`exit_code` 置 `None`。command 与 body 都做长度裁剪和 ANSI 去除。
+`parse_exec_output` 的策略：Codex 输出有两种格式：
+
+1. **Text 格式**（来自 `function_call_output.output`）：
+   ```
+   Chunk ID: b6af7f
+   Wall time: 0.0000 seconds
+   Process exited with code 0
+   Original token count: 12
+   Output:
+   <body>
+   ```
+   用行匹配抽 `exit_code`（"Process exited with code N"），`body` 取 `Output:` 之后的所有内容。
+
+2. **JSON 格式**（来自 `custom_tool_call_output.output`）：
+   ```json
+   {"output":"<body>","metadata":{"exit_code":0,"duration_seconds":0.0}}
+   ```
+   先 `serde_json::from_str`；成功则取 `output` 字段为 body、`metadata.exit_code` 为 exit code。
+
+`command` 不在 output 里，由 `parse_session_event_line` 从上一条 `function_call.arguments` 的 JSON 字符串抽 `cmd` 字段后组装（如果存在）。`parse_exec_output` 只返回 `(exit_code, body)`；如果两种格式都不匹配，把 `raw` 整段当 body。body 和 command 都做长度裁剪与 ANSI 控制序列去除。
 
 Cursor 语义：
 
