@@ -9,6 +9,7 @@ import { HeatmapView } from './components/monitor/HeatmapView'
 import { SettingsView } from './components/monitor/SettingsView'
 import { InspectDrawer } from './components/InspectDrawer'
 import { ShortcutOverlay } from './components/ShortcutOverlay'
+import { ToastContainer } from './components/common/Toast'
 import { RemotePairingGate } from './components/RemotePairingGate'
 import { LoadingScreen } from './components/LoadingScreen'
 import { apiFetch, buildWsUrl, normalizeBootstrapPayload } from './lib/api'
@@ -422,6 +423,7 @@ export default function App() {
       </main>
       <InspectDrawer />
       <ShortcutOverlay />
+      <ToastContainer />
     </div>
   )
 }

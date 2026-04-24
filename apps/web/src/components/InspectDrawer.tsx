@@ -6,11 +6,18 @@ import { formatTokens, formatCost, formatDuration, formatDateTime } from '../lib
 import { buildUsageBucketIndex } from '../lib/usage'
 import { apiFetch } from '../lib/api'
 import { getRuntimeMode } from '../lib/runtimeMode'
+import { CopyButton } from './common/CopyButton'
 
 type InspectEntry = {
   kind: 'input' | 'output'
   timestamp: string
   text: string
+}
+
+interface ResumeCommandPayload {
+  command: string | null
+  tool: string
+  note: string | null
 }
 
 const errorStates = new Set(['error', 'gatewayOffline', 'limitExceeded', 'contextExceeded'])
@@ -35,6 +42,7 @@ export function InspectDrawer() {
   const { t } = useI18n()
   const [entries, setEntries] = useState<InspectEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
+  const [resumeCommand, setResumeCommand] = useState<ResumeCommandPayload | null>(null)
   const runtimeMode = getRuntimeMode()
   const usageBucketIndex = useMemo(
     () => buildUsageBucketIndex(usageBuckets ?? []),
@@ -52,6 +60,30 @@ export function InspectDrawer() {
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [selectedRun, selectRun])
+
+  useEffect(() => {
+    let cancelled = false
+    setResumeCommand(null)
+
+    if (!selectedRun || runtimeMode === 'remoteViewer') {
+      return () => { cancelled = true }
+    }
+
+    void (async () => {
+      try {
+        const response = await apiFetch(
+          `/api/runs/${encodeURIComponent(selectedRun.id)}/resume-command`,
+        )
+        if (!response.ok) return
+        const payload = await response.json() as ResumeCommandPayload
+        if (!cancelled) setResumeCommand(payload)
+      } catch {
+        // best-effort; resume command is advisory only
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [runtimeMode, selectedRun])
 
   useEffect(() => {
     let cancelled = false
@@ -147,6 +179,60 @@ export function InspectDrawer() {
             <div className="inspect-section">
               <span className="inspect-section-label">{t('drawer.origin')}</span>
               <span className="inspect-section-value">{selectedRun.originLabel}</span>
+            </div>
+          )}
+
+          {runtimeMode === 'local' && (
+            <div className="inspect-section">
+              <div className="inspect-copy-row">
+                <CopyButton text={selectedRun.id} ariaLabel={t('drawer.copy.runId')} />
+                <span className="inspect-section-value">{selectedRun.id}</span>
+              </div>
+              {selectedRun.threadId && (
+                <div className="inspect-copy-row">
+                  <CopyButton
+                    text={selectedRun.threadId}
+                    ariaLabel={t('drawer.copy.threadId')}
+                  />
+                  <span className="inspect-section-value">{selectedRun.threadId}</span>
+                </div>
+              )}
+              {selectedRun.workspacePath && (
+                <div className="inspect-copy-row">
+                  <CopyButton
+                    text={selectedRun.workspacePath}
+                    ariaLabel={t('drawer.copy.workspacePath')}
+                  />
+                  <span className="inspect-section-value">{selectedRun.workspacePath}</span>
+                </div>
+              )}
+              {selectedRun.transcriptPath && (
+                <div className="inspect-copy-row">
+                  <CopyButton
+                    text={selectedRun.transcriptPath}
+                    ariaLabel={t('drawer.copy.transcriptPath')}
+                  />
+                  <span className="inspect-section-value">{selectedRun.transcriptPath}</span>
+                </div>
+              )}
+              {resumeCommand?.command ? (
+                <div className="inspect-copy-row">
+                  <CopyButton
+                    text={resumeCommand.command}
+                    ariaLabel={t('drawer.copy.resumeCommand')}
+                  />
+                  <span className="inspect-section-label">
+                    {t('drawer.resumeCommand.label')}
+                  </span>
+                  <code className="inspect-resume-cmd">{resumeCommand.command}</code>
+                </div>
+              ) : resumeCommand && resumeCommand.note ? (
+                <div className="inspect-copy-row">
+                  <span className="inspect-resume-unavailable">
+                    {t('drawer.resumeCommand.unavailable')}
+                  </span>
+                </div>
+              ) : null}
             </div>
           )}
 

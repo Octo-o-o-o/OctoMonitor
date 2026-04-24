@@ -1163,6 +1163,25 @@ fn build_run_from_codex_session(
     let five_h = probe.sessions.iter().find_map(|s| s.five_hour_used_pct);
     let seven_d = probe.sessions.iter().find_map(|s| s.seven_day_used_pct);
 
+    let display_title = codex_adapter::choose_codex_display_title(
+        session.last_question.as_deref(),
+        session.first_question.as_deref(),
+        session.thread_name.as_deref(),
+        &session.session_id,
+    );
+    let first_question_display = session
+        .first_question
+        .as_deref()
+        .filter(|value| !codex_adapter::looks_noisy_title(value))
+        .map(String::from)
+        .or_else(|| {
+            session
+                .thread_name
+                .as_deref()
+                .filter(|value| !codex_adapter::looks_noisy_title(value))
+                .map(String::from)
+        });
+
     RunRecord {
         id: format!("codex-session-{}", session.session_id),
         tool: ToolKind::Codex,
@@ -1189,21 +1208,11 @@ fn build_run_from_codex_session(
             elapsed_from_timestamps(&session.started_at, &session.last_activity_at)
         },
         state: classify_codex_session_state(session),
-        last_action: session
-            .last_question
-            .clone()
-            .or_else(|| session.first_question.clone())
-            .or_else(|| session.thread_name.clone()),
+        last_action: Some(display_title.clone()),
         last_tail: None,
         pending_approval: session.has_pending_approval,
-        first_question: session
-            .first_question
-            .clone()
-            .or_else(|| session.thread_name.clone()),
-        last_question: session
-            .last_question
-            .clone()
-            .or_else(|| session.first_question.clone()),
+        first_question: first_question_display,
+        last_question: Some(display_title),
         error_message: None,
         message_count: session.message_count,
         tokens: TokenUsage {

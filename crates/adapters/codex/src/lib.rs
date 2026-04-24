@@ -531,6 +531,82 @@ pub fn probe() -> CodexSnapshot {
     probe_with_cache(&mut cache)
 }
 
+/// Returns `true` when the candidate title is likely unhelpful/noisy for a run list.
+/// Catches JSON blobs, markdown fences, system prompt markers, long structured single
+/// lines, and values that are empty or only punctuation/whitespace.
+pub fn looks_noisy_title(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let first = trimmed.chars().next().unwrap_or(' ');
+    if matches!(first, '{' | '[' | '<') {
+        return true;
+    }
+
+    if trimmed.starts_with("```") {
+        return true;
+    }
+
+    let upper_head: String = trimmed.chars().take(16).collect();
+    let upper_head = upper_head.to_uppercase();
+    for prefix in [
+        "SYSTEM:",
+        "SYSTEM ",
+        "[SYSTEM",
+        "<SYSTEM",
+        "INSTRUCTION:",
+        "INSTRUCTIONS:",
+        "ASSISTANT:",
+        "USER:",
+    ] {
+        if upper_head.starts_with(prefix) {
+            return true;
+        }
+    }
+
+    let first_line = trimmed.lines().next().unwrap_or("");
+    if first_line.chars().count() > 240 && !first_line.contains(' ') {
+        return true;
+    }
+
+    let has_any_word_char = trimmed
+        .chars()
+        .any(|c| c.is_alphanumeric() || (c as u32) > 0x7F);
+    if !has_any_word_char {
+        return true;
+    }
+
+    false
+}
+
+/// Pick a display-friendly title for a Codex session, falling back through candidates
+/// whenever the preferred value is noisy.
+///
+/// Priority: `last_question` -> `first_question` -> `thread_name` -> session id prefix.
+pub fn choose_codex_display_title(
+    last_question: Option<&str>,
+    first_question: Option<&str>,
+    thread_name: Option<&str>,
+    session_id: &str,
+) -> String {
+    for candidate in [last_question, first_question, thread_name] {
+        if let Some(value) = candidate {
+            if !looks_noisy_title(value) {
+                return value.to_string();
+            }
+        }
+    }
+
+    let short_id: String = session_id.chars().take(8).collect();
+    if short_id.is_empty() {
+        "codex session".to_string()
+    } else {
+        short_id
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -541,6 +617,78 @@ mod tests {
     fn descriptor_returns_codex() {
         let d = descriptor();
         assert_eq!(d.tool, "codex");
+    }
+
+    #[test]
+    fn looks_noisy_flags_json_objects_and_arrays() {
+        assert!(looks_noisy_title("{\"role\":\"user\",\"content\":\"hi\"}"));
+        assert!(looks_noisy_title("[ {\"type\":\"text\"} ]"));
+        assert!(looks_noisy_title("<tool_use>payload</tool_use>"));
+    }
+
+    #[test]
+    fn looks_noisy_flags_markdown_fence() {
+        assert!(looks_noisy_title("```json\n{\"a\":1}\n```"));
+    }
+
+    #[test]
+    fn looks_noisy_flags_system_prefix() {
+        assert!(looks_noisy_title("System: this is a hidden instruction"));
+        assert!(looks_noisy_title("[SYSTEM] reminder"));
+        assert!(looks_noisy_title("Instructions: do the thing"));
+    }
+
+    #[test]
+    fn looks_noisy_flags_empty_and_symbol_only_values() {
+        assert!(looks_noisy_title(""));
+        assert!(looks_noisy_title("   "));
+        assert!(looks_noisy_title("---/////"));
+    }
+
+    #[test]
+    fn looks_noisy_flags_long_single_token_line() {
+        let long = "a".repeat(260);
+        assert!(looks_noisy_title(&long));
+    }
+
+    #[test]
+    fn looks_noisy_accepts_normal_sentences() {
+        assert!(!looks_noisy_title("Fix pagination off-by-one bug"));
+        assert!(!looks_noisy_title("修复登录跳转问题"));
+        assert!(!looks_noisy_title("Summarize the release notes"));
+    }
+
+    #[test]
+    fn choose_display_title_prefers_last_question() {
+        let out = choose_codex_display_title(
+            Some("Real last question"),
+            Some("First question"),
+            Some("Thread one"),
+            "abcdef1234567890",
+        );
+        assert_eq!(out, "Real last question");
+    }
+
+    #[test]
+    fn choose_display_title_falls_back_past_noisy_values() {
+        let out = choose_codex_display_title(
+            Some("{\"payload\":\"noisy\"}"),
+            Some("```json\n{\"a\":1}\n```"),
+            Some("Clean thread name"),
+            "abcdef1234567890",
+        );
+        assert_eq!(out, "Clean thread name");
+    }
+
+    #[test]
+    fn choose_display_title_returns_short_session_id_when_all_noisy() {
+        let out = choose_codex_display_title(
+            Some("{\"a\":1}"),
+            Some("[payload]"),
+            Some("   "),
+            "abcdef1234567890",
+        );
+        assert_eq!(out, "abcdef12");
     }
 
     #[test]

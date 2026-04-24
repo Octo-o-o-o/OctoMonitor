@@ -24,7 +24,8 @@ use tower_http::cors::CorsLayer;
 
 use config::{load_config, save_config};
 use handlers::{
-    bootstrap, config as config_handler, history, ingest, inspect, installer, remote, stream,
+    bootstrap, config as config_handler, history, ingest, inspect, installer, remote, resume,
+    stream,
 };
 use pricing::PricingStore;
 use probe::{empty_bootstrap, spawn_derive_refresh, spawn_probe_refresh};
@@ -68,6 +69,10 @@ pub(crate) fn build_app(state: AppState) -> Router {
         .route("/api/history/usage", get(history::get_usage_history))
         .route("/api/history/commits", get(history::get_commit_history))
         .route("/api/runs/{run_id}/inspect", get(inspect::get_run_inspect))
+        .route(
+            "/api/runs/{run_id}/resume-command",
+            get(resume::get_run_resume_command),
+        )
         .route(
             "/api/config",
             get(config_handler::get_config).patch(config_handler::patch_config),

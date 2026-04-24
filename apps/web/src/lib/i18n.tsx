@@ -243,6 +243,17 @@ const en = {
   'drawer.input': 'Input',
   'drawer.output': 'Output',
   'drawer.loadingEntries': 'Loading timeline…',
+  'drawer.copy.runId': 'Copy run id',
+  'drawer.copy.threadId': 'Copy session id',
+  'drawer.copy.workspacePath': 'Copy workspace path',
+  'drawer.copy.transcriptPath': 'Copy transcript path',
+  'drawer.copy.resumeCommand': 'Copy resume command',
+  'drawer.resumeCommand.label': 'Resume (advisory)',
+  'drawer.resumeCommand.unavailable': 'Resume command unavailable',
+
+  // toast
+  'toast.copied': 'Copied',
+  'toast.copyFailed': 'Copy failed',
 
   // unit
   'unit.tok': 'tok',
@@ -557,6 +568,16 @@ const zh: Record<I18nKey, string> = {
   'drawer.input': '\u8F93\u5165',
   'drawer.output': '\u8F93\u51FA',
   'drawer.loadingEntries': '\u6B63\u5728\u52A0\u8F7D\u65F6\u95F4\u7EBF\u2026',
+  'drawer.copy.runId': '复制 Run ID',
+  'drawer.copy.threadId': '复制 Session ID',
+  'drawer.copy.workspacePath': '复制工作区路径',
+  'drawer.copy.transcriptPath': '复制 Transcript 路径',
+  'drawer.copy.resumeCommand': '复制恢复命令',
+  'drawer.resumeCommand.label': '建议命令（仅复制）',
+  'drawer.resumeCommand.unavailable': '暂无可用的恢复命令',
+
+  'toast.copied': '已复制',
+  'toast.copyFailed': '复制失败',
 
   'unit.tok': 'tok',
   'unit.tokens': 'tokens',
