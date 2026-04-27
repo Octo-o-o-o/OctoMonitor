@@ -103,8 +103,7 @@ pub fn read_jsonl_delta(path: &Path, cursor: &mut JsonlCursor) -> io::Result<Jso
     let mut lines = Vec::new();
     let mut line = String::new();
     while reader.read_line(&mut line)? > 0 {
-        let end = line.trim_end_matches(['\n', '\r']).len();
-        line.truncate(end);
+        line.truncate(line.trim_end_matches(['\n', '\r']).len());
         lines.push(std::mem::take(&mut line));
     }
     cursor.offset = reader.stream_position()?;
