@@ -950,11 +950,12 @@ mod tests {
 
     #[test]
     fn freshness_thresholds_work() {
-        assert!(matches!(classify_freshness(1), Freshness::Hot));
-        assert!(matches!(classify_freshness(10), Freshness::Warm));
-        assert!(matches!(classify_freshness(40), Freshness::Stale));
-        assert!(matches!(classify_freshness(90), Freshness::Cold));
+        assert_eq!(classify_freshness(1), Freshness::Hot);
+        assert_eq!(classify_freshness(10), Freshness::Warm);
+        assert_eq!(classify_freshness(40), Freshness::Stale);
+        assert_eq!(classify_freshness(90), Freshness::Cold);
     }
+
     #[test]
     fn demo_bootstrap_contains_three_tools() {
         let payload = demo_bootstrap();
