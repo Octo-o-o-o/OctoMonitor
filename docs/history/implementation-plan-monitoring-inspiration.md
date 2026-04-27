@@ -1,6 +1,8 @@
 # 借鉴参考监督台的实施计划
 
-源文档：`docs/reference-monitoring-inspiration.md`
+> 2026-04-27 更新：Phase 0-3 已全部落地（CopyButton/Toast、resume-command API、标题降噪、Codex 事件 parser、progress hint + `classify_codex_session_state`、MonitorFilterBar、events endpoint、InspectDrawer timeline 均已合入主线），本文件归档作为已完成的实施记录。Phase 4（只读元数据补强）仍未启动，可作为后续评估的输入；第 8 节"安全边界"清单仍可作为后续新增 API 时的 checklist 参考。
+
+源文档：`docs/history/reference-monitoring-inspiration.md`
 
 日期：2026-04-24
 
@@ -636,5 +638,5 @@ OctoMonitor：
 
 参考文档：
 
-- `docs/reference-monitoring-inspiration.md`：策略和边界。
+- `docs/history/reference-monitoring-inspiration.md`：策略和边界。
 - 本文件：实施计划。

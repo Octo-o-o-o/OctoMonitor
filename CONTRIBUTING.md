@@ -177,8 +177,8 @@ apps/web/src/
 
 1. Create a new crate in `crates/adapters/<name>/`
 2. Implement `descriptor()`, `probe()`, and any cache helpers your adapter needs
-3. Add the tool to `ToolKind` in [`crates/core/src/lib.rs`](/Users/wangyixiao/WorkSpace/OctoMonitor/crates/core/src/lib.rs)
-4. Wire the adapter into [`crates/server/src/probe.rs`](/Users/wangyixiao/WorkSpace/OctoMonitor/crates/server/src/probe.rs) and [`crates/server/src/watcher.rs`](/Users/wangyixiao/WorkSpace/OctoMonitor/crates/server/src/watcher.rs) if it has watchable local state
+3. Add the tool to `ToolKind` in [`crates/core/src/lib.rs`](crates/core/src/lib.rs)
+4. Wire the adapter into [`crates/server/src/probe.rs`](crates/server/src/probe.rs) and [`crates/server/src/watcher.rs`](crates/server/src/watcher.rs) if it has watchable local state
 5. Extend installer detect/doctor output if the tool should appear in Environment & Doctor
 6. Update frontend constants, default panel/filter settings, and i18n labels for the new tool
 

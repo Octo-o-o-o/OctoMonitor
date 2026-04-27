@@ -1,5 +1,7 @@
 # 参考监督台借鉴建议
 
+> 2026-04-27 更新：本文档列出的 Phase 0-3 借鉴项已通过 `docs/history/implementation-plan-monitoring-inspiration.md` 落地。Phase 4（元数据补强）与 Phase 5（手机值守 / annotation 评估）尚未启动；本文件归档保留，作为后续相关讨论的策略与边界参考。
+
 日期：2026-04-24
 
 参考仓库：用户提供的本地参考监督台项目。

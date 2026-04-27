@@ -433,7 +433,7 @@ fn apply_event_msg(
             // Safety: last_tail must be a short *status* line, not assistant
             // content. We intentionally do NOT echo message text here —
             // that would leak up to 80 chars of model output into the run
-            // list. See docs/implementation-plan-monitoring-inspiration.md §8#4.
+            // list. See docs/history/implementation-plan-monitoring-inspiration.md §8#4.
             state.progress_reason = Some("Assistant replied".to_string());
         }
         "task_started" => {

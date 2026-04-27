@@ -34,7 +34,7 @@
 - Server bootstrap blends local adapter probes with in-memory live ingest updates; config patches survive probe refresh cycles
 - Web UI has WS reconnect with exponential backoff and a LIVE/OFFLINE status indicator
 - Desktop finds the server binary relative to itself in release builds; only falls back to `cargo run` in debug builds
-- Current documentation entry points: `README.md`, `README.zh.md`, `CONTRIBUTING.md`, `docs/README.md`, and `docs/implementation-plan-monitoring-inspiration.md` for the latest multi-phase plan and its review notes
+- Current documentation entry points: `README.md`, `README.zh.md`, `CONTRIBUTING.md`, `docs/README.md`
 
 ## Rules
 - No database

@@ -3,7 +3,7 @@
 //! The functions here are **pure** and do not touch OctoMonitor state. They take raw
 //! JSONL lines or file paths and produce structured [`CodexEvent`] values suitable for
 //! timeline rendering and progress inference. See
-//! `docs/implementation-plan-monitoring-inspiration.md` §3 for the event taxonomy and
+//! `docs/history/implementation-plan-monitoring-inspiration.md` §3 for the event taxonomy and
 //! the sampling notes that back these field choices.
 
 use serde::{Deserialize, Serialize};
