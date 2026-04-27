@@ -124,14 +124,13 @@ fn discover_instances(root: &Path) -> Vec<(String, PathBuf)> {
     }
 
     // Named profiles — ~/.hermes/profiles/<name>/
-    let profiles_dir = root.join("profiles");
-    if profiles_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&profiles_dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    instances.push((name, entry.path()));
-                }
+    if let Ok(entries) = fs::read_dir(root.join("profiles")) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                instances.push((
+                    entry.file_name().to_string_lossy().into_owned(),
+                    entry.path(),
+                ));
             }
         }
     }
@@ -144,10 +143,7 @@ fn discover_instances(root: &Path) -> Vec<(String, PathBuf)> {
 // ---------------------------------------------------------------------------
 
 fn check_gateway_status(home: &Path) -> (bool, Option<String>, Vec<String>) {
-    let pid_file = home.join("gateway.pid");
-
-    let state_file = home.join("gateway_state.json");
-    let (state, platforms) = fs::read_to_string(&state_file)
+    let (state, platforms) = fs::read_to_string(home.join("gateway_state.json"))
         .ok()
         .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
         .map(|val| {
@@ -162,10 +158,10 @@ fn check_gateway_status(home: &Path) -> (bool, Option<String>, Vec<String>) {
                 .unwrap_or_default();
             (state, platforms)
         })
-        .unwrap_or((None, vec![]));
+        .unwrap_or_default();
 
     // Running = PID file exists, process is alive, and state is not explicitly stopped
-    let pid_alive = fs::read_to_string(&pid_file)
+    let pid_alive = fs::read_to_string(home.join("gateway.pid"))
         .ok()
         .and_then(|s| s.trim().parse::<u32>().ok())
         .is_some_and(is_process_alive);
@@ -193,31 +189,23 @@ fn is_process_alive(pid: u32) -> bool {
 
 fn derive_origin(entry: &serde_json::Value) -> (Option<String>, Option<String>) {
     let origin = entry.get("origin");
+    let origin_str = |key: &str| origin.and_then(|o| o.get(key)).and_then(|v| v.as_str());
 
-    let platform = origin
-        .and_then(|o| o.get("platform"))
-        .and_then(|v| v.as_str())
-        .or_else(|| entry.get("platform").and_then(|v| v.as_str()));
-
-    let user_name = origin
-        .and_then(|o| o.get("user_name"))
-        .and_then(|v| v.as_str());
-    let chat_name = origin
-        .and_then(|o| o.get("chat_name"))
-        .and_then(|v| v.as_str());
-
-    let provider = platform.map(String::from);
+    let platform =
+        origin_str("platform").or_else(|| entry.get("platform").and_then(|v| v.as_str()));
 
     let label = match platform {
         Some("local") => Some("CLI".to_string()),
         Some(p) => {
-            let name = user_name.or(chat_name).unwrap_or("DM");
+            let name = origin_str("user_name")
+                .or_else(|| origin_str("chat_name"))
+                .unwrap_or("DM");
             Some(format!("{}: {}", capitalize(p), name))
         }
         None => None,
     };
 
-    (label, provider)
+    (label, platform.map(String::from))
 }
 
 fn parse_sessions_json(
@@ -232,64 +220,31 @@ fn parse_sessions_json(
     let mut result = Vec::new();
 
     for (session_key, entry) in obj {
+        let get_str = |key: &str| entry.get(key).and_then(|v| v.as_str()).map(String::from);
+        let get_u64 = |key: &str| entry.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+
         let Some(session_id) = entry
             .get("session_id")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
+            .map(String::from)
         else {
             continue;
         };
-        let session_id = session_id.to_string();
 
-        let created_at = entry
-            .get("created_at")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let updated_at = entry
-            .get("updated_at")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let created_at = get_str("created_at");
+        let updated_at = get_str("updated_at");
 
         // Skip entries with no meaningful data
         if created_at.is_none() && updated_at.is_none() {
             continue;
         }
 
-        let display_name = entry
-            .get("display_name")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let platform = entry
-            .get("platform")
-            .and_then(|v| v.as_str())
-            .map(String::from);
         let chat_type = entry
             .get("chat_type")
             .and_then(|v| v.as_str())
             .unwrap_or("dm")
             .to_string();
-
-        let input_tokens = entry
-            .get("input_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let output_tokens = entry
-            .get("output_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cache_read_tokens = entry
-            .get("cache_read_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cache_write_tokens = entry
-            .get("cache_write_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let total_tokens = entry
-            .get("total_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cost_usd = entry.get("estimated_cost_usd").and_then(|v| v.as_f64());
 
         let (origin_label, origin_provider) = derive_origin(entry);
 
@@ -297,18 +252,18 @@ fn parse_sessions_json(
             session_id,
             session_key: session_key.clone(),
             profile_name: profile_name.to_string(),
-            display_name,
-            platform,
+            display_name: get_str("display_name"),
+            platform: get_str("platform"),
             chat_type,
             model: model_from_config.map(String::from),
             started_at: created_at,
             updated_at,
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            total_tokens,
-            cost_usd,
+            input_tokens: get_u64("input_tokens"),
+            output_tokens: get_u64("output_tokens"),
+            cache_read_tokens: get_u64("cache_read_tokens"),
+            cache_write_tokens: get_u64("cache_write_tokens"),
+            total_tokens: get_u64("total_tokens"),
+            cost_usd: entry.get("estimated_cost_usd").and_then(|v| v.as_f64()),
             first_question: None,
             last_question: None,
             message_count: 0,
@@ -354,30 +309,32 @@ fn load_cached_sessions(
 // ---------------------------------------------------------------------------
 
 fn read_default_model(home: &Path) -> Option<String> {
-    let config_path = home.join("config.yaml");
-    let contents = fs::read_to_string(config_path).ok()?;
-    // Simple extraction: look for "default:" under "model:" section
+    let contents = fs::read_to_string(home.join("config.yaml")).ok()?;
+    let clean = |raw: &str| {
+        let v = raw.trim().trim_matches('"').trim_matches('\'');
+        (!v.is_empty()).then(|| v.to_string())
+    };
+
+    // Look for "model: <inline>" or "default: <value>" inside a "model:" block.
     let mut in_model = false;
     for line in contents.lines() {
         let trimmed = line.trim();
         if trimmed == "model:" {
             in_model = true;
             continue;
-        } else if let Some(rest) = trimmed.strip_prefix("model:") {
-            // Inline form: "model: anthropic/claude-opus-4.6"
-            let model = rest.trim().trim_matches('"').trim_matches('\'');
-            if !model.is_empty() {
-                return Some(model.to_string());
+        }
+        if let Some(rest) = trimmed.strip_prefix("model:") {
+            if let Some(model) = clean(rest) {
+                return Some(model);
             }
         }
         if in_model {
             if !line.starts_with(' ') && !line.starts_with('\t') {
-                break; // Left model section
+                break;
             }
             if let Some(rest) = trimmed.strip_prefix("default:") {
-                let model = rest.trim().trim_matches('"').trim_matches('\'');
-                if !model.is_empty() {
-                    return Some(model.to_string());
+                if let Some(model) = clean(rest) {
+                    return Some(model);
                 }
             }
         }
@@ -393,24 +350,19 @@ fn cron_to_human(schedule: &serde_json::Value) -> String {
     // Hermes uses a richer schedule format: {"kind": "cron", "cron": "0 9 * * *", ...}
     // or {"kind": "interval", "seconds": 3600, ...}
     // or {"kind": "once", "at": "2026-04-15T10:00:00", ...}
-    let kind = schedule
-        .get("kind")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
+    let str_or = |key: &str, fallback: &'static str| {
+        schedule
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or(fallback)
+    };
+    let u64_or_zero = |key: &str| schedule.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let kind = str_or("kind", "unknown");
     match kind {
-        "cron" => {
-            let expr = schedule.get("cron").and_then(|v| v.as_str()).unwrap_or("?");
-            let tz = schedule
-                .get("timezone")
-                .and_then(|v| v.as_str())
-                .unwrap_or("UTC");
-            format_cron_expr(expr, tz)
-        }
+        "cron" => format_cron_expr(str_or("cron", "?"), str_or("timezone", "UTC")),
         "interval" => {
-            let secs = schedule
-                .get("seconds")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let secs = u64_or_zero("seconds");
             if secs >= 3600 {
                 format!("Every {}h", secs / 3600)
             } else if secs >= 60 {
@@ -419,21 +371,12 @@ fn cron_to_human(schedule: &serde_json::Value) -> String {
                 format!("Every {}s", secs)
             }
         }
-        "once" => {
-            let at = schedule.get("at").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("Once at {}", at)
-        }
-        "daily" => {
-            let hour = schedule
-                .get("at_hour")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let minute = schedule
-                .get("at_minute")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            format!("Daily {:02}:{:02}", hour, minute)
-        }
+        "once" => format!("Once at {}", str_or("at", "?")),
+        "daily" => format!(
+            "Daily {:02}:{:02}",
+            u64_or_zero("at_hour"),
+            u64_or_zero("at_minute")
+        ),
         _ => schedule
             .get("display")
             .and_then(|v| v.as_str())
@@ -460,20 +403,14 @@ fn scan_cron_jobs(home: &Path, profile_name: &str) -> Vec<HermesCronJob> {
             let enabled = j.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
 
             let schedule = j.get("schedule")?;
-            let schedule_human = cron_to_human(schedule);
+            let sched_str = |key: &str| schedule.get(key).and_then(|v| v.as_str());
 
-            let expr = schedule
-                .get("cron")
-                .and_then(|v| v.as_str())
+            let expr = sched_str("cron")
                 .or_else(|| j.get("schedule_display").and_then(|v| v.as_str()))
-                .or_else(|| schedule.get("kind").and_then(|v| v.as_str()))
+                .or_else(|| sched_str("kind"))
                 .unwrap_or("unknown")
                 .to_string();
-            let tz = schedule
-                .get("timezone")
-                .and_then(|v| v.as_str())
-                .unwrap_or("UTC")
-                .to_string();
+            let tz = sched_str("timezone").unwrap_or("UTC").to_string();
 
             Some(HermesCronJob {
                 id,
@@ -482,7 +419,7 @@ fn scan_cron_jobs(home: &Path, profile_name: &str) -> Vec<HermesCronJob> {
                 profile_name: profile_name.to_string(),
                 schedule_expr: expr,
                 schedule_tz: tz,
-                schedule_human,
+                schedule_human: cron_to_human(schedule),
             })
         })
         .collect()
@@ -495,25 +432,19 @@ fn scan_cron_jobs(home: &Path, profile_name: &str) -> Vec<HermesCronJob> {
 fn scan_instance(
     profile_name: &str,
     home: &Path,
-    cache: Option<&mut HermesProbeCache>,
+    cache: &mut HermesProbeCache,
 ) -> (HermesInstance, Vec<HermesSession>, Vec<HermesCronJob>) {
     let config_exists = home.join("config.yaml").exists();
     let model = read_default_model(home);
-    let model_ref = model.as_deref();
 
     let (gw_running, gw_state, gw_platforms) = check_gateway_status(home);
 
     let sessions_json = home.join("sessions").join("sessions.json");
     let sessions = sessions_json
         .exists()
-        .then(|| match cache {
-            Some(cache) => load_cached_sessions(cache, &sessions_json, profile_name, model_ref),
-            None => parse_sessions_json(&sessions_json, profile_name, model_ref),
-        })
+        .then(|| load_cached_sessions(cache, &sessions_json, profile_name, model.as_deref()))
         .flatten()
         .unwrap_or_default();
-
-    let cron_jobs = scan_cron_jobs(home, profile_name);
 
     let instance = HermesInstance {
         profile_name: profile_name.to_string(),
@@ -525,7 +456,7 @@ fn scan_instance(
         session_count: sessions.len(),
     };
 
-    (instance, sessions, cron_jobs)
+    (instance, sessions, scan_cron_jobs(home, profile_name))
 }
 
 pub fn probe_with_cache(cache: &mut HermesProbeCache) -> HermesSnapshot {
@@ -541,31 +472,25 @@ pub fn probe_with_cache(cache: &mut HermesProbeCache) -> HermesSnapshot {
     let mut all_sessions = Vec::new();
     let mut all_cron_jobs = Vec::new();
     let mut any_gateway_running = false;
-
-    // Track which session list files are still live for cache cleanup
-    let mut live_cache_keys = Vec::new();
+    let mut live_cache_keys = std::collections::HashSet::new();
 
     for (profile_name, home) in &instances_discovered {
         let sessions_json = home.join("sessions").join("sessions.json");
         if sessions_json.exists() {
-            live_cache_keys.push(sessions_json.display().to_string());
+            live_cache_keys.insert(sessions_json.display().to_string());
         }
 
-        let (instance, sessions, cron_jobs) = scan_instance(profile_name, home, Some(cache));
-        if instance.gateway_running {
-            any_gateway_running = true;
-        }
+        let (instance, sessions, cron_jobs) = scan_instance(profile_name, home, cache);
+        any_gateway_running |= instance.gateway_running;
         all_instances.push(instance);
         all_sessions.extend(sessions);
         all_cron_jobs.extend(cron_jobs);
     }
 
-    // Clean stale cache entries
     cache
         .session_lists
         .retain(|key, _| live_cache_keys.contains(key));
 
-    // Sort sessions by updated_at descending
     all_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
     HermesSnapshot {
