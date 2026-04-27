@@ -106,17 +106,13 @@ interface CustomTheme {
 interface ThemeContextValue {
   themeId: ThemeId
   setTheme: (id: ThemeId) => void
-  customThemes: CustomTheme[]
   importVSCodeTheme: (json: string) => string | null
-  removeCustomTheme: (id: string) => void
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   themeId: 'dark',
   setTheme: () => {},
-  customThemes: [],
   importVSCodeTheme: () => null,
-  removeCustomTheme: () => {},
 })
 
 const cssVarNames: Record<keyof ThemeColors, string> = {
@@ -140,10 +136,6 @@ function applyThemeColors(colors: ThemeColors) {
 
   const lum = hexLuminance(colors.bg)
   root.style.colorScheme = lum > 0.5 ? 'light' : 'dark'
-}
-
-function applyThemeId(id: ThemeId) {
-  document.documentElement.setAttribute('data-theme', id)
 }
 
 function hexLuminance(hex: string): number {
@@ -211,20 +203,13 @@ export function ThemeProvider({ children }: PropsWithChildren) {
   const [themeId, setThemeId] = useState<ThemeId>(detectDefaultTheme)
   const [customThemes, setCustomThemes] = useState<CustomTheme[]>(loadCustomThemes)
 
-  const applyCurrentTheme = useCallback(
-    (id: ThemeId, customs: CustomTheme[]) => {
-      applyThemeId(id)
-      const colors = builtinThemes[id]
-        ?? customs.find((t) => t.id === id)?.colors
-        ?? builtinThemes.dark
-      applyThemeColors(colors)
-    },
-    [],
-  )
-
   useEffect(() => {
-    applyCurrentTheme(themeId, customThemes)
-  }, [themeId, customThemes, applyCurrentTheme])
+    document.documentElement.setAttribute('data-theme', themeId)
+    const colors = builtinThemes[themeId]
+      ?? customThemes.find((t) => t.id === themeId)?.colors
+      ?? builtinThemes.dark
+    applyThemeColors(colors)
+  }, [themeId, customThemes])
 
   const setTheme = useCallback((id: ThemeId) => {
     try {
@@ -250,18 +235,8 @@ export function ThemeProvider({ children }: PropsWithChildren) {
     [customThemes, setTheme],
   )
 
-  const removeCustomTheme = useCallback(
-    (id: string) => {
-      const updated = customThemes.filter((t) => t.id !== id)
-      setCustomThemes(updated)
-      saveCustomThemes(updated)
-      if (themeId === id) setTheme('dark')
-    },
-    [customThemes, themeId, setTheme],
-  )
-
   return (
-    <ThemeContext.Provider value={{ themeId, setTheme, customThemes, importVSCodeTheme, removeCustomTheme }}>
+    <ThemeContext.Provider value={{ themeId, setTheme, importVSCodeTheme }}>
       {children}
     </ThemeContext.Provider>
   )

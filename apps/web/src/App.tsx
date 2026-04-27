@@ -52,6 +52,18 @@ function readDesktopBootIssue(): DesktopBootIssue | null {
   return bootIssue
 }
 
+// Mirror a setting to <html data-*> while the default value uses no attribute,
+// so themed CSS can target only non-default rows without an extra reset.
+function useDocumentDataAttr(attr: string, value: string, defaultValue: string) {
+  useEffect(() => {
+    if (value === defaultValue) {
+      document.documentElement.removeAttribute(attr)
+    } else {
+      document.documentElement.setAttribute(attr, value)
+    }
+  }, [attr, value, defaultValue])
+}
+
 function useWebSocket(
   enabled: boolean,
   onMessage: (data: unknown) => void,
@@ -293,10 +305,10 @@ export default function App() {
   })
   const checkWaitingNotifications = useWaitingNotifications(notificationsEnabled, t)
   const handleWsMessage = useCallback((payload: unknown) => {
-    const data = normalizeBootstrapPayload(payload)
-    setData(data)
-    setConnectionStatus(data.generatedAt ? 'live' : 'connecting')
-    checkWaitingNotifications(data)
+    const next = normalizeBootstrapPayload(payload)
+    setData(next)
+    setConnectionStatus(next.generatedAt ? 'live' : 'connecting')
+    checkWaitingNotifications(next)
   }, [setConnectionStatus, setData, checkWaitingNotifications])
   const handleConnectionChange = useCallback((connected: boolean) => {
     setConnectionStatus(connected ? 'connecting' : 'offline')
@@ -379,21 +391,8 @@ export default function App() {
     }
   }, [activeTab, runtimeMode, setActiveTab])
 
-  useEffect(() => {
-    if (fontSize === 'default') {
-      document.documentElement.removeAttribute('data-fontsize')
-    } else {
-      document.documentElement.setAttribute('data-fontsize', fontSize)
-    }
-  }, [fontSize])
-
-  useEffect(() => {
-    if (uiDensity === 'comfortable') {
-      document.documentElement.removeAttribute('data-density')
-    } else {
-      document.documentElement.setAttribute('data-density', uiDensity)
-    }
-  }, [uiDensity])
+  useDocumentDataAttr('data-fontsize', fontSize, 'default')
+  useDocumentDataAttr('data-density', uiDensity, 'comfortable')
 
   useEffect(() => {
     if (runtimeMode !== 'local') return
@@ -410,6 +409,23 @@ export default function App() {
   const visibleDesktopBootIssue =
     runtimeMode === 'local' && connectionStatus !== 'live' ? desktopBootIssue : null
 
+  function renderMain() {
+    if (runtimeMode === 'remoteViewer' && remoteAuthState === 'required') {
+      return (
+        <RemotePairingGate onPaired={() => {
+          setRemoteAuthState('checking')
+          setData(null)
+          setConnectionStatus('connecting')
+          setAuthCheckNonce((value) => value + 1)
+        }} />
+      )
+    }
+    if (connectionStatus === 'connecting' && !data) {
+      return <LoadingScreen />
+    }
+    return <TabContent runtimeMode={runtimeMode} tab={activeTab} />
+  }
+
   return (
     <div className="app-shell">
       <StatusBar runtimeMode={runtimeMode} wsConnected={wsConnected} />
@@ -420,18 +436,7 @@ export default function App() {
         </div>
       )}
       <main className={`main-content${activeTab === 'monitor' ? ' no-scroll' : ''}`}>
-        {runtimeMode === 'remoteViewer' && remoteAuthState === 'required' ? (
-          <RemotePairingGate onPaired={() => {
-            setRemoteAuthState('checking')
-            setData(null)
-            setConnectionStatus('connecting')
-            setAuthCheckNonce((value) => value + 1)
-          }} />
-        ) : connectionStatus === 'connecting' && !data ? (
-          <LoadingScreen />
-        ) : (
-          <TabContent runtimeMode={runtimeMode} tab={activeTab} />
-        )}
+        {renderMain()}
       </main>
       <InspectDrawer />
       <ShortcutOverlay />

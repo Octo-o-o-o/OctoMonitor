@@ -10,10 +10,11 @@ export function ShortcutOverlay() {
   const { t } = useI18n()
   const runtimeMode = getRuntimeMode()
   const showDesktopShortcuts = isTauriEnvironment()
+  const isRemote = runtimeMode === 'remoteViewer'
   const shortcuts = [
     {
-      key: runtimeMode === 'remoteViewer' ? '1 / 2' : '1 / 2 / 3 / 4 / 5',
-      action: runtimeMode === 'remoteViewer' ? t('shortcut.switchTabRemote') : t('shortcut.switchTab'),
+      key: isRemote ? '1 / 2' : '1 / 2 / 3 / 4 / 5',
+      action: t(isRemote ? 'shortcut.switchTabRemote' : 'shortcut.switchTab'),
     },
     { key: 'j / k', action: t('shortcut.navigate') },
     { key: 'Enter', action: t('shortcut.openDrawer') },

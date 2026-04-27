@@ -85,12 +85,8 @@ export function UsageView() {
     [data],
   )
 
-  const activeRuns = mode === 'history'
-    ? (historyData?.runs ?? [])
-    : (data?.runs ?? [])
-  const activeBuckets = mode === 'history'
-    ? (historyData?.usageBuckets ?? [])
-    : (data?.usageBuckets ?? [])
+  const activeRuns = (mode === 'history' ? historyData?.runs : data?.runs) ?? []
+  const activeBuckets = (mode === 'history' ? historyData?.usageBuckets : data?.usageBuckets) ?? []
 
   const effectiveRange = useMemo(() => {
     if (mode === 'history') {

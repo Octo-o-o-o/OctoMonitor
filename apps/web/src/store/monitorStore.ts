@@ -40,7 +40,6 @@ interface MonitorState {
   focusedRunId?: string
   connectionStatus: ConnectionStatus
   activeTab: ActiveTab
-  settingsOpen: boolean
   showShortcutHelp: boolean
   settings: FrontendSettings
   acknowledgedErrors: Set<string>
@@ -56,7 +55,6 @@ interface MonitorState {
   acknowledgeError: (id: string) => void
   dismissAttention: (id: string) => void
   setActiveTab: (tab: ActiveTab) => void
-  setSettingsOpen: (open: boolean) => void
   updateSettings: (patch: Partial<FrontendSettings>) => void
   setMonitorQuickFilter: (filter: MonitorQuickFilter) => void
   setMonitorSearch: (value: string) => void
@@ -66,7 +64,6 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   data: null,
   connectionStatus: 'connecting',
   activeTab: 'monitor',
-  settingsOpen: false,
   showShortcutHelp: false,
   settings: loadFrontendSettings(),
   acknowledgedErrors: new Set<string>(),
@@ -95,7 +92,6 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     return { dismissedAttentionKeys: next }
   }),
   setActiveTab: (activeTab) => set({ activeTab }),
-  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   updateSettings: (patch) => {
     const next = { ...get().settings, ...patch }
     saveFrontendSettings(next)

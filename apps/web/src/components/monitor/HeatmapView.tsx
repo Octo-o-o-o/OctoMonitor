@@ -95,10 +95,6 @@ function exactMetricValue(value: number): string {
   return Math.round(value).toLocaleString()
 }
 
-function compactMetricValue(value: number): string {
-  return formatTokens(value)
-}
-
 function selectionMetricValue(metric: HeatmapMetric, value: number): string {
   if (metric === 'token') return formatTokens(value)
   return exactMetricValue(value)
@@ -414,13 +410,13 @@ export const HeatmapView = memo(function HeatmapView() {
       <div className="heatmap-summary-grid">
         <div className="summary-stat heatmap-summary-card">
           <span className="summary-label">{t('heatmap.total')}</span>
-          <strong className="summary-value">{compactMetricValue(heatmap.summary.total)}</strong>
+          <strong className="summary-value">{formatTokens(heatmap.summary.total)}</strong>
           <span className="heatmap-summary-hint">{t(totalHintKeys[metric])}</span>
         </div>
         <div className="summary-stat heatmap-summary-card">
           <span className="summary-label">{t('heatmap.peakCell')}</span>
           <strong className="summary-value">
-            {heatmap.summary.peakCell ? compactMetricValue(heatmap.summary.peakCell.value) : '—'}
+            {heatmap.summary.peakCell ? formatTokens(heatmap.summary.peakCell.value) : '—'}
           </strong>
           <span className="heatmap-summary-hint">
             {heatmap.summary.peakCell?.hour == null ? t('heatmap.peakCellHint.day') : t('heatmap.peakCellHint.hour')}
@@ -429,7 +425,7 @@ export const HeatmapView = memo(function HeatmapView() {
         <div className="summary-stat heatmap-summary-card">
           <span className="summary-label">{t('heatmap.topDay')}</span>
           <strong className="summary-value">
-            {heatmap.summary.topDay ? compactMetricValue(heatmap.summary.topDay.total) : '—'}
+            {heatmap.summary.topDay ? formatTokens(heatmap.summary.topDay.total) : '—'}
           </strong>
           <span className="heatmap-summary-hint">
             {heatmap.summary.topDay
