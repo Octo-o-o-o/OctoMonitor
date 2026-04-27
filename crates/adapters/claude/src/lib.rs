@@ -150,13 +150,12 @@ fn scan_sessions(
         return vec![];
     }
 
+    let Ok(entries) = fs::read_dir(&projects_dir) else {
+        return vec![];
+    };
+
     let mut sessions = Vec::new();
     let mut seen_paths = HashSet::new();
-
-    let entries = match fs::read_dir(&projects_dir) {
-        Ok(e) => e,
-        Err(_) => return vec![],
-    };
 
     for entry in entries.flatten() {
         let folder_path = entry.path();
@@ -164,30 +163,29 @@ fn scan_sessions(
             continue;
         }
 
-        let folder_name = entry.file_name().to_string_lossy().to_string();
+        let folder_name = entry.file_name().to_string_lossy().into_owned();
         let workspace_path = decode_project_folder(&folder_name);
         let project_name = project_name_from_path(&workspace_path);
 
-        // Find .jsonl transcript files in this project folder
-        if let Ok(files) = fs::read_dir(&folder_path) {
-            for file_entry in files.flatten() {
-                let path = file_entry.path();
-                if path.extension().is_none_or(|ext| ext != "jsonl") {
-                    continue;
+        let Ok(files) = fs::read_dir(&folder_path) else {
+            continue;
+        };
+        for file_entry in files.flatten() {
+            let path = file_entry.path();
+            if path.extension().is_none_or(|ext| ext != "jsonl") {
+                continue;
+            }
+            let cache_key = path.display().to_string();
+            let session = match cache.as_deref_mut() {
+                Some(cache) => {
+                    let entry = cache.session_files.entry(cache_key.clone()).or_default();
+                    update_cached_claude_session(entry, &path, &workspace_path, &project_name)
                 }
-                let cache_key = path.display().to_string();
-                let session = match cache.as_mut() {
-                    Some(cache) => {
-                        let cache = &mut **cache;
-                        let entry = cache.session_files.entry(cache_key.clone()).or_default();
-                        update_cached_claude_session(entry, &path, &workspace_path, &project_name)
-                    }
-                    None => parse_claude_session(&path, &workspace_path, &project_name),
-                };
-                if let Some(session) = session {
-                    seen_paths.insert(cache_key);
-                    sessions.push(session);
-                }
+                None => parse_claude_session(&path, &workspace_path, &project_name),
+            };
+            if let Some(session) = session {
+                seen_paths.insert(cache_key);
+                sessions.push(session);
             }
         }
     }
@@ -198,9 +196,21 @@ fn scan_sessions(
             .retain(|path, _| seen_paths.contains(path));
     }
 
-    // Sort by last_activity_at descending
     sessions.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
     sessions
+}
+
+fn block_type(block: &serde_json::Value) -> Option<&str> {
+    block.get("type").and_then(|t| t.as_str())
+}
+
+fn message_content_array(val: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    val.get("message")?.get("content")?.as_array()
+}
+
+fn message_has_block(val: &serde_json::Value, kind: &str) -> bool {
+    message_content_array(val)
+        .is_some_and(|arr| arr.iter().any(|b| block_type(b) == Some(kind)))
 }
 
 fn extract_text_from_content(msg: &serde_json::Value) -> Option<String> {
@@ -208,16 +218,11 @@ fn extract_text_from_content(msg: &serde_json::Value) -> Option<String> {
     if let Some(s) = content.as_str() {
         return Some(s.to_string());
     }
-    if let Some(arr) = content.as_array() {
-        return arr.iter().find_map(|block| {
-            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                block.get("text").and_then(|t| t.as_str()).map(String::from)
-            } else {
-                None
-            }
-        });
-    }
-    None
+    content.as_array()?.iter().find_map(|block| {
+        (block_type(block) == Some("text"))
+            .then(|| block.get("text").and_then(|t| t.as_str()).map(String::from))
+            .flatten()
+    })
 }
 
 fn extract_xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
@@ -235,16 +240,16 @@ fn extract_task_notification_usage(text: &str) -> Option<(String, u64)> {
 }
 
 fn extract_assistant_message_key(val: &serde_json::Value) -> Option<String> {
-    val.get("message")
-        .and_then(|message| message.get("id"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .or_else(|| {
-            val.get("requestId")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-        })
-        .or_else(|| val.get("uuid").and_then(|v| v.as_str()).map(String::from))
+    let str_at = |path: &[&str]| -> Option<String> {
+        let mut cursor = val;
+        for key in path {
+            cursor = cursor.get(*key)?;
+        }
+        cursor.as_str().map(String::from)
+    };
+    str_at(&["message", "id"])
+        .or_else(|| str_at(&["requestId"]))
+        .or_else(|| str_at(&["uuid"]))
 }
 
 fn record_task_notification_usage(state: &mut ClaudeSessionState, text: &str) {
@@ -266,9 +271,8 @@ fn parse_claude_session(
 }
 
 fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
-    let val: serde_json::Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(_) => return,
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
     };
 
     if state.session_id.is_none() {
@@ -302,18 +306,8 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
         if let Some(dt) = line_dt {
             state.pending_user_ts = Some(dt);
         }
-        // Check if user message contains tool_result (clears pending tool_use)
-        if let Some(content) = val
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_array())
-        {
-            if content
-                .iter()
-                .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
-            {
-                state.has_pending_tool_use = false;
-            }
+        if message_has_block(&val, "tool_result") {
+            state.has_pending_tool_use = false;
         }
         if let Some(t) = val.get("message").and_then(extract_text_from_content) {
             if t.starts_with("<local-command-caveat>")
@@ -336,16 +330,7 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
     }
 
     if msg_type == "assistant" {
-        // Check if assistant message contains tool_use
-        let has_tool_use = val
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_array())
-            .is_some_and(|arr| {
-                arr.iter()
-                    .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
-            });
-        if has_tool_use {
+        if message_has_block(&val, "tool_use") {
             state.has_pending_tool_use = true;
         }
 
@@ -355,31 +340,21 @@ fn apply_claude_line(state: &mut ClaudeSessionState, line: &str) {
         }
         if let Some(m) = val
             .get("message")
-            .and_then(|msg| msg.get("model").and_then(|v| v.as_str()).map(String::from))
+            .and_then(|msg| msg.get("model"))
+            .and_then(|v| v.as_str())
         {
-            state.model = Some(m);
+            state.model = Some(m.to_string());
         }
         let should_count_usage = extract_assistant_message_key(&val)
             .map(|id| state.counted_assistant_message_ids.insert(id))
             .unwrap_or(true);
         if should_count_usage {
             if let Some(usage) = val.get("message").and_then(|msg| msg.get("usage")) {
-                state.input_tokens += usage
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                state.output_tokens += usage
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                state.cache_read_tokens += usage
-                    .get("cache_read_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                state.cache_write_tokens += usage
-                    .get("cache_creation_input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                let u = |key: &str| usage.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+                state.input_tokens += u("input_tokens");
+                state.output_tokens += u("output_tokens");
+                state.cache_read_tokens += u("cache_read_input_tokens");
+                state.cache_write_tokens += u("cache_creation_input_tokens");
             }
             if let Some(cost) = val.get("costUSD").and_then(|v| v.as_f64()) {
                 state.total_cost_usd += cost;
@@ -393,10 +368,10 @@ fn build_claude_session(
     path: &Path,
     workspace_path: &str,
     project_name: &str,
-) -> Option<ClaudeSession> {
+) -> ClaudeSession {
     let sid = state.session_id.clone().unwrap_or_else(|| {
         path.file_stem()
-            .map(|s| s.to_string_lossy().to_string())
+            .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".into())
     });
     let total_tokens = state.input_tokens
@@ -404,21 +379,18 @@ fn build_claude_session(
         + state.cache_read_tokens
         + state.cache_write_tokens
         + state.external_total_tokens;
-    let file_modified = fs::metadata(path)
+    let fallback_ts = fs::metadata(path)
         .ok()
         .and_then(|m| m.modified().ok())
-        .map(|t| chrono::DateTime::<Utc>::from(t).to_rfc3339());
-    let fallback_ts = file_modified.unwrap_or_default();
-    let active_elapsed_ms = state.completed_active_elapsed_ms
-        + state
-            .pending_user_ts
-            .map(|user_dt| {
-                let now = chrono::Utc::now().fixed_offset();
-                (now - user_dt).num_milliseconds().max(0)
-            })
-            .unwrap_or(0);
+        .map(|t| chrono::DateTime::<Utc>::from(t).to_rfc3339())
+        .unwrap_or_default();
+    let pending_elapsed = state
+        .pending_user_ts
+        .map(|user_dt| (Utc::now().fixed_offset() - user_dt).num_milliseconds().max(0))
+        .unwrap_or(0);
+    let active_elapsed_ms = state.completed_active_elapsed_ms + pending_elapsed;
 
-    Some(ClaudeSession {
+    ClaudeSession {
         session_id: sid,
         project_path: workspace_path.to_string(),
         project_name: project_name.to_string(),
@@ -440,7 +412,7 @@ fn build_claude_session(
         last_question: state.last_question.clone(),
         active_elapsed_ms,
         has_pending_tool_use: state.has_pending_tool_use,
-    })
+    }
 }
 
 fn update_cached_claude_session(
@@ -456,7 +428,7 @@ fn update_cached_claude_session(
     for line in delta.lines {
         apply_claude_line(&mut cached.state, &line);
     }
-    build_claude_session(&cached.state, path, workspace_path, project_name)
+    Some(build_claude_session(&cached.state, path, workspace_path, project_name))
 }
 
 fn read_legacy_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {
@@ -464,28 +436,15 @@ fn read_legacy_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {
     let contents = fs::read_to_string(&cache_path).ok()?;
     let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let data = val.get("data")?;
-
-    let plan_name = data
-        .get("planName")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let five_hour = data.get("fiveHour").and_then(|v| v.as_f64());
-    let seven_day = data.get("sevenDay").and_then(|v| v.as_f64());
-    let five_hour_reset = data
-        .get("fiveHourResetAt")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let seven_day_reset = data
-        .get("sevenDayResetAt")
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let str_field = |key: &str| data.get(key).and_then(|v| v.as_str()).map(String::from);
+    let f64_field = |key: &str| data.get(key).and_then(|v| v.as_f64());
 
     Some(ClaudeQuota {
-        plan_name,
-        five_hour_used_pct: five_hour,
-        seven_day_used_pct: seven_day,
-        five_hour_reset_at: five_hour_reset,
-        seven_day_reset_at: seven_day_reset,
+        plan_name: str_field("planName"),
+        five_hour_used_pct: f64_field("fiveHour"),
+        seven_day_used_pct: f64_field("sevenDay"),
+        five_hour_reset_at: str_field("fiveHourResetAt"),
+        seven_day_reset_at: str_field("sevenDayResetAt"),
     })
 }
 
@@ -500,14 +459,10 @@ pub fn probe_with_cache(cache: &mut ClaudeProbeCache) -> ClaudeSnapshot {
         .as_ref()
         .map(|s| s.trim().to_string());
 
-    let config_file = config_dir.join("settings.json");
-    let config_probe = probe_file(&config_file);
+    let config_probe = probe_file(&config_dir.join("settings.json"));
     let projects_probe = probe_file(&projects_dir);
 
-    // Look for recent transcript/session files (without reading content)
     let active_session_hint = find_recent_session(&config_dir);
-
-    // Scan real sessions
     let sessions = scan_sessions(&config_dir, Some(cache));
 
     // Older third-party HUD integrations wrote subscriber quota to this cache.
