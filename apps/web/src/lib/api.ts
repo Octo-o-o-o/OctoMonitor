@@ -41,23 +41,16 @@ export function normalizeBootstrapPayload(payload: unknown): BootstrapPayload {
   }
 }
 
-export function getApiBase(): string {
-  return isTauriEnvironment() ? 'http://127.0.0.1:46321' : ''
-}
-
-export function getWsBase(): string {
-  if (isTauriEnvironment()) {
-    return 'ws://127.0.0.1:46321'
-  }
-  return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
-}
-
+// Local admin surface in Tauri runs on a fixed loopback port; web/companion
+// flows use same-origin URLs so reverse-proxy and remote-viewer setups work.
 export function buildApiUrl(path: string): string {
-  return `${getApiBase()}${path}`
+  return isTauriEnvironment() ? `http://127.0.0.1:46321${path}` : path
 }
 
 export function buildWsUrl(path: string): string {
-  return `${getWsBase()}${path}`
+  if (isTauriEnvironment()) return `ws://127.0.0.1:46321${path}`
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}${path}`
 }
 
 export function apiFetch(input: string, init?: RequestInit): Promise<Response> {

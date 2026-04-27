@@ -47,14 +47,6 @@ function formatShare(score: number) {
   return `${Math.round(score * 100)}%`
 }
 
-function safeLinks(commit: CommitRecord): CommitAttributionLink[] {
-  return Array.isArray(commit.links) ? commit.links : []
-}
-
-function safeSources(commit: CommitRecord) {
-  return Array.isArray(commit.sources) ? commit.sources : []
-}
-
 export const CommitsView = memo(function CommitsView() {
   const data = useMonitorStore((s) => s.data)
   const connectionStatus = useMonitorStore((s) => s.connectionStatus)
@@ -97,10 +89,10 @@ export const CommitsView = memo(function CommitsView() {
 
   const commits = mode === 'history'
     ? (historyData?.commits ?? [])
-    : (Array.isArray(data?.commits) ? data.commits : [])
+    : (data?.commits ?? [])
   const runs = mode === 'history'
     ? (historyData?.runs ?? [])
-    : (Array.isArray(data?.runs) ? data.runs : [])
+    : (data?.runs ?? [])
   const snapshotRange = useMemo(
     () => (data ? buildCommitDateRange(data.commits) : null),
     [data],
@@ -331,8 +323,7 @@ export const CommitsView = memo(function CommitsView() {
           ) : (
             <div className="commit-list">
               {visibleCommits.map((commit) => {
-                const links = safeLinks(commit)
-                const sources = safeSources(commit)
+                const { links, sources } = commit
                 const sessionCount = Math.max(links.length, commit.runCount)
                 const isExpanded = expandedCommitIds.includes(commit.id)
 

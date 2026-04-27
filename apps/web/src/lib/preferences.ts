@@ -138,7 +138,11 @@ function migrateSnapshotWindow(
 }
 
 function freshDefaults(): FrontendSettings {
-  return { ...defaultSettings, panelConfig: migratePanelConfig(undefined), filterRules: cloneDefaultFilterRules() }
+  return {
+    ...defaultSettings,
+    panelConfig: defaultPanelConfig.map((entry) => ({ ...entry })),
+    filterRules: cloneDefaultFilterRules(),
+  }
 }
 
 export function loadFrontendSettings(): FrontendSettings {

@@ -27,6 +27,12 @@ export function MonitorSection() {
 
   const enabledCount = panelConfig.filter((p) => p.enabled).length
 
+  function movePanel(idx: number, delta: -1 | 1) {
+    const next = [...panelConfig]
+    ;[next[idx + delta], next[idx]] = [next[idx], next[idx + delta]]
+    updateSettings({ panelConfig: next })
+  }
+
   return (
     <section className="settings-section">
       <div className="section-label">{t('tab.monitor')}</div>
@@ -70,23 +76,15 @@ export function MonitorSection() {
                   <button
                     className="panel-move-btn"
                     disabled={idx === 0}
-                    onClick={() => {
-                      const next = [...panelConfig]
-                      ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
-                      updateSettings({ panelConfig: next })
-                    }}
+                    onClick={() => movePanel(idx, -1)}
                     title={t('ui.moveUp')}
-                  >{'\u25B2'}</button>
+                  >{'▲'}</button>
                   <button
                     className="panel-move-btn"
                     disabled={idx === panelConfig.length - 1}
-                    onClick={() => {
-                      const next = [...panelConfig]
-                      ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
-                      updateSettings({ panelConfig: next })
-                    }}
+                    onClick={() => movePanel(idx, 1)}
                     title={t('ui.moveDown')}
-                  >{'\u25BC'}</button>
+                  >{'▼'}</button>
                 </div>
                 <span className="panel-config-label">{sourceLabels[entry.tool]}</span>
                 <button

@@ -65,13 +65,12 @@ export function buildDailySummary(
 
   let durationMs = 0
   for (const { run } of slices) {
-    const s = parseMs(run.startedAt) ?? 0
-    const e = parseMs(run.lastActivityAt) ?? 0
-    if (s > 0 && e > s) {
-      const clampedStart = Math.max(s, startMs)
-      const clampedEnd = Math.min(e, endMs)
-      durationMs += Math.max(clampedEnd - clampedStart, 0)
-    }
+    const s = parseMs(run.startedAt)
+    const e = parseMs(run.lastActivityAt)
+    if (s == null || e == null || e <= s) continue
+    const clampedStart = Math.max(s, startMs)
+    const clampedEnd = Math.min(e, endMs)
+    durationMs += Math.max(clampedEnd - clampedStart, 0)
   }
 
   const sourceMap = new Map<ToolKind, { sessions: number; usage: UsageSlice[] }>()

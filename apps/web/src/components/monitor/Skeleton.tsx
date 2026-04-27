@@ -1,5 +1,11 @@
 import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
 
+function repeat(count: number, className: string) {
+  return Array.from({ length: count }, (_, i) => (
+    <div key={i} className={className} />
+  ))
+}
+
 export function MonitorSkeleton() {
   const isNarrowLayout = useMediaQuery(NARROW_LAYOUT_QUERY)
 
@@ -7,16 +13,12 @@ export function MonitorSkeleton() {
     return (
       <div className="monitor-view">
         <div className="mobile-source-tabs">
-          <div className="skeleton-pill" />
-          <div className="skeleton-pill" />
-          <div className="skeleton-pill" />
+          {repeat(3, 'skeleton-pill')}
         </div>
         <div className="source-columns-mobile skeleton-flex">
           <div className="source-column">
             <div className="skeleton-header" />
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="skeleton-card" />
-            ))}
+            {repeat(4, 'skeleton-card')}
           </div>
         </div>
       </div>
@@ -26,12 +28,10 @@ export function MonitorSkeleton() {
   return (
     <div className="monitor-view">
       <div className="source-columns source-columns-desktop skeleton-grid-3">
-        {[0, 1, 2].map((i) => (
+        {Array.from({ length: 3 }, (_, i) => (
           <div key={i} className="source-column">
             <div className="skeleton-header" />
-            {[0, 1, 2].map((j) => (
-              <div key={j} className="skeleton-card" />
-            ))}
+            {repeat(3, 'skeleton-card')}
           </div>
         ))}
       </div>
@@ -43,16 +43,8 @@ export function UsageSkeleton() {
   return (
     <div className="usage-view">
       <div className="skeleton-header skeleton-w-40" />
-      <div className="skeleton-bar-chart">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="skeleton-bar" />
-        ))}
-      </div>
-      <div className="skeleton-table">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="skeleton-row" />
-        ))}
-      </div>
+      <div className="skeleton-bar-chart">{repeat(3, 'skeleton-bar')}</div>
+      <div className="skeleton-table">{repeat(4, 'skeleton-row')}</div>
     </div>
   )
 }
@@ -61,12 +53,8 @@ export function CommitsSkeleton() {
   return (
     <div className="commits-view">
       <div className="skeleton-header skeleton-w-35" />
-      {[0, 1].map((i) => (
-        <div key={i} className="skeleton-table">
-          {[0, 1, 2].map((j) => (
-            <div key={j} className="skeleton-row" />
-          ))}
-        </div>
+      {Array.from({ length: 2 }, (_, i) => (
+        <div key={i} className="skeleton-table">{repeat(3, 'skeleton-row')}</div>
       ))}
     </div>
   )
@@ -76,16 +64,8 @@ export function HeatmapSkeleton() {
   return (
     <div className="heatmap-view">
       <div className="skeleton-header skeleton-w-38" />
-      <div className="skeleton-bar-chart">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="skeleton-bar" />
-        ))}
-      </div>
-      <div className="skeleton-table">
-        {[0, 1, 2, 3, 4].map((i) => (
-          <div key={i} className="skeleton-row" />
-        ))}
-      </div>
+      <div className="skeleton-bar-chart">{repeat(4, 'skeleton-bar')}</div>
+      <div className="skeleton-table">{repeat(5, 'skeleton-row')}</div>
     </div>
   )
 }
