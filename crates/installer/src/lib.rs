@@ -57,17 +57,22 @@ fn command_exists(name: &str) -> bool {
         return false;
     };
 
+    #[cfg(windows)]
+    let extra_exts: Vec<String> = if candidate.extension().is_none() {
+        windows_path_exts()
+    } else {
+        Vec::new()
+    };
+
     for dir in env::split_paths(&paths) {
         if is_executable(&dir.join(name)) {
             return true;
         }
 
         #[cfg(windows)]
-        if candidate.extension().is_none() {
-            for ext in windows_path_exts() {
-                if is_executable(&dir.join(format!("{name}{ext}"))) {
-                    return true;
-                }
+        for ext in &extra_exts {
+            if is_executable(&dir.join(format!("{name}{ext}"))) {
+                return true;
             }
         }
     }
@@ -79,18 +84,15 @@ fn is_executable(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
     };
-    if !metadata.is_file() {
-        return false;
-    }
 
     #[cfg(unix)]
     {
-        metadata.permissions().mode() & 0o111 != 0
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
     }
 
     #[cfg(not(unix))]
     {
-        true
+        metadata.is_file()
     }
 }
 
