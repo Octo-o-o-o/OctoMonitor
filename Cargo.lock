@@ -2371,7 +2371,6 @@ version = "0.1.6"
 dependencies = [
  "chrono",
  "serde",
- "serde_json",
  "tempfile",
 ]
 
