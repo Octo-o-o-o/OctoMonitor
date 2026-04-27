@@ -219,13 +219,10 @@ fn scan_sessions(config_dir: &Path, mut cache: Option<&mut CodexProbeCache>) -> 
         return vec![];
     }
 
-    let thread_index = match cache.as_mut() {
-        Some(cache) => {
-            let cache = &mut **cache;
-            load_thread_index_with_cache(config_dir, Some(&mut cache.thread_index))
-        }
-        None => load_thread_index(config_dir),
-    };
+    let thread_index = load_thread_index_with_cache(
+        config_dir,
+        cache.as_deref_mut().map(|c| &mut c.thread_index),
+    );
     let mut sessions = Vec::new();
     let mut seen_paths = HashSet::new();
 
@@ -286,9 +283,8 @@ fn scan_flat_sessions(
                 continue;
             }
             let cache_key = path.display().to_string();
-            let session = match cache.as_mut() {
+            let session = match cache.as_deref_mut() {
                 Some(cache) => {
-                    let cache = &mut **cache;
                     let entry = cache.session_files.entry(cache_key.clone()).or_default();
                     update_cached_codex_session(entry, &path, thread_index)
                 }
@@ -323,10 +319,25 @@ fn parse_codex_session(
     update_cached_codex_session(&mut cached, path, thread_index)
 }
 
+/// Helper for fields that are an `Option<String>` extracted via `as_str` on a
+/// JSON value. Keeps the apply_* functions readable.
+fn str_field(payload: &serde_json::Value, key: &str) -> Option<String> {
+    payload.get(key).and_then(|v| v.as_str()).map(String::from)
+}
+
+/// Close any open user→assistant interval with the given line timestamp, then
+/// mark the turn as cleanly completed. Used wherever an assistant reply lands
+/// (turn_complete, assistant_message, agent_message, token_count after reply).
+fn close_pending_turn_at(state: &mut CodexSessionState, timestamp: Option<&str>) {
+    let line_dt = timestamp.and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
+    if let (Some(user_dt), Some(asst_dt)) = (state.pending_user_ts.take(), line_dt) {
+        state.completed_active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
+    }
+}
+
 fn apply_codex_line(state: &mut CodexSessionState, line: &str) {
-    let val: serde_json::Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(_) => return,
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
     };
 
     let timestamp = val.get("timestamp").and_then(|v| v.as_str());
@@ -338,22 +349,17 @@ fn apply_codex_line(state: &mut CodexSessionState, line: &str) {
     }
 
     let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let payload = val.get("payload");
     match msg_type {
         "session_meta" => {
-            if let Some(payload) = val.get("payload") {
-                state.session_id = payload.get("id").and_then(|v| v.as_str()).map(String::from);
-                state.cwd = payload
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                state.cli_version = payload
-                    .get("cli_version")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
+            if let Some(payload) = payload {
+                state.session_id = str_field(payload, "id");
+                state.cwd = str_field(payload, "cwd");
+                state.cli_version = str_field(payload, "cli_version");
             }
         }
         "turn_context" => {
-            if let Some(payload) = val.get("payload") {
+            if let Some(payload) = payload {
                 let model = payload
                     .get("model")
                     .or_else(|| payload.pointer("/info/model"))
@@ -365,23 +371,20 @@ fn apply_codex_line(state: &mut CodexSessionState, line: &str) {
             }
         }
         "event_msg" => {
-            if let Some(payload) = val.get("payload") {
+            if let Some(payload) = payload {
                 apply_event_msg(state, timestamp, payload);
             }
         }
         "turn_complete" | "assistant_message" | "assistant_msg" => {
-            let line_dt = timestamp.and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
-            if let (Some(user_dt), Some(asst_dt)) = (state.pending_user_ts.take(), line_dt) {
-                state.completed_active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
-            }
+            close_pending_turn_at(state, timestamp);
             state.last_completed_ok = true;
             state.last_aborted = false;
         }
         "user_message" | "user_msg" => {
-            handle_user_message(state, timestamp, val.get("payload"));
+            handle_user_message(state, timestamp, payload);
         }
         "response_item" => {
-            if let Some(payload) = val.get("payload") {
+            if let Some(payload) = payload {
                 apply_response_item(state, payload);
             }
         }
@@ -397,36 +400,19 @@ fn apply_event_msg(
     let event_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
     match event_type {
         "token_count" => {
-            let line_dt = timestamp.and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
-            if let (Some(user_dt), Some(asst_dt)) = (state.pending_user_ts.take(), line_dt) {
-                state.completed_active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
-            }
-            if let Some(info) = payload.get("info") {
-                if let Some(usage) = info.get("total_token_usage") {
-                    state.input_tokens = usage
-                        .get("input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    state.cached_input_tokens = usage
-                        .get("cached_input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    state.output_tokens = usage
-                        .get("output_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    state.total_tokens = usage
-                        .get("total_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                }
+            close_pending_turn_at(state, timestamp);
+            if let Some(usage) = payload.pointer("/info/total_token_usage") {
+                let u64_at = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+                state.input_tokens = u64_at("input_tokens");
+                state.cached_input_tokens = u64_at("cached_input_tokens");
+                state.output_tokens = u64_at("output_tokens");
+                state.total_tokens = u64_at("total_tokens");
             }
             if let Some(rate_limits) = payload.get("rate_limits") {
                 if let Some(primary) = rate_limits.get("primary") {
                     state.five_hour_used_pct =
                         primary.get("used_percent").and_then(|v| v.as_f64());
-                    state.five_hour_resets_at =
-                        primary.get("resets_at").and_then(|v| v.as_i64());
+                    state.five_hour_resets_at = primary.get("resets_at").and_then(|v| v.as_i64());
                 }
                 if let Some(secondary) = rate_limits.get("secondary") {
                     state.seven_day_used_pct =
@@ -434,20 +420,14 @@ fn apply_event_msg(
                     state.seven_day_resets_at =
                         secondary.get("resets_at").and_then(|v| v.as_i64());
                 }
-                state.plan_type = rate_limits
-                    .get("plan_type")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
+                state.plan_type = str_field(rate_limits, "plan_type");
             }
         }
         "user_message" => {
             handle_user_message(state, timestamp, Some(payload));
         }
         "agent_message" => {
-            let line_dt = timestamp.and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok());
-            if let (Some(user_dt), Some(asst_dt)) = (state.pending_user_ts.take(), line_dt) {
-                state.completed_active_elapsed_ms += (asst_dt - user_dt).num_milliseconds().max(0);
-            }
+            close_pending_turn_at(state, timestamp);
             state.last_completed_ok = true;
             state.last_aborted = false;
             // Safety: last_tail must be a short *status* line, not assistant
@@ -481,10 +461,8 @@ fn apply_event_msg(
                 .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("aborted");
-            state.progress_reason = Some(truncate_chars(
-                &format!("Turn aborted: {reason}"),
-                80,
-            ));
+            state.progress_reason =
+                Some(truncate_chars(&format!("Turn aborted: {reason}"), 80));
         }
         _ => {}
     }
@@ -492,27 +470,25 @@ fn apply_event_msg(
 
 fn apply_response_item(state: &mut CodexSessionState, payload: &serde_json::Value) {
     let item_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let call_id = payload.get("call_id").and_then(|v| v.as_str());
     match item_type {
         "function_call" | "custom_tool_call" => {
-            if let Some(args_str) = payload.get("arguments").and_then(|v| v.as_str()) {
-                if args_str.contains("require_escalated") {
-                    if let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) {
-                        state.pending_escalated_calls.insert(call_id.to_string());
-                    }
+            let args = payload.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+            if args.contains("require_escalated") {
+                if let Some(id) = call_id {
+                    state.pending_escalated_calls.insert(id.to_string());
                 }
             }
             if let Some(name) = payload.get("name").and_then(|v| v.as_str()) {
                 push_recent_tool(state, name);
-                state.progress_reason = Some(truncate_chars(
-                    &format!("Running tool: {name}"),
-                    80,
-                ));
+                state.progress_reason =
+                    Some(truncate_chars(&format!("Running tool: {name}"), 80));
                 state.last_completed_ok = false;
             }
         }
         "function_call_output" | "custom_tool_call_output" => {
-            if let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) {
-                state.pending_escalated_calls.remove(call_id);
+            if let Some(id) = call_id {
+                state.pending_escalated_calls.remove(id);
             }
         }
         _ => {}
@@ -526,8 +502,7 @@ fn handle_user_message(
 ) {
     if let Some(dt) = timestamp.and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok()) {
         if let Some(prev_user_dt) = state.pending_user_ts.take() {
-            state.completed_active_elapsed_ms +=
-                (dt - prev_user_dt).num_milliseconds().max(0);
+            state.completed_active_elapsed_ms += (dt - prev_user_dt).num_milliseconds().max(0);
         }
         state.pending_user_ts = Some(dt);
     }
@@ -535,9 +510,7 @@ fn handle_user_message(
     state.last_completed_ok = false;
     state.last_aborted = false;
 
-    let Some(payload) = payload else {
-        return;
-    };
+    let Some(payload) = payload else { return };
     let text = payload
         .get("message")
         .and_then(|v| v.as_str())
@@ -557,7 +530,7 @@ fn push_recent_tool(state: &mut CodexSessionState, name: &str) {
         return;
     }
     state.recent_tools.push(name.to_string());
-    while state.recent_tools.len() > 3 {
+    if state.recent_tools.len() > 3 {
         state.recent_tools.remove(0);
     }
 }
@@ -574,14 +547,11 @@ fn build_codex_session(
         .last_question
         .clone()
         .or_else(|| first_question.clone());
-    let active_elapsed_ms = state.completed_active_elapsed_ms
-        + state
-            .pending_user_ts
-            .map(|user_dt| {
-                let now = chrono::Utc::now().fixed_offset();
-                (now - user_dt).num_milliseconds().max(0)
-            })
-            .unwrap_or(0);
+    let pending_ms = state
+        .pending_user_ts
+        .map(|user_dt| (chrono::Utc::now().fixed_offset() - user_dt).num_milliseconds().max(0))
+        .unwrap_or(0);
+    let active_elapsed_ms = state.completed_active_elapsed_ms + pending_ms;
     Some(CodexSession {
         session_id: sid,
         thread_name,
@@ -711,17 +681,12 @@ pub fn looks_noisy_title(value: &str) -> bool {
     }
 
     let first = trimmed.chars().next().unwrap_or(' ');
-    if matches!(first, '{' | '[' | '<') {
+    if matches!(first, '{' | '[' | '<') || trimmed.starts_with("```") {
         return true;
     }
 
-    if trimmed.starts_with("```") {
-        return true;
-    }
-
-    let upper_head: String = trimmed.chars().take(16).collect();
-    let upper_head = upper_head.to_uppercase();
-    for prefix in [
+    let upper_head: String = trimmed.chars().take(16).collect::<String>().to_uppercase();
+    const NOISY_PREFIXES: &[&str] = &[
         "SYSTEM:",
         "SYSTEM ",
         "[SYSTEM",
@@ -730,10 +695,9 @@ pub fn looks_noisy_title(value: &str) -> bool {
         "INSTRUCTIONS:",
         "ASSISTANT:",
         "USER:",
-    ] {
-        if upper_head.starts_with(prefix) {
-            return true;
-        }
+    ];
+    if NOISY_PREFIXES.iter().any(|p| upper_head.starts_with(p)) {
+        return true;
     }
 
     let first_line = trimmed.lines().next().unwrap_or("");

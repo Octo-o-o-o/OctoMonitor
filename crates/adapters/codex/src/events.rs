@@ -52,6 +52,30 @@ pub struct CodexEvent {
     pub call_id: Option<String>,
 }
 
+/// Build a `CodexEvent` with all optional fields defaulted to `None`. Branches
+/// override only the fields they care about — keeps `parse_*` arms readable.
+fn mk_event(kind: CodexEventKind, timestamp: &str, title: &str, preview: String) -> CodexEvent {
+    CodexEvent {
+        kind,
+        timestamp: timestamp.to_string(),
+        turn_id: None,
+        title: title.to_string(),
+        preview,
+        text: None,
+        tool_name: None,
+        command: None,
+        exit_code: None,
+        call_id: None,
+    }
+}
+
+fn turn_id_of(payload: &serde_json::Value) -> Option<String> {
+    payload
+        .get("turn_id")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExecOutput {
     pub exit_code: Option<i32>,
@@ -98,153 +122,69 @@ pub fn parse_session_event_line(line: &str) -> Vec<CodexEvent> {
 fn parse_event_msg(timestamp: &str, payload: &serde_json::Value) -> Vec<CodexEvent> {
     let subtype = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
     match subtype {
-        "user_message" => {
+        "user_message" | "agent_message" => {
             let message = payload
                 .get("message")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let preview = summarize_preview(&message);
-            vec![CodexEvent {
-                kind: CodexEventKind::UserMessage,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: "User message".to_string(),
-                preview,
-                text: Some(truncate_text(&message)),
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
-        }
-        "agent_message" => {
-            let message = payload
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let preview = summarize_preview(&message);
-            vec![CodexEvent {
-                kind: CodexEventKind::AssistantMessage,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: "Assistant message".to_string(),
-                preview,
-                text: Some(truncate_text(&message)),
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+                .unwrap_or("");
+            let (kind, title) = if subtype == "user_message" {
+                (CodexEventKind::UserMessage, "User message")
+            } else {
+                (CodexEventKind::AssistantMessage, "Assistant message")
+            };
+            let mut event = mk_event(kind, timestamp, title, summarize_preview(message));
+            event.text = Some(truncate_text(message));
+            vec![event]
         }
         "token_count" => {
-            let info = payload.get("info");
-            let total = info
-                .and_then(|i| i.get("total_token_usage"))
-                .and_then(|u| u.get("total_tokens"))
+            let total = payload
+                .pointer("/info/total_token_usage/total_tokens")
                 .and_then(|v| v.as_u64());
             let preview = match total {
                 Some(t) => format!("{t} tokens"),
                 None => "token count".to_string(),
             };
-            vec![CodexEvent {
-                kind: CodexEventKind::TokenCount,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: "Token count".to_string(),
+            vec![mk_event(
+                CodexEventKind::TokenCount,
+                timestamp,
+                "Token count",
                 preview,
-                text: None,
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+            )]
         }
         "task_started" => {
-            let turn_id = payload
-                .get("turn_id")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            vec![CodexEvent {
-                kind: CodexEventKind::TaskStarted,
-                timestamp: timestamp.to_string(),
-                turn_id,
-                title: "Task started".to_string(),
-                preview: "Task started".to_string(),
-                text: None,
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+            let mut event = mk_event(
+                CodexEventKind::TaskStarted,
+                timestamp,
+                "Task started",
+                "Task started".to_string(),
+            );
+            event.turn_id = turn_id_of(payload);
+            vec![event]
         }
         "task_complete" => {
-            let turn_id = payload
-                .get("turn_id")
-                .and_then(|v| v.as_str())
-                .map(String::from);
             let preview = payload
                 .get("last_agent_message")
                 .and_then(|v| v.as_str())
                 .map(summarize_preview)
                 .unwrap_or_else(|| "Task complete".to_string());
-            vec![CodexEvent {
-                kind: CodexEventKind::TaskComplete,
-                timestamp: timestamp.to_string(),
-                turn_id,
-                title: "Task complete".to_string(),
-                preview,
-                text: None,
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+            let mut event =
+                mk_event(CodexEventKind::TaskComplete, timestamp, "Task complete", preview);
+            event.turn_id = turn_id_of(payload);
+            vec![event]
         }
-        "task_aborted" => {
-            let turn_id = payload
-                .get("turn_id")
-                .and_then(|v| v.as_str())
-                .map(String::from);
+        "task_aborted" | "turn_aborted" => {
             let reason = payload
                 .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("aborted");
-            vec![CodexEvent {
-                kind: CodexEventKind::TaskAborted,
-                timestamp: timestamp.to_string(),
-                turn_id,
-                title: "Task aborted".to_string(),
-                preview: format!("Task aborted: {reason}"),
-                text: None,
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
-        }
-        "turn_aborted" => {
-            let turn_id = payload
-                .get("turn_id")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            let reason = payload
-                .get("reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("aborted");
-            vec![CodexEvent {
-                kind: CodexEventKind::TurnAborted,
-                timestamp: timestamp.to_string(),
-                turn_id,
-                title: "Turn aborted".to_string(),
-                preview: format!("Turn aborted: {reason}"),
-                text: None,
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+            let (kind, title, preview_prefix) = if subtype == "task_aborted" {
+                (CodexEventKind::TaskAborted, "Task aborted", "Task aborted")
+            } else {
+                (CodexEventKind::TurnAborted, "Turn aborted", "Turn aborted")
+            };
+            let mut event = mk_event(kind, timestamp, title, format!("{preview_prefix}: {reason}"));
+            event.turn_id = turn_id_of(payload);
+            vec![event]
         }
         _ => Vec::new(),
     }
@@ -259,19 +199,14 @@ fn parse_response_item(timestamp: &str, payload: &serde_json::Value) -> Vec<Code
                 return Vec::new();
             }
             let text = extract_message_text(payload.get("content"));
-            let preview = summarize_preview(&text);
-            vec![CodexEvent {
-                kind: CodexEventKind::AssistantMessage,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: "Assistant message".to_string(),
-                preview,
-                text: Some(truncate_text(&text)),
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+            let mut event = mk_event(
+                CodexEventKind::AssistantMessage,
+                timestamp,
+                "Assistant message",
+                summarize_preview(&text),
+            );
+            event.text = Some(truncate_text(&text));
+            vec![event]
         }
         "reasoning" => {
             let summary_text = payload
@@ -284,35 +219,18 @@ fn parse_response_item(timestamp: &str, payload: &serde_json::Value) -> Vec<Code
                         .join("\n")
                 })
                 .unwrap_or_default();
-            let preview = if summary_text.is_empty() {
-                "Reasoning (encrypted)".to_string()
+            let (preview, text) = if summary_text.is_empty() {
+                ("Reasoning (encrypted)".to_string(), None)
             } else {
-                summarize_preview(&summary_text)
+                (summarize_preview(&summary_text), Some(truncate_text(&summary_text)))
             };
-            vec![CodexEvent {
-                kind: CodexEventKind::Reasoning,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: "Reasoning".to_string(),
-                preview,
-                text: if summary_text.is_empty() {
-                    None
-                } else {
-                    Some(truncate_text(&summary_text))
-                },
-                tool_name: None,
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+            let mut event = mk_event(CodexEventKind::Reasoning, timestamp, "Reasoning", preview);
+            event.text = text;
+            vec![event]
         }
         "function_call" | "custom_tool_call" => {
             let tool_name = payload
                 .get("name")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            let call_id = payload
-                .get("call_id")
                 .and_then(|v| v.as_str())
                 .map(String::from);
             let args_raw = payload
@@ -322,74 +240,50 @@ fn parse_response_item(timestamp: &str, payload: &serde_json::Value) -> Vec<Code
                 .unwrap_or("");
             let command = extract_command_from_arguments(args_raw);
             let preview = match (&tool_name, &command) {
-                (Some(name), Some(cmd)) => {
-                    format!("{name}: {}", truncate_chars_display(cmd, 120))
-                }
-                (Some(name), None) => {
-                    if args_raw.is_empty() {
-                        name.clone()
-                    } else {
-                        format!("{name}: {}", summarize_preview(args_raw))
-                    }
-                }
+                (Some(name), Some(cmd)) => format!("{name}: {}", truncate_chars_display(cmd, 120)),
+                (Some(name), None) if args_raw.is_empty() => name.clone(),
+                (Some(name), None) => format!("{name}: {}", summarize_preview(args_raw)),
                 (None, Some(cmd)) => truncate_chars_display(cmd, 120),
                 (None, None) => "tool call".to_string(),
             };
-            vec![CodexEvent {
-                kind: CodexEventKind::ToolCall,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: tool_name.clone().unwrap_or_else(|| "Tool call".to_string()),
-                preview,
-                text: None,
-                tool_name,
-                command,
-                exit_code: None,
-                call_id,
-            }]
-        }
-        "function_call_output" | "custom_tool_call_output" => {
-            let call_id = payload
+            let title = tool_name.clone().unwrap_or_else(|| "Tool call".to_string());
+            let mut event = mk_event(CodexEventKind::ToolCall, timestamp, &title, preview);
+            event.tool_name = tool_name;
+            event.command = command;
+            event.call_id = payload
                 .get("call_id")
                 .and_then(|v| v.as_str())
                 .map(String::from);
+            vec![event]
+        }
+        "function_call_output" | "custom_tool_call_output" => {
             let raw = payload.get("output").and_then(|v| v.as_str()).unwrap_or("");
             let parsed = parse_exec_output(raw);
-            let preview = match &parsed.body {
-                Some(body) => summarize_preview(body),
-                None => "tool output".to_string(),
-            };
-            vec![CodexEvent {
-                kind: CodexEventKind::ToolOutput,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: "Tool output".to_string(),
-                preview,
-                text: parsed.body.as_deref().map(truncate_text),
-                tool_name: None,
-                command: None,
-                exit_code: parsed.exit_code,
-                call_id,
-            }]
+            let preview = parsed
+                .body
+                .as_deref()
+                .map(summarize_preview)
+                .unwrap_or_else(|| "tool output".to_string());
+            let mut event =
+                mk_event(CodexEventKind::ToolOutput, timestamp, "Tool output", preview);
+            event.text = parsed.body.as_deref().map(truncate_text);
+            event.exit_code = parsed.exit_code;
+            event.call_id = payload
+                .get("call_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            vec![event]
         }
         "web_search_call" => {
             let status = payload.get("status").and_then(|v| v.as_str()).unwrap_or("");
-            vec![CodexEvent {
-                kind: CodexEventKind::WebSearch,
-                timestamp: timestamp.to_string(),
-                turn_id: None,
-                title: "Web search".to_string(),
-                preview: if status.is_empty() {
-                    "Web search".to_string()
-                } else {
-                    format!("Web search: {status}")
-                },
-                text: None,
-                tool_name: Some("web_search".to_string()),
-                command: None,
-                exit_code: None,
-                call_id: None,
-            }]
+            let preview = if status.is_empty() {
+                "Web search".to_string()
+            } else {
+                format!("Web search: {status}")
+            };
+            let mut event = mk_event(CodexEventKind::WebSearch, timestamp, "Web search", preview);
+            event.tool_name = Some("web_search".to_string());
+            vec![event]
         }
         _ => Vec::new(),
     }
@@ -404,18 +298,7 @@ fn build_context_event(timestamp: &str, payload: &serde_json::Value) -> CodexEve
         Some(m) => format!("Model: {m}"),
         None => "Turn context".to_string(),
     };
-    CodexEvent {
-        kind: CodexEventKind::Context,
-        timestamp: timestamp.to_string(),
-        turn_id: None,
-        title: "Turn context".to_string(),
-        preview,
-        text: None,
-        tool_name: None,
-        command: None,
-        exit_code: None,
-        call_id: None,
-    }
+    mk_event(CodexEventKind::Context, timestamp, "Turn context", preview)
 }
 
 /// Parse an `output` string from a `function_call_output` (text format) or
@@ -544,11 +427,15 @@ pub fn read_tail_events(
     }
 
     let had_trailing_newline = content.ends_with('\n');
+    let lines: Vec<&str> = content.lines().collect();
+    // Drop a half-written final line (no trailing `\n`) — we'll see it next read.
+    let usable = if had_trailing_newline {
+        lines.as_slice()
+    } else {
+        lines.split_last().map(|(_, rest)| rest).unwrap_or(&[])
+    };
     let mut events: Vec<CodexEvent> = Vec::new();
-    for (idx, line) in content.lines().enumerate() {
-        if !had_trailing_newline && idx + 1 == content.lines().count() {
-            break;
-        }
+    for line in usable {
         events.extend(parse_session_event_line(line));
     }
 
@@ -631,18 +518,20 @@ fn extract_command_from_arguments(raw: &str) -> Option<String> {
     }
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
     let obj = value.as_object()?;
-    let command = obj
+    let cmd_val = obj
         .get("cmd")
         .or_else(|| obj.get("command"))
-        .or_else(|| obj.get("shell"));
-    let command = match command? {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(parts) => parts
+        .or_else(|| obj.get("shell"))?;
+    let command = if let Some(s) = cmd_val.as_str() {
+        s.to_string()
+    } else if let Some(parts) = cmd_val.as_array() {
+        parts
             .iter()
             .filter_map(|v| v.as_str())
             .collect::<Vec<_>>()
-            .join(" "),
-        _ => return None,
+            .join(" ")
+    } else {
+        return None;
     };
     let cleaned = strip_ansi(command.trim());
     if cleaned.is_empty() {
