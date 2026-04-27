@@ -258,7 +258,7 @@ impl PricingStore {
     }
 
     fn fallback_rates(model: &str) -> ResolvedRates {
-        let (inp, out, cr, cw) = if model.contains("opus") {
+        let (input, output, cache_read, cache_write) = if model.contains("opus") {
             (15e-6, 75e-6, 1.5e-6, 18.75e-6)
         } else if model.contains("sonnet") {
             (3e-6, 15e-6, 0.3e-6, 3.75e-6)
@@ -273,10 +273,10 @@ impl PricingStore {
         };
 
         ResolvedRates {
-            input: inp,
-            output: out,
-            cache_read: cr,
-            cache_write: cw,
+            input,
+            output,
+            cache_read,
+            cache_write,
         }
     }
 

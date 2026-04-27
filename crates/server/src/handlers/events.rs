@@ -65,33 +65,25 @@ fn read_codex_events(run: &RunRecord, params: EventsQuery) -> EventsPayload {
         .map(|n| n.clamp(1, MAX_LIMIT))
         .unwrap_or(DEFAULT_LIMIT);
 
-    let Some(path) = resolve_transcript_path(run) else {
-        return EventsPayload {
-            tool: run.tool.clone(),
-            events: Vec::new(),
-            cursor: params.cursor.unwrap_or(0),
-            reset: false,
-        };
+    let empty = || EventsPayload {
+        tool: run.tool.clone(),
+        events: Vec::new(),
+        cursor: params.cursor.unwrap_or(0),
+        reset: false,
     };
 
-    let result =
-        codex_adapter::read_tail_events(&path, params.cursor, DEFAULT_TAIL_BYTE_LIMIT, limit);
-    match result {
-        Ok(tail) => {
-            let events = codex_adapter::dedupe_adjacent(tail.events);
-            EventsPayload {
-                tool: run.tool.clone(),
-                events,
-                cursor: tail.cursor,
-                reset: tail.reset,
-            }
-        }
-        Err(_) => EventsPayload {
+    let Some(path) = resolve_transcript_path(run) else {
+        return empty();
+    };
+
+    match codex_adapter::read_tail_events(&path, params.cursor, DEFAULT_TAIL_BYTE_LIMIT, limit) {
+        Ok(tail) => EventsPayload {
             tool: run.tool.clone(),
-            events: Vec::new(),
-            cursor: params.cursor.unwrap_or(0),
-            reset: false,
+            events: codex_adapter::dedupe_adjacent(tail.events),
+            cursor: tail.cursor,
+            reset: tail.reset,
         },
+        Err(_) => empty(),
     }
 }
 
