@@ -54,22 +54,6 @@ struct SpawnResult {
     launch_error: Option<String>,
 }
 
-impl SpawnResult {
-    fn running(child: Child) -> Self {
-        Self {
-            child: Some(child),
-            launch_error: None,
-        }
-    }
-
-    fn failed(message: String) -> Self {
-        Self {
-            child: None,
-            launch_error: Some(message),
-        }
-    }
-}
-
 enum ChildStatus {
     Running,
     Missing,
@@ -87,21 +71,13 @@ fn to_json_or<T: Serialize>(value: &T, fallback: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| fallback.into())
 }
 
-fn custom_event_script<T: Serialize>(event_name: &str, detail: &T) -> String {
-    let event_name = to_json_or(&event_name, "\"unknown\"");
-    let detail = to_json_or(detail, "null");
-    format!("window.dispatchEvent(new CustomEvent({event_name}, {{ detail: {detail} }}));")
-}
-
-fn dispatch_custom_event<T: Serialize>(app: &AppHandle, event_name: &str, detail: &T) {
-    dispatch_window_script(app, &custom_event_script(event_name, detail));
-}
-
 fn emit_menu_action(app: &AppHandle, action: &str) {
-    dispatch_custom_event(
+    let detail = to_json_or(&serde_json::json!({ "action": action }), "null");
+    dispatch_window_script(
         app,
-        DESKTOP_MENU_ACTION_EVENT,
-        &serde_json::json!({ "action": action }),
+        &format!(
+            "window.dispatchEvent(new CustomEvent('{DESKTOP_MENU_ACTION_EVENT}', {{ detail: {detail} }}));"
+        ),
     );
 }
 
@@ -209,25 +185,15 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 fn find_server_binary() -> Option<PathBuf> {
     let exe = env::current_exe().ok()?;
     let dir = exe.parent()?;
+    let resources = dir.parent()?.join("Resources");
     let candidates = [
-        // 1) Same directory — works for target/{debug,release}
+        // Same directory — works for target/{debug,release}
         dir.join("octomonitor-server"),
-        // 2) Preferred bundle location after resource remap
-        dir.parent()?.join("Resources").join("octomonitor-server"),
-        // 3) Backward-compatible fallbacks for older bundle layouts
-        dir.parent()?
-            .join("Resources")
-            .join("target")
-            .join("release")
-            .join("octomonitor-server"),
-        dir.parent()?
-            .join("Resources")
-            .join("_up_")
-            .join("_up_")
-            .join("_up_")
-            .join("target")
-            .join("release")
-            .join("octomonitor-server"),
+        // Preferred bundle location after resource remap
+        resources.join("octomonitor-server"),
+        // Backward-compatible fallbacks for older bundle layouts
+        resources.join("target/release/octomonitor-server"),
+        resources.join("_up_/_up_/_up_/target/release/octomonitor-server"),
     ];
 
     candidates.into_iter().find(|candidate| candidate.exists())
@@ -252,21 +218,31 @@ fn new_server_command(program: &std::ffi::OsStr) -> Command {
     cmd
 }
 
+fn spawn_with(mut command: Command, on_error: impl FnOnce(std::io::Error) -> String) -> SpawnResult {
+    match command
+        .env("OCTOMONITOR_NO_OPEN", "1")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => SpawnResult {
+            child: Some(child),
+            launch_error: None,
+        },
+        Err(error) => SpawnResult {
+            child: None,
+            launch_error: Some(on_error(error)),
+        },
+    }
+}
+
 fn spawn_server() -> SpawnResult {
     // Try to find the pre-built server binary first.
     if let Some(binary) = find_server_binary() {
-        return match new_server_command(binary.as_os_str())
-            .env("OCTOMONITOR_NO_OPEN", "1")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(child) => SpawnResult::running(child),
-            Err(error) => SpawnResult::failed(format!(
-                "Desktop shell found `{}` but could not launch it: {error}",
-                binary.display()
-            )),
-        };
+        let display = binary.display().to_string();
+        return spawn_with(new_server_command(binary.as_os_str()), |error| {
+            format!("Desktop shell found `{display}` but could not launch it: {error}")
+        });
     }
 
     // Debug-only fallback: use `cargo run` from the workspace root. This
@@ -276,34 +252,26 @@ fn spawn_server() -> SpawnResult {
     {
         let workspace_root = env::current_exe()
             .ok()
-            .and_then(|exe| {
-                // Navigate from target/debug up to the workspace root.
-                exe.parent()?.parent()?.parent().map(Path::to_path_buf)
-            })
+            .and_then(|exe| exe.parent()?.parent()?.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        match new_server_command(std::ffi::OsStr::new("cargo"))
-            .args(["run", "-p", "octomonitor-server"])
-            .current_dir(workspace_root)
-            .env("OCTOMONITOR_NO_OPEN", "1")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(child) => SpawnResult::running(child),
-            Err(error) => SpawnResult::failed(format!(
-                "Desktop shell could not run `cargo run -p octomonitor-server`: {error}"
-            )),
-        }
+        let mut cmd = new_server_command(std::ffi::OsStr::new("cargo"));
+        cmd.args(["run", "-p", "octomonitor-server"])
+            .current_dir(workspace_root);
+        spawn_with(cmd, |error| {
+            format!("Desktop shell could not run `cargo run -p octomonitor-server`: {error}")
+        })
     }
 
     #[cfg(not(debug_assertions))]
     {
         eprintln!("octomonitor-server binary not found; server will not start");
-        SpawnResult::failed(
-            "Bundled `octomonitor-server` binary was not found and no local server was started."
-                .into(),
-        )
+        SpawnResult {
+            child: None,
+            launch_error: Some(
+                "Bundled `octomonitor-server` binary was not found and no local server was started.".into(),
+            ),
+        }
     }
 }
 
@@ -317,15 +285,10 @@ fn check_server_health() -> bool {
     let _ = stream.set_read_timeout(Some(Duration::from_millis(600)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(600)));
 
-    if stream
-        .write_all(
-            format!(
-                "GET {SERVER_HEALTH_PATH} HTTP/1.1\r\nHost: {SERVER_ADDR}\r\nConnection: close\r\n\r\n"
-            )
-            .as_bytes(),
-        )
-        .is_err()
-    {
+    let request = format!(
+        "GET {SERVER_HEALTH_PATH} HTTP/1.1\r\nHost: {SERVER_ADDR}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
 
@@ -353,10 +316,11 @@ fn inspect_server_process(app: &AppHandle) -> ChildStatus {
     match process.try_wait() {
         Ok(Some(status)) => {
             guard.take();
-            ChildStatus::Exited(match status.code() {
-                Some(code) => format!("exit code {code}"),
-                None => "terminated by signal".into(),
-            })
+            let detail = status
+                .code()
+                .map(|code| format!("exit code {code}"))
+                .unwrap_or_else(|| "terminated by signal".into());
+            ChildStatus::Exited(detail)
         }
         Ok(None) => ChildStatus::Running,
         Err(error) => ChildStatus::Unknown(format!(
@@ -427,19 +391,13 @@ fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
 
             if !timeout_reported && Instant::now() >= deadline {
                 let (title, message) = match launch_error.as_deref() {
-                    Some(err) => ("Desktop server unavailable", err.to_owned()),
+                    Some(err) => ("Desktop server unavailable".into(), err.to_owned()),
                     None => (
-                        "Local server did not become ready",
-                        "Desktop shell could not confirm that http://127.0.0.1:46321/api/health became ready within 8 seconds. OctoMonitor is still warming up in the background; if this banner persists, retry or start `cargo run -p octomonitor-server` manually.".to_owned(),
+                        "Local server did not become ready".into(),
+                        "Desktop shell could not confirm that http://127.0.0.1:46321/api/health became ready within 8 seconds. OctoMonitor is still warming up in the background; if this banner persists, retry or start `cargo run -p octomonitor-server` manually.".into(),
                     ),
                 };
-                push_boot_issue(
-                    &app,
-                    Some(DesktopBootIssue {
-                        title: title.into(),
-                        message,
-                    }),
-                );
+                push_boot_issue(&app, Some(DesktopBootIssue { title, message }));
                 timeout_reported = true;
 
                 if matches!(inspect_server_process(&app), ChildStatus::Missing) {
@@ -474,10 +432,9 @@ fn kill_child(child: &mut Child) {
 
 /// Take the child out of the shared state and kill it.
 fn stop_server_shared(shared: &SharedChild) {
-    if let Ok(mut guard) = shared.lock() {
-        if let Some(mut child) = guard.take() {
-            kill_child(&mut child);
-        }
+    let Ok(mut guard) = shared.lock() else { return };
+    if let Some(mut child) = guard.take() {
+        kill_child(&mut child);
     }
 }
 
