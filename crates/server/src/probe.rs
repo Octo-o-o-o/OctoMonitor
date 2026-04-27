@@ -174,6 +174,8 @@ fn failed_hermes_snapshot(reason: String) -> hermes_adapter::HermesSnapshot {
     }
 }
 
+const PROBE_CACHE_BUSY: &str = "probe cache busy after previous timeout";
+
 async fn run_probe_task<T, F, B>(name: &'static str, probe: F, fallback: B) -> T
 where
     T: Send + 'static,
@@ -380,8 +382,7 @@ fn merge_runtime_state(
     let mut run_map: HashMap<String, RunRecord> = target
         .runs
         .iter()
-        .cloned()
-        .map(|run| (run.id.clone(), run))
+        .map(|run| (run.id.clone(), run.clone()))
         .collect();
 
     let eviction_cutoff = (Utc::now() - RUN_RETENTION).to_rfc3339();
@@ -435,11 +436,9 @@ fn same_underlying_run(a: &RunRecord, b: &RunRecord) -> bool {
     if a.tool != b.tool {
         return false;
     }
-
-    fn both_match(left: &Option<String>, right: &Option<String>) -> bool {
+    let both_match = |left: &Option<String>, right: &Option<String>| {
         matches!((left, right), (Some(l), Some(r)) if l == r)
-    }
-
+    };
     both_match(&a.session_id, &b.session_id)
         || both_match(&a.thread_id, &b.thread_id)
         || both_match(&a.session_key, &b.session_key)
@@ -471,35 +470,37 @@ fn is_pinned_run(run: &RunRecord) -> bool {
 
 fn apply_history_window(payload: &mut BootstrapPayload) {
     let cutoff = history_cutoff(&payload.config);
+    let is_after = |ts: &str| {
+        parse_rfc3339_utc(ts)
+            .map(|dt| dt >= cutoff)
+            .unwrap_or(false)
+    };
+    let by_activity_desc =
+        |a: &RunRecord, b: &RunRecord| b.last_activity_at.cmp(&a.last_activity_at);
+
     let mut pinned = Vec::new();
     let mut recent = Vec::new();
 
     for run in std::mem::take(&mut payload.runs) {
-        let is_recent = parse_rfc3339_utc(&run.last_activity_at)
-            .map(|activity| activity >= cutoff)
-            .unwrap_or(false);
-
         if is_pinned_run(&run) {
             pinned.push(run);
-        } else if is_recent {
+        } else if is_after(&run.last_activity_at) {
             recent.push(run);
         }
     }
 
-    pinned.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
-    recent.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    pinned.sort_by(by_activity_desc);
+    recent.sort_by(by_activity_desc);
 
     let mut retained = pinned;
     let remaining = MAX_BOOTSTRAP_RUNS.saturating_sub(retained.len());
     retained.extend(recent.into_iter().take(remaining));
-    retained.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    retained.sort_by(by_activity_desc);
     payload.runs = retained;
 
-    payload.recent_completions.retain(|completion| {
-        parse_rfc3339_utc(&completion.finished_at)
-            .map(|finished| finished >= cutoff)
-            .unwrap_or(false)
-    });
+    payload
+        .recent_completions
+        .retain(|completion| is_after(&completion.finished_at));
     payload
         .recent_completions
         .sort_by(|a, b| b.finished_at.cmp(&a.finished_at));
@@ -542,7 +543,7 @@ async fn scan_adapters_isolated(
             "claude",
             move || match claude_cache.try_lock() {
                 Ok(mut cache) => claude_adapter::probe_with_cache(&mut cache),
-                Err(_) => failed_claude_snapshot("probe cache busy after previous timeout".into()),
+                Err(_) => failed_claude_snapshot(PROBE_CACHE_BUSY.into()),
             },
             failed_claude_snapshot
         ),
@@ -550,7 +551,7 @@ async fn scan_adapters_isolated(
             "codex",
             move || match codex_cache.try_lock() {
                 Ok(mut cache) => codex_adapter::probe_with_cache(&mut cache),
-                Err(_) => failed_codex_snapshot("probe cache busy after previous timeout".into()),
+                Err(_) => failed_codex_snapshot(PROBE_CACHE_BUSY.into()),
             },
             failed_codex_snapshot
         ),
@@ -558,9 +559,7 @@ async fn scan_adapters_isolated(
             "openclaw",
             move || match openclaw_cache.try_lock() {
                 Ok(mut cache) => openclaw_adapter::probe_with_cache(&mut cache),
-                Err(_) => {
-                    failed_openclaw_snapshot("probe cache busy after previous timeout".into())
-                }
+                Err(_) => failed_openclaw_snapshot(PROBE_CACHE_BUSY.into()),
             },
             failed_openclaw_snapshot
         ),
@@ -568,9 +567,7 @@ async fn scan_adapters_isolated(
             "hermes",
             move || match hermes_cache.try_lock() {
                 Ok(mut cache) => hermes_adapter::probe_with_cache(&mut cache),
-                Err(_) => {
-                    failed_hermes_snapshot("probe cache busy after previous timeout".into())
-                }
+                Err(_) => failed_hermes_snapshot(PROBE_CACHE_BUSY.into()),
             },
             failed_hermes_snapshot
         ),
@@ -594,6 +591,20 @@ fn scan_adapters_blocking() -> (
     openclaw_adapter::OpenClawSnapshot,
     hermes_adapter::HermesSnapshot,
 ) {
+    fn join_or_retry<T, F>(
+        name: &'static str,
+        handle: std::thread::ScopedJoinHandle<'_, T>,
+        retry: F,
+    ) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        handle.join().unwrap_or_else(|e| {
+            tracing::error!("{name} probe panicked: {e:?}");
+            retry()
+        })
+    }
+
     let started_at = Instant::now();
     let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = std::thread::scope(|s| {
         let h1 = s.spawn(claude_adapter::probe);
@@ -601,22 +612,10 @@ fn scan_adapters_blocking() -> (
         let h3 = s.spawn(openclaw_adapter::probe);
         let h4 = s.spawn(hermes_adapter::probe);
         (
-            h1.join().unwrap_or_else(|e| {
-                tracing::error!("claude probe panicked: {e:?}");
-                claude_adapter::probe()
-            }),
-            h2.join().unwrap_or_else(|e| {
-                tracing::error!("codex probe panicked: {e:?}");
-                codex_adapter::probe()
-            }),
-            h3.join().unwrap_or_else(|e| {
-                tracing::error!("openclaw probe panicked: {e:?}");
-                openclaw_adapter::probe()
-            }),
-            h4.join().unwrap_or_else(|e| {
-                tracing::error!("hermes probe panicked: {e:?}");
-                hermes_adapter::probe()
-            }),
+            join_or_retry("claude", h1, claude_adapter::probe),
+            join_or_retry("codex", h2, codex_adapter::probe),
+            join_or_retry("openclaw", h3, openclaw_adapter::probe),
+            join_or_retry("hermes", h4, hermes_adapter::probe),
         )
     });
     perf::log_elapsed_with_details("scan_adapters", started_at, || {
@@ -786,6 +785,22 @@ fn gateway_auth_mode(gateway_ok: bool) -> Option<String> {
     Some(gateway_auth_mode_label(gateway_ok).into())
 }
 
+fn openclaw_source_mode_label(gateway_ok: bool) -> &'static str {
+    if gateway_ok {
+        "openclaw_gateway"
+    } else {
+        "openclaw_sessions"
+    }
+}
+
+fn hermes_source_mode_label(gateway_running: bool) -> &'static str {
+    if gateway_running {
+        "hermes_gateway"
+    } else {
+        "hermes_sessions"
+    }
+}
+
 fn collect_probe_scan_from_snapshots(
     include_placeholder_runs: bool,
     claude_probe: claude_adapter::ClaudeSnapshot,
@@ -857,16 +872,8 @@ fn collect_probe_scan_from_snapshots(
     } else {
         "unavailable"
     };
-    let openclaw_auth = if openclaw_probe.gateway_status_ok {
-        "gateway"
-    } else {
-        "sessions-scan"
-    };
-    let hermes_auth = if hermes_probe.gateway_running {
-        "gateway"
-    } else {
-        "sessions-scan"
-    };
+    let openclaw_auth = gateway_auth_mode_label(openclaw_probe.gateway_status_ok);
+    let hermes_auth = gateway_auth_mode_label(hermes_probe.gateway_running);
 
     let identities = vec![
         make_identity(
@@ -1361,11 +1368,7 @@ fn build_run_from_openclaw_session(
     RunRecord {
         id: format!("openclaw-{}-{}", session.agent_name, session.session_id),
         tool: ToolKind::OpenClaw,
-        source_mode: if probe.gateway_status_ok {
-            "openclaw_gateway".into()
-        } else {
-            "openclaw_sessions".into()
-        },
+        source_mode: openclaw_source_mode_label(probe.gateway_status_ok).into(),
         project_name: session
             .label
             .clone()
@@ -1477,11 +1480,7 @@ fn build_run_from_hermes_session(
     RunRecord {
         id: format!("hermes-{}-{}", session.profile_name, session.session_id),
         tool: ToolKind::Hermes,
-        source_mode: if instance_gw {
-            "hermes_gateway".into()
-        } else {
-            "hermes_sessions".into()
-        },
+        source_mode: hermes_source_mode_label(instance_gw).into(),
         project_name: session
             .display_name
             .clone()
@@ -1709,11 +1708,7 @@ fn build_probe_run_from_openclaw(probe: &openclaw_adapter::OpenClawSnapshot) -> 
     build_probe_placeholder_run(ProbeRunParams {
         id: "openclaw-probe-run",
         tool: ToolKind::OpenClaw,
-        source_mode: if probe.gateway_status_ok {
-            "openclaw_gateway".into()
-        } else {
-            "openclaw_sessions".into()
-        },
+        source_mode: openclaw_source_mode_label(probe.gateway_status_ok).into(),
         project_name: "OpenClaw",
         workspace_path: probe
             .workspace_dir
@@ -1756,11 +1751,7 @@ fn build_probe_run_from_hermes(probe: &hermes_adapter::HermesSnapshot) -> RunRec
     build_probe_placeholder_run(ProbeRunParams {
         id: "hermes-probe-run",
         tool: ToolKind::Hermes,
-        source_mode: if probe.gateway_running {
-            "hermes_gateway".into()
-        } else {
-            "hermes_sessions".into()
-        },
+        source_mode: hermes_source_mode_label(probe.gateway_running).into(),
         project_name: "Hermes",
         workspace_path: resolved_home,
         workspace_short: short,

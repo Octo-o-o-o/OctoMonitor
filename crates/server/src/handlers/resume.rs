@@ -34,34 +34,25 @@ pub async fn get_run_resume_command(
 }
 
 fn build_resume_command(run: &RunRecord) -> ResumeCommandPayload {
+    let tool = run.tool.clone();
+    let note = |msg: &str| ResumeCommandPayload {
+        command: None,
+        tool: tool.clone(),
+        note: Some(msg.to_string()),
+    };
+
     match run.tool {
         ToolKind::Codex => match run.thread_id.as_deref() {
             Some(thread_id) if !thread_id.is_empty() => ResumeCommandPayload {
                 command: Some(format!("codex resume {thread_id}")),
-                tool: ToolKind::Codex,
+                tool,
                 note: None,
             },
-            _ => ResumeCommandPayload {
-                command: None,
-                tool: ToolKind::Codex,
-                note: Some("Codex session is missing a thread id".to_string()),
-            },
+            _ => note("Codex session is missing a thread id"),
         },
-        ToolKind::Claude => ResumeCommandPayload {
-            command: None,
-            tool: ToolKind::Claude,
-            note: Some("Resume command is not yet available for Claude".to_string()),
-        },
-        ToolKind::OpenClaw => ResumeCommandPayload {
-            command: None,
-            tool: ToolKind::OpenClaw,
-            note: Some("Resume command is not yet available for OpenClaw".to_string()),
-        },
-        ToolKind::Hermes => ResumeCommandPayload {
-            command: None,
-            tool: ToolKind::Hermes,
-            note: Some("Resume command is not yet available for Hermes".to_string()),
-        },
+        ToolKind::Claude => note("Resume command is not yet available for Claude"),
+        ToolKind::OpenClaw => note("Resume command is not yet available for OpenClaw"),
+        ToolKind::Hermes => note("Resume command is not yet available for Hermes"),
     }
 }
 

@@ -498,11 +498,7 @@ fn parse_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let raw = headers.get(COOKIE)?.to_str().ok()?;
     raw.split(';').find_map(|entry| {
         let (cookie_name, value) = entry.trim().split_once('=')?;
-        if cookie_name == name {
-            Some(value.to_string())
-        } else {
-            None
-        }
+        (cookie_name == name).then(|| value.to_string())
     })
 }
 

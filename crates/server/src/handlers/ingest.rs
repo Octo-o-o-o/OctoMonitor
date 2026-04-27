@@ -11,12 +11,7 @@ use crate::probe::{elapsed_from_timestamps, shorten_path};
 use crate::state::AppState;
 
 fn default_quota() -> octomonitor_core::QuotaValue {
-    octomonitor_core::QuotaValue {
-        five_hour_used_pct: None,
-        seven_day_used_pct: None,
-        reset_at: vec![],
-        confidence: SourceConfidence::Derived,
-    }
+    statusline_quota(None, None, Vec::new())
 }
 
 fn statusline_quota(

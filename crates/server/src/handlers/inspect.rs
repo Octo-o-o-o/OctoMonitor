@@ -127,18 +127,21 @@ fn find_file_containing_id(root: &Path, needle: &str) -> Option<PathBuf> {
     None
 }
 
+/// Iterate JSONL lines from `reader`, yielding `(value, timestamp)` for lines
+/// that parse successfully. Bad lines are skipped silently.
+fn jsonl_lines<R: BufRead>(reader: R) -> impl Iterator<Item = (serde_json::Value, String)> {
+    reader.lines().map_while(Result::ok).filter_map(|line| {
+        let value: serde_json::Value = serde_json::from_str(&line).ok()?;
+        let timestamp = json_str(&value, "timestamp").to_string();
+        Some((value, timestamp))
+    })
+}
+
 fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
     let mut entries = Vec::new();
     let mut pending_output: Option<InspectEntry> = None;
 
-    for line in reader.lines().map_while(Result::ok) {
-        let val: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
-        let timestamp = json_str(&val, "timestamp").to_string();
-
+    for (val, timestamp) in jsonl_lines(reader) {
         match json_str(&val, "type") {
             "event_msg" => {
                 let Some(payload) = val.get("payload") else {
@@ -208,14 +211,7 @@ fn parse_claude_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
     let mut entries = Vec::new();
     let mut pending_output: Option<InspectEntry> = None;
 
-    for line in reader.lines().map_while(Result::ok) {
-        let val: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
-        let timestamp = json_str(&val, "timestamp").to_string();
-
+    for (val, timestamp) in jsonl_lines(reader) {
         match json_str(&val, "type") {
             "user" => {
                 let Some(message) = val.get("message") else {
@@ -255,12 +251,7 @@ fn parse_claude_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
 fn parse_openclaw_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
     let mut entries = Vec::new();
 
-    for line in reader.lines().map_while(Result::ok) {
-        let val: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
+    for (val, timestamp) in jsonl_lines(reader) {
         if json_str(&val, "type") != "message" {
             continue;
         }
@@ -268,7 +259,6 @@ fn parse_openclaw_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
         let Some(message) = val.get("message") else {
             continue;
         };
-        let timestamp = json_str(&val, "timestamp").to_string();
 
         match json_str(message, "role") {
             "user" => {

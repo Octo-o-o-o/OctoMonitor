@@ -111,17 +111,10 @@ pub fn discover_vcs_context(path: &str) -> Option<VcsContext> {
         worktree_root.clone()
     };
 
-    let branch = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .arg("branch")
-        .arg("--show-current")
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let branch = {
+        let raw = command_stdout(path, &["branch", "--show-current"]);
+        (!raw.is_empty()).then_some(raw)
+    };
 
     let repo_name = repo_root
         .file_name()
@@ -490,9 +483,13 @@ fn parse_timestamp_ms(value: &str) -> Option<i64> {
 }
 
 fn primary_worktree(commit: &ScannedCommit) -> (Option<String>, Option<String>) {
-    fn sole_element(set: &BTreeSet<String>) -> Option<String> {
-        (set.len() == 1).then(|| set.iter().next().cloned())?
-    }
+    let sole_element = |set: &BTreeSet<String>| -> Option<String> {
+        if set.len() == 1 {
+            set.iter().next().cloned()
+        } else {
+            None
+        }
+    };
     (
         sole_element(&commit.worktree_ids),
         sole_element(&commit.worktree_names),
@@ -721,10 +718,6 @@ fn parse_scanned_commits(stdout: &str, target: &WorktreeScanTarget) -> Vec<Scann
             deletions += removed.parse::<u64>().unwrap_or(0);
         }
 
-        let branches: BTreeSet<String> = target.branch.iter().cloned().collect();
-        let worktree_ids: BTreeSet<String> = target.worktree_id.iter().cloned().collect();
-        let worktree_names: BTreeSet<String> = target.worktree_name.iter().cloned().collect();
-
         commits.push(ScannedCommit {
             sha: sha.to_string(),
             short_sha: short_sha.to_string(),
@@ -734,9 +727,9 @@ fn parse_scanned_commits(stdout: &str, target: &WorktreeScanTarget) -> Vec<Scann
             files_changed,
             insertions,
             deletions,
-            branches,
-            worktree_ids,
-            worktree_names,
+            branches: target.branch.iter().cloned().collect(),
+            worktree_ids: target.worktree_id.iter().cloned().collect(),
+            worktree_names: target.worktree_name.iter().cloned().collect(),
         });
     }
 
@@ -750,19 +743,16 @@ fn scan_fingerprint(repo_root: &str) -> String {
 }
 
 fn command_stdout(repo_root: &str, args: &[&str]) -> String {
-    let output = Command::new("git")
+    Command::new("git")
         .arg("-C")
         .arg(repo_root)
         .args(args)
         .output()
         .ok()
-        .filter(|o| o.status.success());
-    match output {
-        Some(o) => String::from_utf8(o.stdout)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default(),
-        None => String::new(),
-    }
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
