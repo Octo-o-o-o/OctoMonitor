@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -137,8 +138,16 @@ fn recent_session_hint(sessions_dir: &Path) -> Option<String> {
     Some(format!("latest session artifact: {}", mask_tail(&name)))
 }
 
+fn get_str(v: &Value, key: &str) -> Option<String> {
+    v.get(key).and_then(Value::as_str).map(String::from)
+}
+
+fn get_u64(v: &Value, key: &str) -> u64 {
+    v.get(key).and_then(Value::as_u64).unwrap_or(0)
+}
+
 fn parse_gateway_status_payload(stdout: &str) -> OpenClawGatewayStatusProbe {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+    let Ok(value) = serde_json::from_str::<Value>(stdout) else {
         return OpenClawGatewayStatusProbe {
             reachable: false,
             status: Some("warning".into()),
@@ -146,32 +155,22 @@ fn parse_gateway_status_payload(stdout: &str) -> OpenClawGatewayStatusProbe {
         };
     };
 
-    let runtime_status = value
-        .pointer("/service/runtime/status")
-        .and_then(|v| v.as_str());
-    let runtime_state = value
-        .pointer("/service/runtime/state")
-        .and_then(|v| v.as_str());
-    let config_ok = value
-        .pointer("/service/configAudit/ok")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let config_issue_count = value
-        .pointer("/service/configAudit/issues")
-        .and_then(|v| v.as_array())
-        .map_or(0, |issues| issues.len());
-    let rpc_ok = value
-        .pointer("/rpc/ok")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let health_ok = value
-        .pointer("/health/healthy")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(rpc_ok);
-    let stale_gateway_pid_count = value
-        .pointer("/health/staleGatewayPids")
-        .and_then(|v| v.as_array())
-        .map_or(0, |items| items.len());
+    let ptr_str = |p: &str| value.pointer(p).and_then(Value::as_str);
+    let ptr_bool = |p: &str| value.pointer(p).and_then(Value::as_bool);
+    let ptr_array_len = |p: &str| {
+        value
+            .pointer(p)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
+
+    let runtime_status = ptr_str("/service/runtime/status");
+    let runtime_state = ptr_str("/service/runtime/state");
+    let config_ok = ptr_bool("/service/configAudit/ok").unwrap_or(true);
+    let config_issue_count = ptr_array_len("/service/configAudit/issues");
+    let rpc_ok = ptr_bool("/rpc/ok").unwrap_or(false);
+    let health_ok = ptr_bool("/health/healthy").unwrap_or(rpc_ok);
+    let stale_gateway_pid_count = ptr_array_len("/health/staleGatewayPids");
 
     let service_running = matches!(runtime_status, Some("running"));
     let transition_state = matches!(runtime_status, Some("starting" | "restarting"));
@@ -182,35 +181,31 @@ fn parse_gateway_status_payload(stdout: &str) -> OpenClawGatewayStatusProbe {
             || matches!(runtime_state, Some("degraded" | "failed")));
 
     let status = if warning || transition_state {
-        Some("warning".into())
+        "warning"
     } else if service_running || rpc_ok {
-        Some("running".into())
+        "running"
     } else {
-        Some("stopped".into())
+        "stopped"
     };
 
     let mut detail_parts = Vec::new();
-    if let Some(runtime_status) = runtime_status {
-        let mut service_part = format!("service {runtime_status}");
-        if let Some(runtime_state) = runtime_state.filter(|state| !state.is_empty()) {
-            service_part.push_str(&format!(" ({runtime_state})"));
+    if let Some(rs) = runtime_status {
+        let mut service_part = format!("service {rs}");
+        if let Some(state) = runtime_state.filter(|s| !s.is_empty()) {
+            service_part.push_str(&format!(" ({state})"));
         }
         detail_parts.push(service_part);
     }
-    detail_parts.push(if rpc_ok {
-        "rpc reachable".into()
-    } else {
-        "rpc unreachable".into()
-    });
+    detail_parts.push(if rpc_ok { "rpc reachable" } else { "rpc unreachable" }.into());
     if !health_ok {
         detail_parts.push("health unhealthy".into());
     }
     if !config_ok {
-        if config_issue_count > 0 {
-            detail_parts.push(format!("config issues: {config_issue_count}"));
+        detail_parts.push(if config_issue_count > 0 {
+            format!("config issues: {config_issue_count}")
         } else {
-            detail_parts.push("config issues".into());
-        }
+            "config issues".into()
+        });
     }
     if stale_gateway_pid_count > 0 {
         detail_parts.push(format!("stale gateway pids: {stale_gateway_pid_count}"));
@@ -218,7 +213,7 @@ fn parse_gateway_status_payload(stdout: &str) -> OpenClawGatewayStatusProbe {
 
     OpenClawGatewayStatusProbe {
         reachable: rpc_ok,
-        status,
+        status: Some(status.into()),
         detail: (!detail_parts.is_empty()).then(|| detail_parts.join(" | ")),
     }
 }
@@ -260,72 +255,44 @@ fn run_gateway_status_probe() -> (CommandProbeResult, OpenClawGatewayStatusProbe
 }
 
 /// Derive a human-readable origin label and provider from session data
-fn derive_origin(
-    session_key: &str,
-    session_val: &serde_json::Value,
-) -> (Option<String>, Option<String>) {
+fn derive_origin(session_key: &str, session_val: &Value) -> (Option<String>, Option<String>) {
     let origin = session_val.get("origin");
+    let origin_provider_raw = origin.and_then(|o| o.get("provider")).and_then(Value::as_str);
+    let origin_label_raw = origin.and_then(|o| o.get("label")).and_then(Value::as_str);
+    let origin_surface = origin.and_then(|o| o.get("surface")).and_then(Value::as_str);
+    let session_label = session_val.get("label").and_then(Value::as_str);
 
-    // Try origin.provider first
-    let origin_provider_raw = origin
-        .and_then(|o| o.get("provider"))
-        .and_then(|v| v.as_str());
-    let origin_label_raw = origin.and_then(|o| o.get("label")).and_then(|v| v.as_str());
-    let origin_surface = origin
-        .and_then(|o| o.get("surface"))
-        .and_then(|v| v.as_str());
-
-    // Also check session-level label (e.g. "Cron: AI Daily Brief")
-    let session_label = session_val.get("label").and_then(|v| v.as_str());
-
-    let provider = origin_provider_raw.map(|p| p.to_string()).or_else(|| {
-        [
+    let provider = origin_provider_raw.map(String::from).or_else(|| {
+        const PATTERNS: &[(&str, &str)] = &[
             (":cron:", "cron"),
             (":telegram:", "telegram"),
             (":weixin:", "wechat"),
             (":wechat:", "wechat"),
-        ]
-        .iter()
-        .find(|(pattern, _)| session_key.contains(pattern))
-        .map(|(_, name)| name.to_string())
+        ];
+        PATTERNS
+            .iter()
+            .find(|(pattern, _)| session_key.contains(pattern))
+            .map(|(_, name)| (*name).to_string())
     });
 
-    // Build human-readable label
     let label = match provider.as_deref() {
         Some("telegram") => {
-            // Clean up origin label - remove "id:NNNNN" suffix
             let clean_name = origin_label_raw
-                .map(|l| {
-                    if let Some(idx) = l.find(" id:") {
-                        l[..idx].to_string()
-                    } else {
-                        l.to_string()
-                    }
-                })
+                .map(|l| l.split(" id:").next().unwrap_or(l).to_string())
                 .unwrap_or_else(|| "DM".to_string());
             let surface = origin_surface.unwrap_or("telegram");
             Some(format!("{}: {}", capitalize(surface), clean_name))
         }
         Some("heartbeat") => Some("Heartbeat".to_string()),
-        Some("cron") => {
-            // Use session label if it starts with "Cron:", otherwise build from origin
-            if let Some(sl) = session_label {
-                if sl.starts_with("Cron:") {
-                    Some(sl.to_string())
-                } else {
-                    Some(format!("Cron: {}", sl))
-                }
-            } else {
-                origin_label_raw.map(|l| format!("Cron: {}", l))
-            }
-        }
-        Some(other) => {
-            if let Some(l) = origin_label_raw {
-                Some(format!("{}: {}", capitalize(other), l))
-            } else {
-                Some(capitalize(other))
-            }
-        }
+        Some("cron") => match session_label {
+            Some(sl) if sl.starts_with("Cron:") => Some(sl.to_string()),
+            Some(sl) => Some(format!("Cron: {sl}")),
+            None => origin_label_raw.map(|l| format!("Cron: {l}")),
+        },
+        Some(other) => Some(match origin_label_raw {
+            Some(l) => format!("{}: {}", capitalize(other), l),
+            None => capitalize(other),
+        }),
         None => None,
     };
 
@@ -336,10 +303,10 @@ fn scan_cron_jobs(root: &Path) -> Vec<OpenClawCronJob> {
     let Ok(contents) = fs::read_to_string(root.join("cron").join("jobs.json")) else {
         return vec![];
     };
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(&contents) else {
+    let Ok(val) = serde_json::from_str::<Value>(&contents) else {
         return vec![];
     };
-    let Some(jobs) = val.get("jobs").and_then(|j| j.as_array()) else {
+    let Some(jobs) = val.get("jobs").and_then(Value::as_array) else {
         return vec![];
     };
 
@@ -347,18 +314,18 @@ fn scan_cron_jobs(root: &Path) -> Vec<OpenClawCronJob> {
         .filter_map(|j| {
             let id = j.get("id")?.as_str()?.to_string();
             let name = j.get("name")?.as_str()?.to_string();
-            let enabled = j.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            let enabled = j.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             let schedule = j.get("schedule")?;
             let expr = schedule.get("expr")?.as_str()?.to_string();
             let tz = schedule
                 .get("tz")
-                .and_then(|v| v.as_str())
+                .and_then(Value::as_str)
                 .unwrap_or("UTC")
                 .to_string();
             let agent_id = j
                 .get("payload")
                 .and_then(|p| p.get("agentId"))
-                .and_then(|v| v.as_str())
+                .and_then(Value::as_str)
                 .map(String::from);
 
             let schedule_human = format_cron_expr(&expr, &tz);
@@ -380,27 +347,25 @@ fn load_agent_name_map(root: &Path) -> HashMap<String, String> {
     let Ok(contents) = fs::read_to_string(root.join("openclaw.json")) else {
         return HashMap::new();
     };
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(&contents) else {
+    let Ok(val) = serde_json::from_str::<Value>(&contents) else {
         return HashMap::new();
     };
-    let Some(agents) = val.pointer("/agents/list").and_then(|v| v.as_array()) else {
+    let Some(agents) = val.pointer("/agents/list").and_then(Value::as_array) else {
         return HashMap::new();
     };
-    let mut map = HashMap::new();
-    for agent in agents {
-        if let (Some(id), Some(name)) = (
-            agent.get("id").and_then(|v| v.as_str()),
-            agent.get("name").and_then(|v| v.as_str()),
-        ) {
-            map.insert(id.to_string(), name.to_string());
-        }
-    }
-    map
+    agents
+        .iter()
+        .filter_map(|agent| {
+            let id = agent.get("id").and_then(Value::as_str)?.to_string();
+            let name = agent.get("name").and_then(Value::as_str)?.to_string();
+            Some((id, name))
+        })
+        .collect()
 }
 
 fn scan_agent_sessions(
     root: &Path,
-    cache: Option<&mut OpenClawProbeCache>,
+    mut cache: Option<&mut OpenClawProbeCache>,
 ) -> Vec<OpenClawSession> {
     let agents_dir = root.join("agents");
     if !agents_dir.is_dir() {
@@ -409,43 +374,41 @@ fn scan_agent_sessions(
 
     let name_map = load_agent_name_map(root);
     let mut sessions = Vec::new();
-    let mut cache = cache;
     let mut seen_session_lists = HashSet::new();
 
-    if let Ok(agents) = fs::read_dir(&agents_dir) {
-        for agent_entry in agents.flatten() {
-            if !agent_entry.path().is_dir() {
-                continue;
-            }
-            let agent_name = agent_entry.file_name().to_string_lossy().to_string();
-            let display_name = name_map.get(&agent_name).cloned();
-            let sessions_json = agent_entry.path().join("sessions").join("sessions.json");
+    let Ok(agents) = fs::read_dir(&agents_dir) else {
+        return sessions;
+    };
+    for agent_entry in agents.flatten() {
+        if !agent_entry.path().is_dir() {
+            continue;
+        }
+        let agent_name = agent_entry.file_name().to_string_lossy().to_string();
+        let display_name = name_map.get(&agent_name).cloned();
+        let sessions_json = agent_entry.path().join("sessions").join("sessions.json");
 
-            if !sessions_json.exists() {
-                continue;
-            }
-            seen_session_lists.insert(sessions_json.display().to_string());
+        if !sessions_json.exists() {
+            continue;
+        }
+        seen_session_lists.insert(sessions_json.display().to_string());
 
-            let agent_sessions = match cache.as_mut() {
-                Some(cache) => {
-                    let cache = &mut **cache;
-                    load_cached_agent_sessions(cache, &sessions_json, &agent_name, &display_name)
-                }
-                None => parse_sessions_json_base(&sessions_json, &agent_name, &display_name),
-            };
-            if let Some(agent_sessions) = agent_sessions {
-                sessions.extend(agent_sessions);
+        let agent_sessions = match cache.as_deref_mut() {
+            Some(cache) => {
+                load_cached_agent_sessions(cache, &sessions_json, &agent_name, &display_name)
             }
+            None => parse_sessions_json_base(&sessions_json, &agent_name, &display_name),
+        };
+        if let Some(agent_sessions) = agent_sessions {
+            sessions.extend(agent_sessions);
         }
     }
 
-    // Sort by updated_at descending
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     if let Some(cache) = cache {
-        let live_transcripts = sessions
+        let live_transcripts: HashSet<_> = sessions
             .iter()
             .filter_map(|session| session.transcript_path.clone())
-            .collect::<HashSet<_>>();
+            .collect();
         cache
             .session_lists
             .retain(|path, _| seen_session_lists.contains(path));
@@ -456,32 +419,43 @@ fn scan_agent_sessions(
     sessions
 }
 
+fn is_synthetic_user_message(text: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "[cron:",
+        "[[",
+        "Read HEARTBEAT",
+        "<system",
+        "<command",
+        "A new session was started via",
+        "Conversation info (untrusted",
+    ];
+    if PREFIXES.iter().any(|p| text.starts_with(p)) {
+        return true;
+    }
+    if text.contains("HEARTBEAT.md") || text.contains("# OpenClaw Worker Spawn Contract") {
+        return true;
+    }
+    text.len() > 5 && text.starts_with('[') && text.contains("GMT")
+}
+
 fn apply_openclaw_transcript_line(state: &mut OpenClawTranscriptState, line: &str) {
-    let val: serde_json::Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(_) => return,
+    let Ok(val) = serde_json::from_str::<Value>(line) else {
+        return;
     };
-    let entry_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
-    if entry_type != "message" {
+    if val.get("type").and_then(Value::as_str) != Some("message") {
         return;
     }
     let Some(msg) = val.get("message") else {
         return;
     };
-    let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
-    if role == "user" {
-        if let Some(text) = extract_text_content(msg) {
-            if text.starts_with("[cron:")
-                || text.starts_with("[[")
-                || text.starts_with("Read HEARTBEAT")
-                || text.starts_with("<system")
-                || text.starts_with("<command")
-                || text.contains("HEARTBEAT.md")
-                || text.contains("# OpenClaw Worker Spawn Contract")
-                || text.starts_with("A new session was started via")
-                || (text.len() > 5 && text.starts_with('[') && text.contains("GMT"))
-                || text.starts_with("Conversation info (untrusted")
-            {
+    let role = msg.get("role").and_then(Value::as_str).unwrap_or("");
+    let Some(text) = extract_text_content(msg) else {
+        return;
+    };
+
+    match role {
+        "user" => {
+            if is_synthetic_user_message(&text) {
                 return;
             }
             state.message_count += 1;
@@ -491,33 +465,30 @@ fn apply_openclaw_transcript_line(state: &mut OpenClawTranscriptState, line: &st
             }
             state.last_question = Some(truncated);
         }
-    } else if role == "assistant" {
-        if let Some(text) = extract_text_content(msg) {
+        "assistant" => {
             let lower = text.to_lowercase();
             if lower.contains("error") || lower.contains("failed") || text.contains("无法") {
                 state.error_message = Some(truncate_chars(&text, 300));
             }
         }
+        _ => {}
     }
 }
 
-fn extract_text_content(msg: &serde_json::Value) -> Option<String> {
+fn extract_text_content(msg: &Value) -> Option<String> {
     let content = msg.get("content")?;
     if let Some(s) = content.as_str() {
         return (!s.is_empty()).then(|| s.to_string());
     }
-    content.as_array().and_then(|arr| {
-        arr.iter().find_map(|block| {
-            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                block
-                    .get("text")
-                    .and_then(|t| t.as_str())
-                    .filter(|t| !t.is_empty())
-                    .map(String::from)
-            } else {
-                None
-            }
-        })
+    content.as_array()?.iter().find_map(|block| {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            return None;
+        }
+        block
+            .get("text")
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+            .map(String::from)
     })
 }
 
@@ -527,77 +498,40 @@ fn parse_sessions_json_base(
     agent_display_name: &Option<String>,
 ) -> Option<Vec<OpenClawSession>> {
     let contents = fs::read_to_string(path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    let val: Value = serde_json::from_str(&contents).ok()?;
     let obj = val.as_object()?;
 
     let mut result = Vec::new();
 
     for (session_key, session_val) in obj {
-        let updated_at = session_val.get("updatedAt").and_then(|v| v.as_i64());
-
         let Some(session_id) = session_val
             .get("sessionId")
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
+            .map(String::from)
         else {
             continue;
         };
-        let session_id = session_id.to_string();
 
         let status = session_val
             .get("status")
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let model = session_val
-            .get("model")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let model_provider = session_val
-            .get("modelProvider")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let label = session_val
-            .get("label")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let started_at = session_val.get("startedAt").and_then(|v| v.as_i64());
+        let started_at = session_val.get("startedAt").and_then(Value::as_i64);
         if status.trim().is_empty() && started_at.unwrap_or_default() <= 0 {
             continue;
         }
-        let context_tokens = session_val.get("contextTokens").and_then(|v| v.as_u64());
 
         let workspace_dir = session_val
             .pointer("/systemPromptReport/workspaceDir")
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .map(String::from);
 
-        let input_tokens = session_val
-            .get("inputTokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let output_tokens = session_val
-            .get("outputTokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let total_tokens = session_val
-            .get("totalTokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cache_read = session_val
-            .get("cacheRead")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cache_write = session_val
-            .get("cacheWrite")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let cost_usd = session_val.get("estimatedCostUsd").and_then(|v| v.as_f64());
-
-        let session_file = session_val
+        let transcript_path = session_val
             .get("sessionFile")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from);
+            .and_then(Value::as_str)
+            .map(|s| PathBuf::from(s).display().to_string());
 
         let (origin_label, origin_provider) = derive_origin(session_key, session_val);
 
@@ -605,25 +539,25 @@ fn parse_sessions_json_base(
             session_id,
             session_key: session_key.clone(),
             agent_name: agent_name.to_string(),
-            label,
+            label: get_str(session_val, "label"),
             status,
-            model,
-            model_provider,
-            transcript_path: session_file.map(|path| path.display().to_string()),
+            model: get_str(session_val, "model"),
+            model_provider: get_str(session_val, "modelProvider"),
+            transcript_path,
             workspace_dir,
             started_at,
-            updated_at,
-            context_tokens,
+            updated_at: session_val.get("updatedAt").and_then(Value::as_i64),
+            context_tokens: session_val.get("contextTokens").and_then(Value::as_u64),
             first_question: None,
             last_question: None,
             message_count: 0,
             error_message: None,
-            input_tokens,
-            output_tokens,
-            total_tokens,
-            cache_read,
-            cache_write,
-            cost_usd,
+            input_tokens: get_u64(session_val, "inputTokens"),
+            output_tokens: get_u64(session_val, "outputTokens"),
+            total_tokens: get_u64(session_val, "totalTokens"),
+            cache_read: get_u64(session_val, "cacheRead"),
+            cache_write: get_u64(session_val, "cacheWrite"),
+            cost_usd: session_val.get("estimatedCostUsd").and_then(Value::as_f64),
             origin_label,
             origin_provider,
             agent_display_name: agent_display_name.clone(),
@@ -706,7 +640,6 @@ pub fn probe_with_cache(cache: &mut OpenClawProbeCache) -> OpenClawSnapshot {
     let sessions_probe = probe_file(&sessions_dir);
     let state_probe = probe_file(&state_file);
 
-    // Scan real agent sessions
     let sessions = scan_agent_sessions(&root, Some(cache));
     let cron_jobs = scan_cron_jobs(&root);
 
