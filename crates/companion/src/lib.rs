@@ -29,7 +29,7 @@ const PAIRING_TTL: Duration = Duration::minutes(10);
 const SESSION_TTL: Duration = Duration::days(30);
 const PAIRING_CODE_LEN: usize = 8;
 
-/// Returns `true` when `timestamp` is missing, unparseable, or in the past.
+/// Returns `true` when `timestamp` is unparseable or already in the past.
 fn is_past(timestamp: &str) -> bool {
     DateTime::parse_from_rfc3339(timestamp)
         .map(|dt| dt.with_timezone(&Utc) < Utc::now())
@@ -43,7 +43,7 @@ pub fn request_pairing(label: Option<&str>) -> PairingRecord {
         .chars()
         .filter(|ch| *ch != '-')
         .take(PAIRING_CODE_LEN)
-        .flat_map(char::to_uppercase)
+        .map(|ch| ch.to_ascii_uppercase())
         .collect();
 
     PairingRecord {
