@@ -5,7 +5,7 @@ use std::{
     env,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -252,7 +252,7 @@ fn spawn_server() -> SpawnResult {
     {
         let workspace_root = env::current_exe()
             .ok()
-            .and_then(|exe| exe.parent()?.parent()?.parent().map(Path::to_path_buf))
+            .and_then(|exe| exe.parent()?.parent()?.parent().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."));
 
         let mut cmd = new_server_command(std::ffi::OsStr::new("cargo"));

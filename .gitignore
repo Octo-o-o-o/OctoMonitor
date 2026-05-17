@@ -36,3 +36,9 @@ octomonitor_v*.png
 
 # NPM binary tarballs (built during release)
 packages/*/*.tgz
+
+# Claude Code worktrees / per-machine session state
+.claude/
+
+# devyard local project config
+.devyard.yml
