@@ -89,17 +89,34 @@ pub async fn revoke_remote_device(
 #[cfg(test)]
 mod tests {
     use axum::{
-        body::Body,
+        body::{self, Body},
         http::{header, Method, Request, StatusCode},
     };
     use octomonitor_companion::{request_pairing, ViewerSession};
     use tempfile::tempdir;
 
-    use crate::test_support::{ConfigDirGuard, ServerTestHarness};
+    use crate::test_support::ServerTestHarness;
+
+    fn post_json(uri: &str, body_json: &str) -> Request<Body> {
+        Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body_json.to_string()))
+            .unwrap()
+    }
+
+    async fn enable_companion(harness: &ServerTestHarness) {
+        let mut payload = harness.state.bootstrap.write().await;
+        payload.config.companion_enabled = true;
+    }
 
     #[tokio::test]
     async fn patch_remote_access_returns_500_and_keeps_state_when_save_fails() {
-        let harness = ServerTestHarness::new();
+        let temp = tempdir().unwrap();
+        let bad_parent = temp.path().join("not-a-directory");
+        std::fs::write(&bad_parent, "occupied").unwrap();
+        let harness = ServerTestHarness::with_config_dir(&bad_parent);
         {
             let mut payload = harness.state.bootstrap.write().await;
             payload.config.companion_enabled = true;
@@ -124,11 +141,6 @@ mod tests {
                 expires_at: "2026-05-01T10:00:00Z".into(),
             });
 
-        let temp = tempdir().unwrap();
-        let bad_parent = temp.path().join("not-a-directory");
-        std::fs::write(&bad_parent, "occupied").unwrap();
-        let _guard = ConfigDirGuard::set(&bad_parent);
-
         let response = harness
             .request(
                 Request::builder()
@@ -152,5 +164,106 @@ mod tests {
         );
         assert_eq!(harness.state.pairings.read().await.len(), 1);
         assert_eq!(harness.state.viewer_sessions.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_remote_pairing_rejects_when_companion_disabled() {
+        let harness = ServerTestHarness::new();
+        let response = harness
+            .request(post_json("/api/remote/pairings", r#"{"label":"laptop"}"#))
+            .await;
+        // Should refuse with CONFLICT instead of silently issuing a code that
+        // would be unusable until the operator enables remote access.
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(
+            harness.state.pairings.read().await.is_empty(),
+            "no pairing should land in state when companion is off"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_remote_pairing_returns_code_and_records_when_enabled() {
+        let harness = ServerTestHarness::new();
+        enable_companion(&harness).await;
+
+        let response = harness
+            .request(post_json("/api/remote/pairings", r#"{"label":"laptop"}"#))
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(value.get("code").and_then(|v| v.as_str()).is_some());
+        assert_eq!(value.get("label").and_then(|v| v.as_str()), Some("laptop"));
+
+        assert_eq!(harness.state.pairings.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_remote_devices_reflects_viewer_sessions() {
+        let harness = ServerTestHarness::new();
+        enable_companion(&harness).await;
+        harness
+            .state
+            .viewer_sessions
+            .write()
+            .await
+            .push(ViewerSession {
+                id: "viewer-1".into(),
+                secret: "secret-1".into(),
+                label: "Desk".into(),
+                paired_at: "2026-04-01T10:00:00Z".into(),
+                last_seen_at: Some("2026-04-01T10:05:00Z".into()),
+                expires_at: "2099-05-01T10:00:00Z".into(),
+            });
+
+        let response = harness
+            .request(
+                Request::builder()
+                    .uri("/api/remote/devices")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let devices = value.as_array().expect("devices is an array");
+        assert_eq!(devices.len(), 1);
+        assert_eq!(
+            devices[0].get("label").and_then(|v| v.as_str()),
+            Some("Desk")
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_remote_device_returns_ok_even_when_device_is_unknown() {
+        // The web client always issues DELETE optimistically when a row goes
+        // away on screen; the handler should respond consistently rather than
+        // 404 for an already-gone id.
+        let harness = ServerTestHarness::new();
+        enable_companion(&harness).await;
+        let response = harness
+            .request(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/api/remote/devices/never-existed")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            value.get("revoked").and_then(|v| v.as_str()),
+            Some("never-existed")
+        );
     }
 }

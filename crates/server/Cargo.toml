@@ -29,7 +29,9 @@ octomonitor-openclaw-adapter = { path = "../adapters/openclaw" }
 octomonitor-hermes-adapter = { path = "../adapters/hermes" }
 
 [dev-dependencies]
+futures-util = "0.3"
 tempfile = "3"
+tokio-tungstenite = "0.28"
 tower = { version = "0.5", features = ["util"] }
 
 [[bin]]

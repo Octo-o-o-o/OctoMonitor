@@ -79,18 +79,38 @@ pub(crate) fn sample_run_record() -> RunRecord {
 
 pub(crate) struct ServerTestHarness {
     _temp_dir: TempDir,
+    _config_guard: ConfigDirGuard,
     pub state: AppState,
     app: axum::Router,
 }
 
 impl ServerTestHarness {
+    /// Create a harness with `OCTOMONITOR_CONFIG_DIR` pointed at a private
+    /// `TempDir`, so any `save_config` triggered by handlers stays sandboxed.
     pub(crate) fn new() -> Self {
         let temp_dir = tempfile::tempdir().expect("temp dir");
+        let guard = ConfigDirGuard::set(temp_dir.path());
+        Self::assemble(temp_dir, guard)
+    }
+
+    /// Use a caller-provided config dir (kept alive by the caller, e.g. a
+    /// `TempDir` bound to the test scope). The harness still owns its own
+    /// private `TempDir` as a placeholder so the field type stays uniform.
+    /// Useful when a test wants `save_config` to fail by pointing at a path
+    /// that is not a writable directory.
+    pub(crate) fn with_config_dir(dir: &Path) -> Self {
+        let placeholder = tempfile::tempdir().expect("temp dir");
+        let guard = ConfigDirGuard::set(dir);
+        Self::assemble(placeholder, guard)
+    }
+
+    fn assemble(temp_dir: TempDir, guard: ConfigDirGuard) -> Self {
         let pricing = PricingStore::new();
         let state = AppState::new(empty_bootstrap(), pricing);
         let app = build_app(state.clone());
         Self {
             _temp_dir: temp_dir,
+            _config_guard: guard,
             state,
             app,
         }
@@ -116,7 +136,14 @@ pub(crate) struct ConfigDirGuard {
 
 impl ConfigDirGuard {
     pub(crate) fn set(path: &Path) -> Self {
-        let guard = config_dir_lock().lock().expect("config dir lock");
+        // Tolerate `PoisonError`: a panic in another harness-using test should
+        // not cascade-fail every subsequent test in the same process. The
+        // lock's only payload is `()`, so recovering the inner guard is safe
+        // — we still rebuild env state below.
+        let guard = match config_dir_lock().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         std::env::set_var("OCTOMONITOR_CONFIG_DIR", path);
         Self { _guard: guard }
     }

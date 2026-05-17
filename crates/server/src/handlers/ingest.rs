@@ -488,4 +488,112 @@ mod tests {
         assert_eq!(run.quota.confidence, SourceConfidence::Official);
         assert_eq!(run.quota.reset_at.len(), 2);
     }
+
+    fn empty_claude_statusline() -> ClaudeStatuslineIngest {
+        ClaudeStatuslineIngest {
+            session_id: None,
+            transcript_path: None,
+            model: None,
+            provider: None,
+            project_name: None,
+            workspace_path: None,
+            total_cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            context_tokens: None,
+            five_hour_used_pct: None,
+            seven_day_used_pct: None,
+            five_hour_resets_at: None,
+            seven_day_resets_at: None,
+            pending_approval: None,
+            last_action: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_statusline_with_missing_session_id_routes_to_fallback_run() {
+        // External hooks sometimes omit session_id; that should still produce
+        // a deterministic run id ("ingest-claude-unknown") so the next call
+        // upserts rather than littering the store with duplicates.
+        let state = test_state();
+        let _ = ingest_claude_statusline(State(state.clone()), Json(empty_claude_statusline())).await;
+        let _ = ingest_claude_statusline(State(state.clone()), Json(empty_claude_statusline())).await;
+
+        let payload = state.bootstrap.read().await;
+        let fallback_runs: Vec<_> = payload
+            .runs
+            .iter()
+            .filter(|run| run.id == "ingest-claude-unknown")
+            .collect();
+        assert_eq!(
+            fallback_runs.len(),
+            1,
+            "two empty statusline ingests should upsert into a single run, got {} (runs: {:?})",
+            fallback_runs.len(),
+            payload.runs.iter().map(|r| &r.id).collect::<Vec<_>>(),
+        );
+    }
+
+    #[tokio::test]
+    async fn claude_statusline_with_missing_workspace_falls_back_without_panic() {
+        // Hook should never crash on a minimally-populated payload; missing
+        // workspace_path should yield the documented `~/.claude` fallback.
+        let state = test_state();
+        let mut input = empty_claude_statusline();
+        input.session_id = Some("solo".into());
+        let _ = ingest_claude_statusline(State(state.clone()), Json(input)).await;
+
+        let payload = state.bootstrap.read().await;
+        let run = payload
+            .runs
+            .iter()
+            .find(|r| r.id == "ingest-claude-solo")
+            .expect("solo run should be present");
+        assert_eq!(run.workspace_path, "~/.claude");
+    }
+
+    #[tokio::test]
+    async fn claude_statusline_pending_approval_lands_waiting_state() {
+        let state = test_state();
+        let mut input = empty_claude_statusline();
+        input.session_id = Some("waiting".into());
+        input.pending_approval = Some(true);
+        let _ = ingest_claude_statusline(State(state.clone()), Json(input)).await;
+
+        let payload = state.bootstrap.read().await;
+        let run = payload
+            .runs
+            .iter()
+            .find(|r| r.id == "ingest-claude-waiting")
+            .expect("waiting run");
+        assert_eq!(run.state, RunState::WaitingApproval);
+        assert!(run.pending_approval);
+    }
+
+    #[tokio::test]
+    async fn codex_hook_marks_completed_on_stop_event() {
+        let state = test_state();
+        let _ = ingest_codex_hook(
+            State(state.clone()),
+            Json(CodexHookIngest {
+                thread_id: Some("t-stop".into()),
+                cwd: Some("/tmp/octomonitor".into()),
+                model: Some("gpt-5".into()),
+                event: Some("stop".into()),
+                waiting_on_approval: None,
+                total_tokens: Some(200),
+            }),
+        )
+        .await;
+
+        let payload = state.bootstrap.read().await;
+        let run = payload
+            .runs
+            .iter()
+            .find(|r| r.id == "ingest-codex-t-stop")
+            .expect("codex stop run");
+        assert_eq!(run.state, RunState::Completed);
+        assert_eq!(run.tokens.total, 200);
+    }
 }

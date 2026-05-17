@@ -13,6 +13,8 @@ const outputPath = path.resolve(reportDir, 'a11y-output.txt')
 const tabs = [
   { key: 'monitor', name: 'MONITOR' },
   { key: 'usage', name: 'USAGE' },
+  { key: 'commits', name: 'COMMITS' },
+  { key: 'heatmap', name: 'HEATMAP' },
   { key: 'settings', name: 'SETTINGS' },
 ] as const
 

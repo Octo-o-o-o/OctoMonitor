@@ -28,6 +28,13 @@ function createBootstrap(): BootstrapPayload {
   }
 }
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 describe('App', () => {
   beforeEach(() => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
@@ -35,6 +42,31 @@ describe('App', () => {
       value: {
         invoke: vi.fn().mockResolvedValue(undefined),
       },
+    })
+
+    // Override the global 503 stub for endpoints the settings tab hits on
+    // mount, so opening settings doesn't spam `Cannot read properties of null`
+    // when SetupSection / RemoteAccessSection probe their data on render.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request | URL).toString()
+      if (url.endsWith('/api/installer/detect')) {
+        return jsonResponse({ capabilities: [] })
+      }
+      if (url.endsWith('/api/installer/doctor')) {
+        return jsonResponse({ checks: [] })
+      }
+      if (url.endsWith('/api/remote/access')) {
+        return jsonResponse({
+          enabled: false,
+          mode: 'lanViewer',
+          listenerHost: '0.0.0.0',
+          listenerPort: 46322,
+          addresses: [],
+          devices: [],
+          pendingPairings: [],
+        })
+      }
+      return jsonResponse(null, 503)
     })
 
     act(() => {
@@ -51,6 +83,7 @@ describe('App', () => {
 
   afterEach(() => {
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
+    vi.restoreAllMocks()
     act(() => {
       useMonitorStore.setState({
         data: null,

@@ -17,16 +17,33 @@ const remoteAccessState = {
   pendingPairings: [],
 }
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 describe('SettingsView', () => {
   beforeEach(() => {
     localStorage.clear()
     localStorage.setItem(STORAGE_KEYS.locale, 'zh')
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(remoteAccessState), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
+    // Use mockImplementation so each fetch call yields a *fresh* Response —
+    // `mockResolvedValue` returns the same Response instance every time, and
+    // its body can only be read once (`Body has already been read`).
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request | URL).toString()
+      if (url.endsWith('/api/remote/access')) {
+        return jsonResponse(remoteAccessState)
+      }
+      if (url.endsWith('/api/installer/detect')) {
+        return jsonResponse({ capabilities: [] })
+      }
+      if (url.endsWith('/api/installer/doctor')) {
+        return jsonResponse({ checks: [] })
+      }
+      return jsonResponse(null, 503)
+    })
   })
 
   afterEach(() => {

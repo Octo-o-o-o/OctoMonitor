@@ -48,36 +48,103 @@ pub async fn patch_config(
 #[cfg(test)]
 mod tests {
     use axum::{
-        body::Body,
+        body::{self, Body},
         http::{header, Method, Request, StatusCode},
     };
     use tempfile::tempdir;
 
-    use crate::test_support::{ConfigDirGuard, ServerTestHarness};
+    use crate::test_support::ServerTestHarness;
+
+    fn patch_body(body_json: &str) -> Request<Body> {
+        Request::builder()
+            .method(Method::PATCH)
+            .uri("/api/config")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body_json.to_string()))
+            .unwrap()
+    }
 
     #[tokio::test]
     async fn patch_config_returns_500_and_reverts_when_save_fails() {
-        let harness = ServerTestHarness::new();
-        let original = harness.state.bootstrap.read().await.config.clone();
         let temp = tempdir().unwrap();
         let bad_parent = temp.path().join("not-a-directory");
         std::fs::write(&bad_parent, "occupied").unwrap();
-        let _guard = ConfigDirGuard::set(&bad_parent);
+        let harness = ServerTestHarness::with_config_dir(&bad_parent);
+        let original = harness.state.bootstrap.read().await.config.clone();
 
         let response = harness
-            .request(
-                Request::builder()
-                    .method(Method::PATCH)
-                    .uri("/api/config")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"historyDays":90,"companionEnabled":true}"#))
-                    .unwrap(),
-            )
+            .request(patch_body(r#"{"historyDays":90,"companionEnabled":true}"#))
             .await;
 
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let config = harness.state.bootstrap.read().await.config.clone();
         assert_eq!(config.history_days, original.history_days);
         assert_eq!(config.companion_enabled, original.companion_enabled);
+    }
+
+    #[tokio::test]
+    async fn patch_config_clamps_history_days_to_180_and_persists() {
+        // `historyDays` is typed `u8`, so the serde layer already rejects
+        // anything above 255 (returns 422). The handler's own
+        // `clamp(1, 180)` only kicks in for values in (180, 255]; pick 200.
+        let harness = ServerTestHarness::new();
+        let response = harness.request(patch_body(r#"{"historyDays":200}"#)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value.get("historyDays").and_then(|v| v.as_u64()), Some(180));
+
+        let in_state = harness
+            .state
+            .bootstrap
+            .read()
+            .await
+            .config
+            .history_days;
+        assert_eq!(in_state, 180);
+    }
+
+    #[tokio::test]
+    async fn patch_config_clamps_history_days_below_one_to_one() {
+        let harness = ServerTestHarness::new();
+        let response = harness.request(patch_body(r#"{"historyDays":0}"#)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let in_state = harness
+            .state
+            .bootstrap
+            .read()
+            .await
+            .config
+            .history_days;
+        assert_eq!(in_state, 1);
+    }
+
+    #[tokio::test]
+    async fn patch_config_companion_enabled_toggle_leaves_history_days_untouched() {
+        let harness = ServerTestHarness::new();
+        let original_history = harness
+            .state
+            .bootstrap
+            .read()
+            .await
+            .config
+            .history_days;
+        let original_revision = harness.state.current_revision();
+
+        let response = harness
+            .request(patch_body(r#"{"companionEnabled":true}"#))
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let after = harness.state.bootstrap.read().await.config.clone();
+        assert!(after.companion_enabled);
+        assert_eq!(after.history_days, original_history);
+        assert!(
+            harness.state.current_revision() > original_revision,
+            "config patch should bump snapshot revision so clients can detect change"
+        );
     }
 }

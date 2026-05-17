@@ -761,8 +761,9 @@ mod tests {
         fs,
         path::{Path, PathBuf},
         process::Command,
-        time::{SystemTime, UNIX_EPOCH},
     };
+
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -1164,24 +1165,15 @@ mod tests {
     }
 
     struct GitSandbox {
+        _dir: TempDir,
         root: PathBuf,
     }
 
     impl GitSandbox {
         fn new() -> Self {
-            let unique = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let root = std::env::temp_dir().join(format!("octomonitor-commit-tests-{unique}"));
-            fs::create_dir_all(&root).unwrap();
-            Self { root }
-        }
-    }
-
-    impl Drop for GitSandbox {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
+            let dir = tempfile::tempdir().expect("temp dir");
+            let root = dir.path().to_path_buf();
+            Self { _dir: dir, root }
         }
     }
 }

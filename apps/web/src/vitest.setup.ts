@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom'
+import { beforeEach, vi } from 'vitest'
 
 function createStorageMock(): Storage {
   const store = new Map<string, string>()
@@ -42,3 +43,19 @@ if (typeof globalThis.WebSocket === 'undefined') {
     send() {}
   } as unknown as typeof WebSocket
 }
+
+// jsdom routes `fetch` to the real network. Without a stub, tests that mount
+// components which call `apiFetch` on mount (e.g. SetupSection,
+// RemoteAccessSection) trigger ECONNREFUSED against 127.0.0.1:46321 and leak
+// unhandled rejections that mask real failures. Default every test to a 503
+// reply so any unmocked call is loudly wrong (no `ok` branch, fresh Response
+// every call so `.json()` can never double-read), and let individual tests
+// override via `vi.spyOn(globalThis, 'fetch').mockImplementation(...)`.
+beforeEach(() => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    new Response('null', {
+      status: 503,
+      headers: { 'content-type': 'application/json' },
+    }),
+  )
+})
