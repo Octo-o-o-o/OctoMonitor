@@ -1,7 +1,7 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import { sourceLabelsUpper } from '../lib/constants'
 import { getTauriInvoke } from '../lib/desktopZoom'
-import { formatDuration } from '../lib/format'
+import { formatLastUpdated } from '../lib/format'
 import { buildCodexDeepLink, getRunOpenAffordance } from '../lib/runTarget'
 import { isTauriEnvironment } from '../lib/runtimeEnvironment'
 import { buildIslandCounts, buildIslandItems, type IslandItem, type IslandPriority } from '../lib/island'
@@ -62,16 +62,44 @@ function readIslandChromeMetrics(): IslandChromeMetrics {
   }
 }
 
+function firstMeaningfulText(...values: Array<string | null | undefined>): string | undefined {
+  return values
+    .map((value) => value?.trim().replace(/\s+/g, ' '))
+    .find((value): value is string => Boolean(value))
+}
+
 function itemTitle(run: RunRecord): string {
-  return run.projectName || run.workspaceShort || sourceLabelsUpper[run.tool]
+  return firstMeaningfulText(
+    run.lastQuestion,
+    run.lastAction,
+    run.lastTail,
+    run.projectName,
+    run.workspaceShort,
+    sourceLabelsUpper[run.tool],
+  ) ?? sourceLabelsUpper[run.tool]
 }
 
 function itemSubtitle(run: RunRecord): string {
-  return run.lastQuestion
-    ?? run.lastAction
-    ?? run.lastTail
-    ?? run.workspaceShort
+  const primary = firstMeaningfulText(run.projectName, run.workspaceShort, sourceLabelsUpper[run.tool])
     ?? sourceLabelsUpper[run.tool]
+  const secondary = firstMeaningfulText(run.workspaceShort, sourceLabelsUpper[run.tool])
+  if (!secondary || secondary === primary) return primary
+  return `${primary} · ${secondary}`
+}
+
+function compactRecency(iso: string): string {
+  const value = Date.parse(iso)
+  if (!Number.isFinite(value)) return ''
+  const ageMs = Math.max(0, Date.now() - value)
+  const minuteMs = 60_000
+  const hourMs = 60 * minuteMs
+  const dayMs = 24 * hourMs
+  if (ageMs < minuteMs) return 'now'
+  if (ageMs < hourMs) return `${Math.floor(ageMs / minuteMs)}m`
+  if (ageMs < dayMs) return `${Math.floor(ageMs / hourMs)}h`
+  if (ageMs < 7 * dayMs) return `${Math.floor(ageMs / dayMs)}d`
+  const date = new Date(value)
+  return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
 function priorityClass(priority: IslandPriority): string {
@@ -274,7 +302,9 @@ export function IslandSurface({
                   {priorityLabel(item.priority)}
                 </span>
                 <span className="island-tool-badge">{sourceLabelsUpper[item.run.tool]}</span>
-                <span className="island-elapsed">{formatDuration(item.run.elapsedMs)}</span>
+                <span className="island-recency" title={formatLastUpdated(item.run.lastActivityAt)}>
+                  {compactRecency(item.run.lastActivityAt)}
+                </span>
                 {item.unread && <span className="island-unread-dot" aria-hidden="true" />}
               </span>
             </button>

@@ -359,7 +359,7 @@ html[data-surface="island"] #root {
   color: var(--muted);
 }
 
-.island-elapsed {
+.island-recency {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);

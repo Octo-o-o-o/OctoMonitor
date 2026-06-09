@@ -116,12 +116,14 @@ describe('IslandSurface', () => {
     })
 
     expect(shell).toHaveClass('is-expanded')
-    expect(screen.getByText('Waiting Project')).toBeInTheDocument()
-    expect(screen.getByText('Active Project')).toBeInTheDocument()
-    expect(screen.getByText('Done Project')).toBeInTheDocument()
+    expect(container.querySelector('.island-item-title')?.textContent).toBe('Approve shell command?')
+    expect(container.querySelector('.island-item-subtitle')?.textContent).toBe('Waiting Project · ~/octo')
+    expect(screen.getByText('Running tests')).toBeInTheDocument()
+    expect(screen.getByText('Finished build')).toBeInTheDocument()
     expect(screen.getByText('Action')).toBeInTheDocument()
     expect(screen.getByText('Running')).toBeInTheDocument()
     expect(screen.getByText('Just done')).toBeInTheDocument()
+    expect(container.querySelector('.island-recency')).toBeInTheDocument()
   })
 
   it('uses native notch metrics for the collapsed chrome', () => {
