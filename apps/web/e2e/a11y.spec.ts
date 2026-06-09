@@ -23,10 +23,22 @@ test('wcag audit across primary tabs', async ({ page, baseURL }) => {
 
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto(`${baseURL}/`)
+  await page.addStyleTag({
+    content: `
+      *, *::before, *::after {
+        animation: none !important;
+        scroll-behavior: auto !important;
+        transition: none !important;
+      }
+    `,
+  })
   await expect(page.locator('body')).toBeVisible()
 
   for (const tab of tabs) {
-    await page.getByRole('tab', { name: tab.name }).click()
+    const tabButton = page.getByRole('tab', { name: tab.name })
+    if (await tabButton.getAttribute('aria-selected') !== 'true') {
+      await tabButton.click()
+    }
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze()
     details.push({ url: `/${tab.key}`, violations: results.violations })
   }

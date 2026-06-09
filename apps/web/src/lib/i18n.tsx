@@ -256,6 +256,12 @@ const en = {
   'drawer.resumeCommand.label': 'Resume (advisory)',
   'drawer.resumeCommand.unavailable': 'Resume command unavailable',
 
+  // island
+  'island.region': 'OctoMonitor Island',
+  'island.empty.title': 'Quiet',
+  'island.empty.waiting': 'Waiting for updates',
+  'island.empty.none': 'No active runs',
+
   // toast
   'toast.copied': 'Copied',
   'toast.copyFailed': 'Copy failed',
@@ -591,6 +597,11 @@ const zh: Record<I18nKey, string> = {
   'drawer.openInCodex.error': '未检测到 Codex 应用，可复制下方命令。',
   'drawer.resumeCommand.label': '建议命令（仅复制）',
   'drawer.resumeCommand.unavailable': '暂无可用的恢复命令',
+
+  'island.region': 'OctoMonitor 灵动岛',
+  'island.empty.title': '安静',
+  'island.empty.waiting': '等待更新中',
+  'island.empty.none': '暂无运行中任务',
 
   'toast.copied': '已复制',
   'toast.copyFailed': '复制失败',

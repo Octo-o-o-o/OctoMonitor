@@ -12,7 +12,7 @@ import { ShortcutOverlay } from './components/ShortcutOverlay'
 import { ToastContainer } from './components/common/Toast'
 import { RemotePairingGate } from './components/RemotePairingGate'
 import { LoadingScreen } from './components/LoadingScreen'
-import { apiFetch, buildWsUrl, normalizeBootstrapPayload } from './lib/api'
+import { apiFetch, normalizeBootstrapPayload } from './lib/api'
 import { DESKTOP_BOOT_EVENT, DESKTOP_MENU_ACTION_EVENT } from './lib/desktopEvents'
 import {
   applyDesktopZoom,
@@ -25,6 +25,7 @@ import { buildVisiblePanels, buildVisibleRunIds, buildVisibleRunsBySource } from
 import { isTauriEnvironment } from './lib/runtimeEnvironment'
 import { getRuntimeMode, type RuntimeMode } from './lib/runtimeMode'
 import { useI18n, type I18nKey } from './lib/i18n'
+import { useLiveSnapshot } from './lib/useLiveSnapshot'
 
 type DesktopBootIssue = {
   title: string
@@ -62,66 +63,6 @@ function useDocumentDataAttr(attr: string, value: string, defaultValue: string) 
       document.documentElement.setAttribute(attr, value)
     }
   }, [attr, value, defaultValue])
-}
-
-function useWebSocket(
-  enabled: boolean,
-  onMessage: (data: unknown) => void,
-  onStatusChange: (connected: boolean) => void,
-) {
-  const [connected, setConnected] = useState(false)
-  const retryRef = useRef(0)
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-
-  useEffect(() => {
-    if (!enabled) {
-      setConnected(false)
-      return
-    }
-
-    let unmounted = false
-    let socket: WebSocket | null = null
-
-    function connect() {
-      if (unmounted) return
-      const ws = new WebSocket(buildWsUrl('/api/stream'))
-      socket = ws
-
-      ws.onopen = () => {
-        retryRef.current = 0
-        setConnected(true)
-        onStatusChange(true)
-      }
-      ws.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(event.data)
-          if (parsed.type === 'snapshot.replace' && parsed.payload) onMessage(parsed.payload)
-        } catch {
-          // ignore malformed frames
-        }
-      }
-      ws.onclose = () => {
-        setConnected(false)
-        onStatusChange(false)
-        if (unmounted) return
-        const delay = Math.min(1000 * 2 ** retryRef.current, 30_000)
-        retryRef.current++
-        timerRef.current = setTimeout(connect, delay)
-      }
-      ws.onerror = () => {
-        ws.close()
-      }
-    }
-
-    connect()
-    return () => {
-      unmounted = true
-      clearTimeout(timerRef.current)
-      socket?.close()
-    }
-  }, [enabled, onMessage, onStatusChange])
-
-  return connected
 }
 
 function TabContent({ runtimeMode, tab }: { runtimeMode: RuntimeMode; tab: string }) {
@@ -313,7 +254,7 @@ export default function App() {
   const handleConnectionChange = useCallback((connected: boolean) => {
     setConnectionStatus(connected ? 'connecting' : 'offline')
   }, [setConnectionStatus])
-  const wsConnected = useWebSocket(
+  const wsConnected = useLiveSnapshot(
     runtimeMode === 'local' || remoteAuthState === 'ready',
     handleWsMessage,
     handleConnectionChange,

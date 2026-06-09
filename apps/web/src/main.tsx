@@ -4,9 +4,12 @@ import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { bootstrapDesktopWebview } from './lib/desktopZoom'
 import { I18nProvider } from './lib/i18n'
+import { getRuntimeMode } from './lib/runtimeMode'
 import { STORAGE_KEYS } from './lib/storageKeys'
 import { ThemeProvider } from './lib/theme'
+import IslandApp from './island/IslandApp'
 import './styles.css'
+import './island/island.css'
 
 // Set color-scheme early to avoid flash of wrong native chrome
 {
@@ -18,12 +21,15 @@ import './styles.css'
 
 void bootstrapDesktopWebview()
 
+const surface = new URLSearchParams(window.location.search).get('surface')
+const RootApp = surface === 'island' && getRuntimeMode() === 'local' ? IslandApp : App
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <I18nProvider>
         <ThemeProvider>
-          <App />
+          <RootApp />
         </ThemeProvider>
       </I18nProvider>
     </ErrorBoundary>
