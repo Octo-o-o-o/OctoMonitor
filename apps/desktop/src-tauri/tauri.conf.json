@@ -5,7 +5,8 @@
   "identifier": "ai.openclaw.octomonitor",
   "build": { "frontendDist": "../../web/dist" },
   "app": {
-    "windows": [{ "title": "OctoMonitor", "width": 1440, "height": 960, "resizable": true }]
+    "macOSPrivateApi": true,
+    "windows": [{ "label": "main", "title": "OctoMonitor", "width": 1440, "height": 960, "resizable": true }]
   },
   "bundle": {
     "active": true,

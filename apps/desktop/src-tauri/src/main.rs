@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+mod island;
+
 use serde::Serialize;
 use std::{
     env,
@@ -29,6 +32,7 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
 const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const DESKTOP_BOOT_EVENT: &str = "octomonitor:desktop-boot-status";
 const DESKTOP_MENU_ACTION_EVENT: &str = "octomonitor:desktop-menu-action";
+const MAIN_WINDOW_LABEL: &str = "main";
 
 const MENU_APP_PREFERENCES: &str = "app.preferences";
 const MENU_VIEW_ZOOM_IN: &str = "view.zoom_in";
@@ -467,14 +471,51 @@ fn open_external(url: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn set_island_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        island::set_island_visible(&app, visible)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        let _ = visible;
+        Err("Island overlay is only supported on macOS".into())
+    }
+}
+
+#[tauri::command]
+fn toggle_island(app: AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        island::toggle_island(&app)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("Island overlay is only supported on macOS".into())
+    }
+}
+
 fn main() {
     let spawn_result = spawn_server();
     let shared_child: SharedChild = Arc::new(Mutex::new(spawn_result.child));
     let shared_for_setup = shared_child.clone();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .menu(build_app_menu)
-        .invoke_handler(tauri::generate_handler![open_external])
+        .invoke_handler(tauri::generate_handler![
+            open_external,
+            set_island_visible,
+            toggle_island,
+        ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_APP_PREFERENCES => emit_menu_action(app, ACTION_OPEN_SETTINGS),
             MENU_VIEW_ZOOM_IN => emit_menu_action(app, ACTION_ZOOM_IN),
@@ -486,6 +527,8 @@ fn main() {
         .setup(move |app| {
             app.manage(ServerState(shared_for_setup));
             app.manage(DesktopBootState(Mutex::new(None)));
+            #[cfg(target_os = "macos")]
+            island::setup_island_panel(app.handle())?;
             monitor_server_readiness(app.handle().clone(), spawn_result.launch_error);
             Ok(())
         })
@@ -497,7 +540,9 @@ fn main() {
             let _ = window.eval(boot_issue_script(&issue));
         })
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
+            if window.label() == MAIN_WINDOW_LABEL
+                && matches!(event, tauri::WindowEvent::Destroyed)
+            {
                 if let Some(state) = window.app_handle().try_state::<ServerState>() {
                     stop_server_shared(&state.0);
                 }
