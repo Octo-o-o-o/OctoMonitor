@@ -1,10 +1,10 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MonitorView } from './MonitorView'
 import { I18nProvider } from '../../lib/i18n'
 import { defaultSettings } from '../../lib/preferences'
 import { STORAGE_KEYS } from '../../lib/storageKeys'
-import type { BootstrapPayload } from '../../lib/types'
+import type { BootstrapPayload, RunRecord } from '../../lib/types'
 import { useMonitorStore } from '../../store/monitorStore'
 
 function createBootstrap(): BootstrapPayload {
@@ -51,6 +51,48 @@ function createBootstrap(): BootstrapPayload {
   }
 }
 
+function runFixture(overrides: Partial<RunRecord>): RunRecord {
+  const now = new Date().toISOString()
+  return {
+    id: 'run-x',
+    tool: 'codex',
+    sourceMode: 'live',
+    projectName: 'Octo',
+    workspacePath: '/tmp/octo',
+    workspaceShort: '~/octo',
+    model: null,
+    provider: null,
+    agentName: null,
+    agentDisplayName: null,
+    accountAlias: null,
+    authMode: null,
+    authVerified: true,
+    sessionId: null,
+    threadId: null,
+    sessionKey: null,
+    transcriptPath: null,
+    startedAt: now,
+    lastActivityAt: now,
+    elapsedMs: 60_000,
+    state: 'completed',
+    lastAction: 'Fix parser',
+    lastTail: null,
+    pendingApproval: false,
+    firstQuestion: null,
+    lastQuestion: null,
+    errorMessage: null,
+    messageCount: 0,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, context: 0 },
+    cost: { usd: null, confidence: 'derived' },
+    quota: { fiveHourUsedPct: null, sevenDayUsedPct: null, resetAt: [], confidence: 'derived' },
+    source: { confidence: 'derived', freshness: 'warm', lastUpdatedAt: now },
+    vcs: null,
+    originLabel: null,
+    originProvider: null,
+    ...overrides,
+  }
+}
+
 describe('MonitorView gateway status', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -64,6 +106,7 @@ describe('MonitorView gateway status', () => {
         showShortcutHelp: false,
         selectedRunId: undefined,
         focusedRunId: undefined,
+        visitedRunIds: new Set<string>(),
         settings: {
           ...defaultSettings,
           panelConfig: [
@@ -86,6 +129,7 @@ describe('MonitorView gateway status', () => {
         showShortcutHelp: false,
         selectedRunId: undefined,
         focusedRunId: undefined,
+        visitedRunIds: new Set<string>(),
         settings: defaultSettings,
       })
     })
@@ -103,5 +147,40 @@ describe('MonitorView gateway status', () => {
     expect(screen.getByText('HERMES')).toBeInTheDocument()
     expect(screen.getByText('RUNNING')).toBeInTheDocument()
     expect(screen.getByText('STOPPED')).toBeInTheDocument()
+  })
+
+  it('marks completed rows as visited and removes the unread dot on click', () => {
+    const completed = runFixture({ id: 'done-1', lastAction: 'Fix parser' })
+    act(() => {
+      useMonitorStore.setState({
+        data: { ...createBootstrap(), runs: [completed] },
+        settings: {
+          ...defaultSettings,
+          panelConfig: [
+            { tool: 'claude', enabled: false },
+            { tool: 'codex', enabled: true },
+            { tool: 'openClaw', enabled: false },
+            { tool: 'hermes', enabled: false },
+          ],
+        },
+      })
+    })
+
+    const { container } = render(
+      <I18nProvider>
+        <MonitorView />
+      </I18nProvider>,
+    )
+
+    const row = screen.getByText('Fix parser').closest('button')
+    expect(row).not.toBeNull()
+    expect(row).not.toHaveClass('is-visited')
+    expect(container.querySelector('.session-unvisited-dot')).not.toBeNull()
+
+    fireEvent.click(row!)
+
+    expect(useMonitorStore.getState().visitedRunIds.has('done-1')).toBe(true)
+    expect(row).toHaveClass('is-visited')
+    expect(container.querySelector('.session-unvisited-dot')).toBeNull()
   })
 })

@@ -79,6 +79,7 @@ describe('monitorStore', () => {
         showShortcutHelp: false,
         acknowledgedErrors: new Set<string>(),
         dismissedAttentionKeys: new Set<string>(),
+        visitedRunIds: new Set<string>(),
         monitorQuickFilter: 'all',
         monitorSearch: '',
       })
@@ -151,6 +152,44 @@ describe('monitorStore', () => {
     })
   })
 
+  describe('markRunVisited', () => {
+    it('persists visited runs in insertion order and exposes them as a set', () => {
+      act(() => {
+        useMonitorStore.getState().markRunVisited('run-1')
+        useMonitorStore.getState().markRunVisited('run-2')
+        useMonitorStore.getState().markRunVisited('run-1')
+      })
+
+      expect([...useMonitorStore.getState().visitedRunIds]).toEqual(['run-2', 'run-1'])
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.visitedRuns)!)).toEqual(['run-2', 'run-1'])
+    })
+
+    it('keeps only the newest 1000 visited runs', () => {
+      act(() => {
+        for (let i = 0; i < 1001; i++) {
+          useMonitorStore.getState().markRunVisited(`run-${i}`)
+        }
+      })
+
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEYS.visitedRuns)!) as string[]
+      expect(stored).toHaveLength(1000)
+      expect(stored[0]).toBe('run-1')
+      expect(stored[999]).toBe('run-1000')
+      expect(useMonitorStore.getState().visitedRunIds.has('run-0')).toBe(false)
+      expect(useMonitorStore.getState().visitedRunIds.has('run-1000')).toBe(true)
+    })
+
+    it('syncs visited runs from a storage event', () => {
+      localStorage.setItem(STORAGE_KEYS.visitedRuns, JSON.stringify(['from-other-window']))
+
+      act(() => {
+        window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEYS.visitedRuns }))
+      })
+
+      expect(useMonitorStore.getState().visitedRunIds.has('from-other-window')).toBe(true)
+    })
+  })
+
   describe('updateSettings', () => {
     it('merges patches and writes the combined snapshot to storage', () => {
       const initial = useMonitorStore.getState().settings
@@ -163,7 +202,7 @@ describe('monitorStore', () => {
       expect(merged.fontSize).toBe('large')
       // Patches should leave untouched fields intact so consumers can update
       // a single setting without supplying the entire payload.
-      expect(merged.locale).toBe(initial.locale)
+      expect(merged.monitorPeriod).toBe(initial.monitorPeriod)
     })
   })
 })

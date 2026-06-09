@@ -250,6 +250,9 @@ const en = {
   'drawer.copy.workspacePath': 'Copy workspace path',
   'drawer.copy.transcriptPath': 'Copy transcript path',
   'drawer.copy.resumeCommand': 'Copy resume command',
+  'drawer.openInCodex': 'Open in Codex',
+  'drawer.openInCodex.hint': 'If it does not jump, the thread may be archived; copy the command below instead.',
+  'drawer.openInCodex.error': 'Codex app was not detected. Copy the command below instead.',
   'drawer.resumeCommand.label': 'Resume (advisory)',
   'drawer.resumeCommand.unavailable': 'Resume command unavailable',
 
@@ -583,6 +586,9 @@ const zh: Record<I18nKey, string> = {
   'drawer.copy.workspacePath': '复制工作区路径',
   'drawer.copy.transcriptPath': '复制 Transcript 路径',
   'drawer.copy.resumeCommand': '复制恢复命令',
+  'drawer.openInCodex': '在 Codex 中打开',
+  'drawer.openInCodex.hint': '如果没有跳转，可能是 thread 已归档；可复制下方命令。',
+  'drawer.openInCodex.error': '未检测到 Codex 应用，可复制下方命令。',
   'drawer.resumeCommand.label': '建议命令（仅复制）',
   'drawer.resumeCommand.unavailable': '暂无可用的恢复命令',
 

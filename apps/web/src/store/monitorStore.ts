@@ -16,6 +16,33 @@ function loadDismissedAttentionKeys(): string[] {
   }
 }
 
+const VISITED_RUN_LIMIT = 1000
+
+function parseStringArray(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((value): value is string => typeof value === 'string' && value !== '')
+  } catch {
+    return []
+  }
+}
+
+function loadVisitedRunIds(): string[] {
+  try {
+    return parseStringArray(localStorage.getItem(STORAGE_KEYS.visitedRuns)).slice(-VISITED_RUN_LIMIT)
+  } catch {
+    return []
+  }
+}
+
+function nextVisitedRunIds(current: Iterable<string>, id: string): string[] {
+  const ordered = [...current].filter((value) => value !== id)
+  ordered.push(id)
+  return ordered.slice(-VISITED_RUN_LIMIT)
+}
+
 export type ActiveTab = 'monitor' | 'usage' | 'commits' | 'heatmap' | 'settings'
 export type {
   AgentDisplayFormat,
@@ -44,6 +71,7 @@ interface MonitorState {
   settings: FrontendSettings
   acknowledgedErrors: Set<string>
   dismissedAttentionKeys: Set<string>
+  visitedRunIds: Set<string>
   monitorQuickFilter: MonitorQuickFilter
   monitorSearch: string
   setData: (data: BootstrapPayload | null) => void
@@ -54,6 +82,8 @@ interface MonitorState {
   toggleShortcutHelp: () => void
   acknowledgeError: (id: string) => void
   dismissAttention: (id: string) => void
+  markRunVisited: (id: string) => void
+  syncVisitedRunsFromStorage: () => void
   setActiveTab: (tab: ActiveTab) => void
   updateSettings: (patch: Partial<FrontendSettings>) => void
   setMonitorQuickFilter: (filter: MonitorQuickFilter) => void
@@ -68,6 +98,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   settings: loadFrontendSettings(),
   acknowledgedErrors: new Set<string>(),
   dismissedAttentionKeys: new Set<string>(loadDismissedAttentionKeys()),
+  visitedRunIds: new Set<string>(loadVisitedRunIds()),
   monitorQuickFilter: 'all',
   monitorSearch: '',
   setData: (data) => set({ data }),
@@ -91,6 +122,20 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     }
     return { dismissedAttentionKeys: next }
   }),
+  markRunVisited: (id) => set((s) => {
+    const stored = loadVisitedRunIds()
+    const source = stored.length > 0 ? stored : s.visitedRunIds
+    const ordered = nextVisitedRunIds(source, id)
+    try {
+      localStorage.setItem(STORAGE_KEYS.visitedRuns, JSON.stringify(ordered))
+    } catch (err) {
+      console.warn('[OctoMonitor] storage.write.visitedRuns', err)
+    }
+    return { visitedRunIds: new Set(ordered) }
+  }),
+  syncVisitedRunsFromStorage: () => set({
+    visitedRunIds: new Set<string>(loadVisitedRunIds()),
+  }),
   setActiveTab: (activeTab) => set({ activeTab }),
   updateSettings: (patch) => {
     const next = { ...get().settings, ...patch }
@@ -104,3 +149,11 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
 /** Selector: derive the selected run from data + selectedRunId */
 export const selectSelectedRun = (s: MonitorState): RunRecord | undefined =>
   s.selectedRunId == null ? undefined : s.data?.runs.find((r) => r.id === s.selectedRunId)
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === STORAGE_KEYS.visitedRuns) {
+      useMonitorStore.getState().syncVisitedRunsFromStorage()
+    }
+  })
+}

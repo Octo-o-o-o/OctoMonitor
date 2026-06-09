@@ -6,7 +6,11 @@ import { formatTokens, formatCost, formatDuration, formatDateTime } from '../lib
 import { buildUsageBucketIndex } from '../lib/usage'
 import { apiFetch } from '../lib/api'
 import { getRuntimeMode } from '../lib/runtimeMode'
+import { isTauriEnvironment } from '../lib/runtimeEnvironment'
+import { buildCodexDeepLink, getRunOpenAffordance } from '../lib/runTarget'
+import { openExternalUrl } from '../lib/openExternal'
 import { CopyButton } from './common/CopyButton'
+import { useToastStore } from '../store/toastStore'
 
 type InspectEntry = {
   kind: 'input' | 'output'
@@ -92,19 +96,27 @@ export function InspectDrawer() {
   const selectedRunId = useMonitorStore((s) => s.selectedRunId)
   const usageBuckets = useMonitorStore((s) => s.data?.usageBuckets)
   const selectRun = useMonitorStore((s) => s.selectRun)
+  const markRunVisited = useMonitorStore((s) => s.markRunVisited)
+  const pushToast = useToastStore((s) => s.pushToast)
   const { t } = useI18n()
   const [entries, setEntries] = useState<InspectEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<ResumeCommandPayload | null>(null)
   const [events, setEvents] = useState<CodexEvent[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
+  const [openingCodex, setOpeningCodex] = useState(false)
   const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set())
   const cursorRef = useRef<number | undefined>(undefined)
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const nearBottomRef = useRef(true)
   const runtimeMode = getRuntimeMode()
+  const canUseDesktopOpen = runtimeMode === 'local' && isTauriEnvironment()
 
   const useCodexEvents = runtimeMode === 'local' && selectedRun?.tool === 'codex'
+  const openAffordance = selectedRun ? getRunOpenAffordance(selectedRun) : 'inspectOnly'
+  const showOpenInCodex = Boolean(
+    selectedRun && canUseDesktopOpen && openAffordance === 'openCodex',
+  )
   const usageBucketIndex = useMemo(
     () => buildUsageBucketIndex(usageBuckets ?? []),
     [usageBuckets],
@@ -276,6 +288,19 @@ export function InspectDrawer() {
 
   if (!selectedRun) return null
 
+  async function handleOpenInCodex() {
+    if (!selectedRun?.threadId) return
+    setOpeningCodex(true)
+    try {
+      await openExternalUrl(buildCodexDeepLink(selectedRun.threadId))
+    } catch {
+      pushToast({ kind: 'error', message: t('drawer.openInCodex.error') })
+    } finally {
+      markRunVisited(selectedRun.id)
+      setOpeningCodex(false)
+    }
+  }
+
   const isError = errorStates.has(selectedRun.state)
   const stateClass = stateClassMap[selectedRun.state]
     ?? (isError ? 'inspect-state--error' : 'inspect-state--done')
@@ -347,6 +372,21 @@ export function InspectDrawer() {
 
           {runtimeMode === 'local' && (
             <div className="inspect-section">
+              {showOpenInCodex && (
+                <div className="inspect-open-codex">
+                  <button
+                    type="button"
+                    className="inspect-open-codex-button"
+                    onClick={handleOpenInCodex}
+                    disabled={openingCodex}
+                  >
+                    {t('drawer.openInCodex')}
+                  </button>
+                  <span className="inspect-open-codex-hint">
+                    {t('drawer.openInCodex.hint')}
+                  </span>
+                </div>
+              )}
               <div className="inspect-copy-row">
                 <CopyButton text={selectedRun.id} ariaLabel={t('drawer.copy.runId')} />
                 <span className="inspect-section-value">{selectedRun.id}</span>

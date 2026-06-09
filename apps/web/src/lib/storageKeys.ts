@@ -5,4 +5,5 @@ export const STORAGE_KEYS = {
   locale: 'octomonitor-locale',
   desktopZoom: 'octomonitor-desktop-zoom',
   dismissedAttentions: 'octomonitor-dismissed-attentions-v2',
+  visitedRuns: 'octomonitor-visited-runs-v1',
 } as const

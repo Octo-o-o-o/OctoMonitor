@@ -67,8 +67,9 @@ function bucketFixture(overrides: Partial<UsageBucket> & { run: RunRecord; token
 }
 
 function commitFixture(overrides: Partial<CommitRecord> & { committedAt: string }): CommitRecord {
+  const { committedAt, ...rest } = overrides
   return {
-    id: overrides.id ?? `c-${overrides.committedAt}`,
+    id: overrides.id ?? `c-${committedAt}`,
     repoId: 'repo',
     repoName: 'Octo',
     repoRoot: '/tmp/octo',
@@ -77,7 +78,7 @@ function commitFixture(overrides: Partial<CommitRecord> & { committedAt: string 
     sha: 'a'.repeat(40),
     shortSha: 'aaaaaaa',
     authorName: 'Tester',
-    committedAt: overrides.committedAt,
+    committedAt,
     summary: 'a commit',
     filesChanged: 1,
     insertions: 1,
@@ -90,7 +91,7 @@ function commitFixture(overrides: Partial<CommitRecord> & { committedAt: string 
     method: 'readOnlyHeuristic',
     sources: [],
     links: [],
-    ...overrides,
+    ...rest,
   }
 }
 

@@ -101,6 +101,8 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
   const agentDisplayFormat = useMonitorStore((s) => s.settings.agentDisplayFormat)
   const acknowledgedErrors = useMonitorStore((s) => s.acknowledgedErrors)
   const acknowledgeError = useMonitorStore((s) => s.acknowledgeError)
+  const visitedRunIds = useMonitorStore((s) => s.visitedRunIds)
+  const markRunVisited = useMonitorStore((s) => s.markRunVisited)
   const { t } = useI18n()
   const tag = run.tool === 'openClaw'
     ? formatAgentTag(run, agentDisplayFormat)
@@ -109,6 +111,12 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
   const style = stateStyles[run.state] ?? defaultStateStyle
   const isError = style.row === 'state-error'
   const isAcknowledged = isError && acknowledgedErrors.has(run.id)
+  const supportsVisitedVisual = run.state === 'completed'
+    || run.state === 'idle'
+    || run.state === 'stale'
+    || run.state === 'cancelled'
+  const isVisitedDone = supportsVisitedVisual && visitedRunIds.has(run.id)
+  const isUnvisitedDone = supportsVisitedVisual && !isVisitedDone
   const rowClass = isAcknowledged ? 'state-error-ack' : style.row
   const tagColor = getTagColor(tag)
   const isWaiting = run.state === 'waitingApproval'
@@ -121,13 +129,19 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
     if (isError && !isAcknowledged) {
       acknowledgeError(run.id)
     }
+    markRunVisited(run.id)
     onClick()
   }
 
   return (
-    <button className={`session-row ${rowClass}${focused ? ' session-focused' : ''}`} data-run-id={run.id} onClick={handleClick}>
+    <button
+      className={`session-row ${rowClass}${focused ? ' session-focused' : ''}${isVisitedDone ? ' is-visited' : ''}`}
+      data-run-id={run.id}
+      onClick={handleClick}
+    >
       <div className="session-header">
         {!hideBadge && <span className={`state-badge ${style.badge}`}>{stateLabel}</span>}
+        {isUnvisitedDone && <span className="session-unvisited-dot" aria-hidden="true" />}
         <span className="session-duration">{formatDuration(run.elapsedMs)}</span>
         <span className="session-updated">{formatLastUpdated(run.lastActivityAt)}</span>
         {run.tool === 'openClaw' && run.model && (

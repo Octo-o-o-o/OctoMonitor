@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '../lib/i18n'
 import { ThemeProvider } from '../lib/theme'
@@ -85,8 +85,10 @@ describe('InspectDrawer', () => {
         focusedRunId: undefined,
         connectionStatus: 'live',
         activeTab: 'monitor',
+        visitedRunIds: new Set<string>(),
       })
     })
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
   })
 
   afterEach(() => {
@@ -98,8 +100,10 @@ describe('InspectDrawer', () => {
         focusedRunId: undefined,
         connectionStatus: 'connecting',
         activeTab: 'monitor',
+        visitedRunIds: new Set<string>(),
       })
     })
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
   })
 
   it('renders nothing when no run is selected', () => {
@@ -200,5 +204,73 @@ describe('InspectDrawer', () => {
     ).toBe(true)
     // And it should NOT have hit /events for a non-Codex run.
     expect(calls.some((url) => url.includes('/events'))).toBe(false)
+  })
+
+  it('shows Open in Codex only in the desktop app and marks the run visited on click', async () => {
+    const invoke = vi.fn<(_: string, __?: Record<string, unknown>) => Promise<unknown>>()
+      .mockResolvedValue(undefined)
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke },
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response('null', { status: 503, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const codexRun = runFixture({
+      id: 'codex-open',
+      tool: 'codex',
+      threadId: '019eacb8-5af1-7d41-beb4-052a48825afa',
+    })
+
+    act(() => {
+      useMonitorStore.setState({
+        data: bootstrapWithRuns([codexRun]),
+        selectedRunId: 'codex-open',
+      })
+    })
+
+    render(
+      <I18nProvider>
+        <ThemeProvider>
+          <InspectDrawer />
+        </ThemeProvider>
+      </I18nProvider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Codex' }))
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('open_external', {
+        url: 'codex://threads/019eacb8-5af1-7d41-beb4-052a48825afa',
+      })
+    })
+    expect(useMonitorStore.getState().visitedRunIds.has('codex-open')).toBe(true)
+  })
+
+  it('does not show the Codex open action outside Tauri', async () => {
+    const codexRun = runFixture({
+      id: 'codex-browser',
+      tool: 'codex',
+      threadId: '019eacb8-5af1-7d41-beb4-052a48825afa',
+    })
+
+    act(() => {
+      useMonitorStore.setState({
+        data: bootstrapWithRuns([codexRun]),
+        selectedRunId: 'codex-browser',
+      })
+    })
+
+    render(
+      <I18nProvider>
+        <ThemeProvider>
+          <InspectDrawer />
+        </ThemeProvider>
+      </I18nProvider>,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Open in Codex' })).not.toBeInTheDocument()
+    await act(async () => { await flushPromises() })
   })
 })

@@ -438,6 +438,35 @@ fn stop_server_shared(shared: &SharedChild) {
     }
 }
 
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let Some((scheme, _)) = url.split_once(':') else {
+        return Err("URL is missing a scheme".into());
+    };
+    if !scheme.eq_ignore_ascii_case("codex") {
+        return Err("Unsupported URL scheme".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("open")
+            .arg(&url)
+            .status()
+            .map_err(|error| format!("Could not open external URL: {error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("External opener exited with status {status}"))
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = url;
+        Err("Opening external Codex threads is only supported on macOS".into())
+    }
+}
+
 fn main() {
     let spawn_result = spawn_server();
     let shared_child: SharedChild = Arc::new(Mutex::new(spawn_result.child));
@@ -445,6 +474,7 @@ fn main() {
 
     tauri::Builder::default()
         .menu(build_app_menu)
+        .invoke_handler(tauri::generate_handler![open_external])
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_APP_PREFERENCES => emit_menu_action(app, ACTION_OPEN_SETTINGS),
             MENU_VIEW_ZOOM_IN => emit_menu_action(app, ACTION_ZOOM_IN),

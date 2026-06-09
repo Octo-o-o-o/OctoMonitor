@@ -4,11 +4,11 @@
   "version": "0.1.6",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
+    "dev": "node ./node_modules/vite/bin/vite.js",
+    "build": "node ./node_modules/typescript/bin/tsc -b && node ./node_modules/vite/bin/vite.js build",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
     "test": "vitest",
-    "a11y": "playwright test -c ../../playwright.config.ts",
+    "a11y": "NODE_PATH=./node_modules node ./node_modules/@playwright/test/cli.js test -c ../../playwright.config.ts",
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {

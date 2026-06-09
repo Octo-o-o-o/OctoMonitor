@@ -264,6 +264,7 @@ export function UsageView() {
                 </div>
                 <div
                   className="usage-source-items"
+                  role="region"
                   tabIndex={0}
                   aria-label={`${sourceLabels[group.tool]} ${t('usage.bySource').toLowerCase()}`}
                 >

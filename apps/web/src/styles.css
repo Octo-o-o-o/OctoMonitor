@@ -1223,6 +1223,10 @@ input, textarea, select { font: inherit; }
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 .session-row.state-done { background: transparent; }
+.session-row.is-visited {
+  background: color-mix(in srgb, var(--shell-glass-strong) 50%, transparent);
+  opacity: 0.68;
+}
 .session-row.state-error,
 .session-row.state-error-ack { background: color-mix(in srgb, var(--danger) 8%, transparent); }
 
@@ -1249,6 +1253,14 @@ input, textarea, select { font: inherit; }
 .state-badge.state-waiting { background: var(--state-waiting-bg); color: var(--state-waiting-text); }
 .state-badge.state-done { background: var(--state-done-bg); color: var(--state-done-text); }
 .state-badge.state-error { background: var(--state-error-bg); color: var(--state-error-text); }
+.session-unvisited-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
 
 .session-duration,
 .session-updated {
@@ -5087,6 +5099,35 @@ input, textarea, select { font: inherit; }
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+.inspect-open-codex {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--shell-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.inspect-open-codex-button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+  font-size: var(--font-size-sm);
+}
+.inspect-open-codex-button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+.inspect-open-codex-hint {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
 }
 .inspect-resume-cmd {
   font-family: var(--font-mono, monospace);

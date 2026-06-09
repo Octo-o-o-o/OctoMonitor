@@ -41,7 +41,7 @@ export function saveDesktopZoom(value: number) {
   }
 }
 
-function getTauriInvoke() {
+export function getTauriInvoke() {
   if (typeof window === 'undefined') return null
   return (window as TauriInternalsWindow).__TAURI_INTERNALS__?.invoke ?? null
 }
