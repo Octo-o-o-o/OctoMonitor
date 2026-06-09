@@ -22,7 +22,11 @@ import './island/island.css'
 void bootstrapDesktopWebview()
 
 const surface = new URLSearchParams(window.location.search).get('surface')
-const RootApp = surface === 'island' && getRuntimeMode() === 'local' ? IslandApp : App
+const isIslandSurface = surface === 'island' && getRuntimeMode() === 'local'
+if (isIslandSurface) {
+  document.documentElement.dataset.surface = 'island'
+}
+const RootApp = isIslandSurface ? IslandApp : App
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

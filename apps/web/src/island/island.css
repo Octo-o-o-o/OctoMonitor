@@ -1,28 +1,38 @@
+html[data-surface="island"],
+html[data-surface="island"] body,
+html[data-surface="island"] #root {
+  min-height: 100vh;
+  overflow: hidden;
+  background: transparent !important;
+}
+
 .island-app {
   min-height: 100vh;
   display: grid;
   place-items: start center;
-  padding-top: 10px;
+  padding-top: 0;
   background: transparent;
   color: var(--text);
   font-family: var(--font-sans);
+  pointer-events: none;
 }
 
 .island-shell {
-  --island-width: 228px;
-  --island-expanded-width: 408px;
+  --island-width: 360px;
+  --island-expanded-width: 640px;
   --island-collapsed-height: 38px;
-  --island-expanded-height: 336px;
+  --island-expanded-height: 560px;
   position: relative;
   width: var(--island-width);
   height: var(--island-collapsed-height);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  border: 0;
+  border-radius: 0 0 calc(var(--island-collapsed-height) / 2) calc(var(--island-collapsed-height) / 2);
   background:
-    linear-gradient(180deg, rgba(21, 29, 46, 0.94), rgba(6, 9, 16, 0.96)),
-    rgba(6, 9, 16, 0.94);
+    linear-gradient(180deg, rgba(7, 8, 10, 0.99), rgba(0, 0, 0, 0.98)),
+    #000;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
   transition:
     width 180ms ease,
     height 180ms ease,
@@ -32,9 +42,9 @@
 }
 
 .island-shell.is-expanded {
-  width: min(var(--island-expanded-width), calc(100vw - 18px));
-  height: var(--island-expanded-height);
-  border-radius: 22px;
+  width: min(var(--island-expanded-width), 100vw);
+  height: min(var(--island-expanded-height), 100vh);
+  border-radius: 0 0 22px 22px;
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
 }
 
@@ -48,9 +58,9 @@
 .island-collapsed {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 12px;
-  padding: 0 16px;
+  padding: 0 14px;
   opacity: 1;
   transform: translateY(0);
 }
@@ -65,10 +75,14 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px;
+  padding: 14px 16px 16px;
   opacity: 0;
   transform: translateY(10px);
   pointer-events: none;
+}
+
+.island-shell.is-notched .island-expanded {
+  padding-top: calc(var(--island-collapsed-height) + 12px);
 }
 
 .island-shell.is-expanded .island-expanded {
@@ -106,11 +120,21 @@
 }
 
 .island-counts {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
+}
+
+.island-count-summary {
+  min-width: 28px;
+  display: inline-block;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-md);
+  font-weight: 800;
+  text-align: right;
 }
 
 .island-count {
@@ -169,6 +193,12 @@
   flex-direction: column;
   gap: 6px;
   min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.island-list::-webkit-scrollbar {
+  display: none;
 }
 
 .island-item {
