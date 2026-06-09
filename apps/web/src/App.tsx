@@ -26,6 +26,7 @@ import { isTauriEnvironment } from './lib/runtimeEnvironment'
 import { getRuntimeMode, type RuntimeMode } from './lib/runtimeMode'
 import { useI18n, type I18nKey } from './lib/i18n'
 import { useLiveSnapshot } from './lib/useLiveSnapshot'
+import { applyDesktopDisplaySettings } from './lib/desktopDisplay'
 
 type DesktopBootIssue = {
   title: string
@@ -235,6 +236,8 @@ export default function App() {
   const notificationsEnabled = useMonitorStore((s) => s.settings.notificationsEnabled)
   const fontSize = useMonitorStore((s) => s.settings.fontSize)
   const uiDensity = useMonitorStore((s) => s.settings.uiDensity)
+  const desktopDisplayMode = useMonitorStore((s) => s.settings.desktopDisplayMode)
+  const islandPosition = useMonitorStore((s) => s.settings.islandPosition)
   const { t } = useI18n()
   const [remoteAuthState, setRemoteAuthState] = useState<'checking' | 'required' | 'ready'>(
     runtimeMode === 'remoteViewer' ? 'checking' : 'ready',
@@ -244,6 +247,7 @@ export default function App() {
     if (typeof window === 'undefined' || runtimeMode !== 'local') return null
     return readDesktopBootIssue()
   })
+  const desktopDisplayAppliedOnBootRef = useRef(false)
   const checkWaitingNotifications = useWaitingNotifications(notificationsEnabled, t)
   const handleWsMessage = useCallback((payload: unknown) => {
     const next = normalizeBootstrapPayload(payload)
@@ -261,6 +265,18 @@ export default function App() {
   )
   useKeyboardShortcuts(runtimeMode, activeTab)
   useDesktopMenuActions(runtimeMode)
+
+  useEffect(() => {
+    if (runtimeMode !== 'local') return
+    if (desktopDisplayAppliedOnBootRef.current) return
+    desktopDisplayAppliedOnBootRef.current = true
+    void applyDesktopDisplaySettings({
+      mode: desktopDisplayMode,
+      position: islandPosition,
+    }).catch((err) => {
+      console.warn('[OctoMonitor] desktop.displayMode', err)
+    })
+  }, [desktopDisplayMode, islandPosition, runtimeMode])
 
   useEffect(() => {
     if (runtimeMode !== 'remoteViewer') return

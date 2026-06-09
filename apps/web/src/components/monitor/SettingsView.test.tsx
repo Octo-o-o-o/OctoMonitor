@@ -64,7 +64,10 @@ describe('SettingsView', () => {
       .map((node) => node.textContent?.trim())
 
     expect(labels.indexOf('远程访问')).toBeGreaterThan(-1)
+    expect(labels.indexOf('桌面显示')).toBeGreaterThan(-1)
+    expect(labels.indexOf('桌面显示')).toBeLessThan(labels.indexOf('远程访问'))
     expect(labels.indexOf('远程访问')).toBeLessThan(labels.indexOf('过滤规则'))
+    expect(screen.getByRole('button', { name: 'Dashboard + 灵动岛' })).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: '允许远程只读访问' })).toBeInTheDocument()
     expect(await screen.findByText('生成配对码')).toBeInTheDocument()
   })

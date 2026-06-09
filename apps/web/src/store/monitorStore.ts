@@ -6,6 +6,7 @@ import {
   type FrontendSettings,
 } from '../lib/preferences'
 import { STORAGE_KEYS } from '../lib/storageKeys'
+import { applyDesktopDisplaySettings } from '../lib/desktopDisplay'
 
 function loadDismissedAttentionKeys(): string[] {
   try {
@@ -47,9 +48,11 @@ export type ActiveTab = 'monitor' | 'usage' | 'commits' | 'heatmap' | 'settings'
 export type {
   AgentDisplayFormat,
   ColumnLayout,
+  DesktopDisplayMode,
   FilterMode,
   FilterRules,
   FontSize,
+  IslandPosition,
   MonitorPeriod,
   PanelEntry,
   SnapshotWindow,
@@ -141,6 +144,14 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     const next = { ...get().settings, ...patch }
     saveFrontendSettings(next)
     set({ settings: next })
+    if ('desktopDisplayMode' in patch || 'islandPosition' in patch) {
+      void applyDesktopDisplaySettings({
+        mode: next.desktopDisplayMode,
+        position: next.islandPosition,
+      }).catch((err) => {
+        console.warn('[OctoMonitor] desktop.displayMode', err)
+      })
+    }
   },
   setMonitorQuickFilter: (monitorQuickFilter) => set({ monitorQuickFilter }),
   setMonitorSearch: (monitorSearch) => set({ monitorSearch }),

@@ -13,6 +13,12 @@ const ISLAND_WIDTH: f64 = 408.0;
 const ISLAND_HEIGHT: f64 = 336.0;
 const TOP_MARGIN: f64 = 10.0;
 
+#[derive(Clone, Copy)]
+pub enum IslandPositionMode {
+    Auto,
+    TopCenter,
+}
+
 tauri_panel! {
     panel!(IslandPanel {
         config: {
@@ -40,12 +46,23 @@ fn initial_panel_position(app: &AppHandle) -> LogicalPosition<f64> {
     )
 }
 
-fn screen_top_left_point() -> Option<ObjcNSPoint> {
+pub fn parse_position_mode(value: Option<&str>) -> Result<IslandPositionMode, String> {
+    match value.unwrap_or("auto") {
+        "auto" => Ok(IslandPositionMode::Auto),
+        "topCenter" => Ok(IslandPositionMode::TopCenter),
+        _ => Err("Unsupported island position".into()),
+    }
+}
+
+fn screen_top_left_point(mode: IslandPositionMode) -> Option<ObjcNSPoint> {
     let mtm = ObjcMainThreadMarker::new()?;
     let screen = NSScreen::mainScreen(mtm)?;
     let frame = screen.frame();
     let fallback_center_x = frame.origin.x + ((frame.size.width - ISLAND_WIDTH) / 2.0).max(0.0);
-    let x = notch_panel_x(&screen).unwrap_or(fallback_center_x);
+    let x = match mode {
+        IslandPositionMode::Auto => notch_panel_x(&screen).unwrap_or(fallback_center_x),
+        IslandPositionMode::TopCenter => fallback_center_x,
+    };
 
     Some(ObjcNSPoint::new(
         x,
@@ -77,8 +94,8 @@ fn notch_panel_x(screen: &NSScreen) -> Option<f64> {
     Some(((notch_left + notch_right) / 2.0) - (ISLAND_WIDTH / 2.0))
 }
 
-fn position_panel(panel: &dyn Panel) {
-    if let Some(point) = screen_top_left_point() {
+fn position_panel(panel: &dyn Panel, mode: IslandPositionMode) {
+    if let Some(point) = screen_top_left_point(mode) {
         unsafe {
             let _: () = objc2::msg_send![panel.as_panel(), setFrameTopLeftPoint: point];
         }
@@ -120,17 +137,25 @@ pub fn setup_island_panel(app: &AppHandle) -> tauri::Result<()> {
                 .focused(false)
         })
         .build()?;
-    position_panel(panel.as_ref());
+    position_panel(panel.as_ref(), IslandPositionMode::Auto);
     panel.show();
     Ok(())
 }
 
 pub fn set_island_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
+    set_island_visible_with_position(app, visible, IslandPositionMode::Auto)
+}
+
+pub fn set_island_visible_with_position(
+    app: &AppHandle,
+    visible: bool,
+    position: IslandPositionMode,
+) -> Result<(), String> {
     let panel = app
         .get_webview_panel(ISLAND_WINDOW_LABEL)
         .map_err(|_| "Island panel is not available".to_string())?;
     if visible {
-        position_panel(panel.as_ref());
+        position_panel(panel.as_ref(), position);
         panel.show();
     } else {
         panel.hide();
@@ -144,7 +169,7 @@ pub fn toggle_island(app: &AppHandle) -> Result<bool, String> {
         .map_err(|_| "Island panel is not available".to_string())?;
     let next_visible = !panel.is_visible();
     if next_visible {
-        position_panel(panel.as_ref());
+        position_panel(panel.as_ref(), IslandPositionMode::Auto);
         panel.show();
     } else {
         panel.hide();

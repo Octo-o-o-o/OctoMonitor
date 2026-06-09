@@ -38,6 +38,8 @@ const MENU_APP_PREFERENCES: &str = "app.preferences";
 const MENU_VIEW_ZOOM_IN: &str = "view.zoom_in";
 const MENU_VIEW_ZOOM_OUT: &str = "view.zoom_out";
 const MENU_VIEW_ZOOM_RESET: &str = "view.zoom_reset";
+const MENU_WINDOW_SHOW_DASHBOARD: &str = "window.show_dashboard";
+const MENU_WINDOW_TOGGLE_ISLAND: &str = "window.toggle_island";
 const MENU_HELP_KEYBOARD_SHORTCUTS: &str = "help.keyboard_shortcuts";
 
 const ACTION_OPEN_SETTINGS: &str = "open-settings";
@@ -127,6 +129,10 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let zoom_reset = MenuItemBuilder::with_id(MENU_VIEW_ZOOM_RESET, "Actual Size")
         .accelerator("CmdOrCtrl+0")
         .build(app)?;
+    let show_dashboard =
+        MenuItemBuilder::with_id(MENU_WINDOW_SHOW_DASHBOARD, "Show Dashboard").build(app)?;
+    let toggle_island =
+        MenuItemBuilder::with_id(MENU_WINDOW_TOGGLE_ISLAND, "Show/Hide Island").build(app)?;
     let keyboard_shortcuts =
         MenuItemBuilder::with_id(MENU_HELP_KEYBOARD_SHORTCUTS, "Keyboard Shortcuts").build(app)?;
 
@@ -169,6 +175,9 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     }
     let view_menu = view_menu.build()?;
     let window_menu = SubmenuBuilder::new(app, "Window")
+        .item(&show_dashboard)
+        .item(&toggle_island)
+        .separator()
         .minimize()
         .maximize()
         .separator()
@@ -471,6 +480,61 @@ fn open_external(url: String) -> Result<(), String> {
     }
 }
 
+fn show_dashboard_window(app: &AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return Err("Dashboard window is not available".into());
+    };
+    window
+        .show()
+        .map_err(|error| format!("Could not show dashboard window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("Could not focus dashboard window: {error}"))?;
+    Ok(())
+}
+
+fn hide_dashboard_window(app: &AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return Err("Dashboard window is not available".into());
+    };
+    window
+        .hide()
+        .map_err(|error| format!("Could not hide dashboard window: {error}"))
+}
+
+fn apply_display_mode_to_windows(
+    app: &AppHandle,
+    mode: &str,
+    position: Option<&str>,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let island_position = island::parse_position_mode(position)?;
+
+    match mode {
+        "dashboard" => {
+            show_dashboard_window(app)?;
+            #[cfg(target_os = "macos")]
+            island::set_island_visible_with_position(app, false, island_position)?;
+            Ok(())
+        }
+        "island" => {
+            #[cfg(target_os = "macos")]
+            island::set_island_visible_with_position(app, true, island_position)?;
+            #[cfg(not(target_os = "macos"))]
+            return Err("Island overlay is only supported on macOS".into());
+            hide_dashboard_window(app)?;
+            Ok(())
+        }
+        "both" => {
+            show_dashboard_window(app)?;
+            #[cfg(target_os = "macos")]
+            island::set_island_visible_with_position(app, true, island_position)?;
+            Ok(())
+        }
+        _ => Err("Unsupported desktop display mode".into()),
+    }
+}
+
 #[tauri::command]
 fn set_island_visible(app: AppHandle, visible: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -500,6 +564,15 @@ fn toggle_island(app: AppHandle) -> Result<bool, String> {
     }
 }
 
+#[tauri::command]
+fn apply_display_mode(
+    app: AppHandle,
+    mode: String,
+    position: Option<String>,
+) -> Result<(), String> {
+    apply_display_mode_to_windows(&app, &mode, position.as_deref())
+}
+
 fn main() {
     let spawn_result = spawn_server();
     let shared_child: SharedChild = Arc::new(Mutex::new(spawn_result.child));
@@ -515,12 +588,19 @@ fn main() {
             open_external,
             set_island_visible,
             toggle_island,
+            apply_display_mode,
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_APP_PREFERENCES => emit_menu_action(app, ACTION_OPEN_SETTINGS),
             MENU_VIEW_ZOOM_IN => emit_menu_action(app, ACTION_ZOOM_IN),
             MENU_VIEW_ZOOM_OUT => emit_menu_action(app, ACTION_ZOOM_OUT),
             MENU_VIEW_ZOOM_RESET => emit_menu_action(app, ACTION_ZOOM_RESET),
+            MENU_WINDOW_SHOW_DASHBOARD => {
+                let _ = show_dashboard_window(app);
+            }
+            MENU_WINDOW_TOGGLE_ISLAND => {
+                let _ = toggle_island(app.clone());
+            }
             MENU_HELP_KEYBOARD_SHORTCUTS => emit_menu_action(app, ACTION_TOGGLE_SHORTCUTS),
             _ => {}
         })

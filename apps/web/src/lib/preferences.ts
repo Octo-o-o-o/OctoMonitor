@@ -9,6 +9,8 @@ export type ColumnLayout = 'fixed' | 'adaptive'
 export type AgentDisplayFormat = 'id' | 'name' | 'id:name'
 export type FontSize = 'xsmall' | 'small' | 'default' | 'large' | 'xlarge'
 export type FilterMode = 'off' | 'include' | 'exclude'
+export type DesktopDisplayMode = 'dashboard' | 'island' | 'both'
+export type IslandPosition = 'auto' | 'topCenter'
 
 export interface PanelEntry {
   tool: ToolKind
@@ -33,6 +35,8 @@ export interface FrontendSettings {
   agentDisplayFormat: AgentDisplayFormat
   fontSize: FontSize
   notificationsEnabled: boolean
+  desktopDisplayMode: DesktopDisplayMode
+  islandPosition: IslandPosition
 }
 
 interface StoredFrontendSettings extends Partial<FrontendSettings> {
@@ -41,8 +45,10 @@ interface StoredFrontendSettings extends Partial<FrontendSettings> {
   usageWindow?: 'live' | 'day' | 'week' | 'month' | 'all'
 }
 
-const SETTINGS_VERSION = 3
+const SETTINGS_VERSION = 4
 const allSnapshotWindows: SnapshotWindow[] = ['day', 'week', 'month', 'all']
+const allDesktopDisplayModes: DesktopDisplayMode[] = ['dashboard', 'island', 'both']
+const allIslandPositions: IslandPosition[] = ['auto', 'topCenter']
 
 export const defaultPanelConfig: PanelEntry[] = [
   { tool: 'claude', enabled: true },
@@ -69,6 +75,8 @@ export const defaultSettings: FrontendSettings = {
   agentDisplayFormat: 'id',
   fontSize: 'default',
   notificationsEnabled: false,
+  desktopDisplayMode: 'both',
+  islandPosition: 'auto',
 }
 
 function cloneDefaultFilterRules(): FilterRules {
@@ -145,6 +153,18 @@ function freshDefaults(): FrontendSettings {
   }
 }
 
+function migrateDesktopDisplayMode(value: DesktopDisplayMode | undefined): DesktopDisplayMode {
+  return value && allDesktopDisplayModes.includes(value)
+    ? value
+    : defaultSettings.desktopDisplayMode
+}
+
+function migrateIslandPosition(value: IslandPosition | undefined): IslandPosition {
+  return value && allIslandPositions.includes(value)
+    ? value
+    : defaultSettings.islandPosition
+}
+
 export function loadFrontendSettings(): FrontendSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.settings)
@@ -162,6 +182,8 @@ export function loadFrontendSettings(): FrontendSettings {
       agentDisplayFormat: parsed.agentDisplayFormat ?? defaultSettings.agentDisplayFormat,
       fontSize: parsed.fontSize ?? defaultSettings.fontSize,
       notificationsEnabled: parsed.notificationsEnabled ?? defaultSettings.notificationsEnabled,
+      desktopDisplayMode: migrateDesktopDisplayMode(parsed.desktopDisplayMode),
+      islandPosition: migrateIslandPosition(parsed.islandPosition),
     }
   } catch {
     return freshDefaults()

@@ -35,6 +35,8 @@ describe('frontend preferences', () => {
     expect(settings.uiDensity).toBe('compact')
     expect(settings.showFingerprints).toBe(false)
     expect(settings.notificationsEnabled).toBe(false)
+    expect(settings.desktopDisplayMode).toBe('both')
+    expect(settings.islandPosition).toBe('auto')
     expect(settings.panelConfig.map((entry) => entry.tool)).toEqual(['codex', 'claude', 'openClaw', 'hermes'])
     expect(settings.filterRules.codex.patterns).toEqual(['octo'])
     expect(settings.filterRules.claude.mode).toBe('off')
@@ -59,7 +61,7 @@ describe('frontend preferences', () => {
     })
 
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.settings) ?? '{}')).toEqual({
-      version: 3,
+      version: 4,
       ...defaultSettings,
       notificationsEnabled: true,
       uiDensity: 'spacious',
