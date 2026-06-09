@@ -1,6 +1,6 @@
 import type { RunRecord, ToolKind } from './types'
 
-export type IslandPriority = 'waiting' | 'active' | 'unreadDone' | 'recentDone'
+export type IslandPriority = 'waiting' | 'active' | 'freshDone' | 'done'
 
 export type IslandItem = {
   id: string
@@ -19,8 +19,8 @@ const doneStates = new Set(['completed', 'idle', 'stale', 'cancelled'])
 const priorityRank: Record<IslandPriority, number> = {
   waiting: 0,
   active: 1,
-  unreadDone: 2,
-  recentDone: 3,
+  freshDone: 2,
+  done: 3,
 }
 
 const toolRank: Record<ToolKind, number> = {
@@ -48,7 +48,7 @@ function toIslandItem(run: RunRecord, visitedRunIds: ReadonlySet<string>): Islan
   if (run.state === 'active') return { id: run.id, run, priority: 'active', unread: false }
   if (!isDone(run)) return null
   const unread = !visitedRunIds.has(run.id)
-  return { id: run.id, run, priority: unread ? 'unreadDone' : 'recentDone', unread }
+  return { id: run.id, run, priority: unread ? 'freshDone' : 'done', unread }
 }
 
 export function buildIslandCounts(

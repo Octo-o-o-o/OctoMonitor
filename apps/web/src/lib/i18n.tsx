@@ -261,6 +261,12 @@ const en = {
   'island.empty.title': 'Quiet',
   'island.empty.waiting': 'Waiting for updates',
   'island.empty.none': 'No active runs',
+  'island.settings': 'Open settings',
+  'island.settings.error': 'Could not open settings',
+  'island.status.waiting': 'Action',
+  'island.status.active': 'Running',
+  'island.status.freshDone': 'Just done',
+  'island.status.done': 'Done',
 
   // toast
   'toast.copied': 'Copied',
@@ -612,6 +618,12 @@ const zh: Record<I18nKey, string> = {
   'island.empty.title': '安静',
   'island.empty.waiting': '等待更新中',
   'island.empty.none': '暂无运行中任务',
+  'island.settings': '\u6253\u5F00\u8BBE\u7F6E',
+  'island.settings.error': '\u65E0\u6CD5\u6253\u5F00\u8BBE\u7F6E',
+  'island.status.waiting': '\u9700\u8981\u64CD\u4F5C',
+  'island.status.active': '\u8FDB\u884C\u4E2D',
+  'island.status.freshDone': '\u521A\u5B8C\u6210',
+  'island.status.done': '\u5DF2\u5B8C\u6210',
 
   'toast.copied': '已复制',
   'toast.copyFailed': '复制失败',

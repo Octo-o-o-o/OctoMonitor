@@ -573,6 +573,13 @@ fn apply_display_mode(
     apply_display_mode_to_windows(&app, &mode, position.as_deref())
 }
 
+#[tauri::command]
+fn open_dashboard_settings(app: AppHandle) -> Result<(), String> {
+    show_dashboard_window(&app)?;
+    emit_menu_action(&app, ACTION_OPEN_SETTINGS);
+    Ok(())
+}
+
 fn main() {
     let spawn_result = spawn_server();
     let shared_child: SharedChild = Arc::new(Mutex::new(spawn_result.child));
@@ -589,6 +596,7 @@ fn main() {
             set_island_visible,
             toggle_island,
             apply_display_mode,
+            open_dashboard_settings,
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_APP_PREFERENCES => emit_menu_action(app, ACTION_OPEN_SETTINGS),

@@ -159,7 +159,7 @@ html[data-surface="island"] #root {
 
 .island-expanded-header {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 8px;
   min-height: 22px;
@@ -176,9 +176,15 @@ html[data-surface="island"] #root {
   white-space: nowrap;
 }
 
-.island-header-count {
-  min-width: 22px;
-  height: 20px;
+.island-header-metrics {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.island-header-pill {
+  min-width: 18px;
+  height: 18px;
   display: inline-grid;
   place-items: center;
   border-radius: 999px;
@@ -186,6 +192,48 @@ html[data-surface="island"] #root {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--font-size-2xs);
+}
+
+.island-header-pill.waiting {
+  color: var(--state-waiting-text);
+  background: rgba(255, 211, 106, 0.16);
+}
+
+.island-header-pill.active {
+  color: var(--state-running-text);
+  background: rgba(122, 211, 154, 0.15);
+}
+
+.island-header-pill.done {
+  color: #9ff0cc;
+  background: rgba(159, 240, 204, 0.14);
+}
+
+.island-settings-button {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.island-settings-button:hover,
+.island-settings-button:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.island-settings-button svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 
 .island-list {
@@ -203,12 +251,12 @@ html[data-surface="island"] #root {
 
 .island-item {
   width: 100%;
-  min-height: 54px;
+  min-height: 58px;
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-columns: 10px minmax(0, 1fr) 108px;
   align-items: center;
   gap: 10px;
-  padding: 8px 9px;
+  padding: 8px 10px;
   border: 1px solid transparent;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.045);
@@ -226,7 +274,7 @@ html[data-surface="island"] #root {
   transform: translateY(-1px);
 }
 
-.island-item.is-read {
+.island-item.is-done.is-read {
   opacity: 0.72;
 }
 
@@ -268,21 +316,47 @@ html[data-surface="island"] #root {
 }
 
 .island-item-meta {
-  display: flex;
-  min-width: 74px;
+  display: grid;
+  min-width: 0;
   align-items: flex-end;
-  flex-direction: column;
-  gap: 3px;
+  justify-items: end;
+  gap: 2px;
 }
 
+.island-priority-badge,
 .island-tool-badge {
   max-width: 86px;
   overflow: hidden;
-  color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--font-size-3xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.island-priority-badge {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.island-priority-badge.is-waiting {
+  color: var(--state-waiting-text);
+  background: rgba(255, 211, 106, 0.14);
+}
+
+.island-priority-badge.is-active {
+  color: var(--state-running-text);
+  background: rgba(122, 211, 154, 0.13);
+}
+
+.island-priority-badge.is-fresh-done {
+  color: #9ff0cc;
+  background: rgba(159, 240, 204, 0.13);
+}
+
+.island-tool-badge {
+  color: var(--muted);
 }
 
 .island-elapsed {

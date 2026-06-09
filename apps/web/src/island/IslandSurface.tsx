@@ -1,9 +1,10 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
 import { sourceLabelsUpper } from '../lib/constants'
+import { getTauriInvoke } from '../lib/desktopZoom'
 import { formatDuration } from '../lib/format'
 import { buildCodexDeepLink, getRunOpenAffordance } from '../lib/runTarget'
 import { isTauriEnvironment } from '../lib/runtimeEnvironment'
-import { buildIslandCounts, buildIslandItems, type IslandItem } from '../lib/island'
+import { buildIslandCounts, buildIslandItems, type IslandItem, type IslandPriority } from '../lib/island'
 import { openExternalUrl } from '../lib/openExternal'
 import type { RunRecord, ToolKind } from '../lib/types'
 import { useMonitorStore } from '../store/monitorStore'
@@ -24,6 +25,11 @@ type IslandChromeMetrics = {
 
 type IslandExpansionWindow = Window & {
   __OCTOMONITOR_ISLAND_EXPANDED__?: boolean
+}
+
+type IslandExpansionDetail = {
+  expanded?: boolean
+  immediate?: boolean
 }
 
 const toolClass: Record<ToolKind, string> = {
@@ -66,6 +72,15 @@ function itemSubtitle(run: RunRecord): string {
     ?? run.lastTail
     ?? run.workspaceShort
     ?? sourceLabelsUpper[run.tool]
+}
+
+function priorityClass(priority: IslandPriority): string {
+  switch (priority) {
+    case 'waiting': return 'is-waiting'
+    case 'active': return 'is-active'
+    case 'freshDone': return 'is-fresh-done'
+    case 'done': return 'is-done'
+  }
 }
 
 export function IslandSurface({
@@ -117,11 +132,20 @@ export function IslandSurface({
     collapseTimerRef.current = setTimeout(() => setExpanded(false), 280)
   }
 
+  function hideNow() {
+    clearTimeout(expandTimerRef.current)
+    clearTimeout(collapseTimerRef.current)
+    setExpanded(false)
+  }
+
   useEffect(() => {
     function handleNativeExpansion(event: Event) {
-      const expanded = (event as CustomEvent<{ expanded?: boolean }>).detail?.expanded === true
+      const detail = (event as CustomEvent<IslandExpansionDetail>).detail
+      const expanded = detail?.expanded === true
       if (expanded) {
         showSoon()
+      } else if (detail?.immediate === true) {
+        hideNow()
       } else {
         hideLater()
       }
@@ -138,6 +162,27 @@ export function IslandSurface({
     window.setTimeout(() => {
       if (!rootRef.current?.contains(document.activeElement)) setExpanded(false)
     }, 0)
+  }
+
+  async function handleSettingsClick() {
+    hideNow()
+    if (!isTauriEnvironment()) return
+    const invoke = getTauriInvoke()
+    if (!invoke) return
+    try {
+      await invoke('open_dashboard_settings')
+    } catch {
+      pushToast({ kind: 'error', message: t('island.settings.error') })
+    }
+  }
+
+  function priorityLabel(priority: IslandPriority): string {
+    switch (priority) {
+      case 'waiting': return t('island.status.waiting')
+      case 'active': return t('island.status.active')
+      case 'freshDone': return t('island.status.freshDone')
+      case 'done': return t('island.status.done')
+    }
   }
 
   async function handleItemClick(item: IslandItem) {
@@ -183,7 +228,24 @@ export function IslandSurface({
         <div className="island-expanded-header">
           <span className={`island-status-dot${connected ? ' is-live' : ' is-offline'}`} />
           <span className="island-header-title">OctoMonitor</span>
-          <span className="island-header-count">{items.length}</span>
+          <div className="island-header-metrics" aria-hidden="true">
+            {counts.waiting > 0 && <span className="island-header-pill waiting">{counts.waiting}</span>}
+            {counts.active > 0 && <span className="island-header-pill active">{counts.active}</span>}
+            {counts.unreadDone > 0 && <span className="island-header-pill done">{counts.unreadDone}</span>}
+            {items.length === 0 && <span className="island-header-pill neutral">0</span>}
+          </div>
+          <button
+            type="button"
+            className="island-settings-button"
+            aria-label={t('island.settings')}
+            title={t('island.settings')}
+            tabIndex={expanded ? 0 : -1}
+            onClick={() => void handleSettingsClick()}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="M6.9 1.4h2.2l.4 1.6c.4.1.7.3 1 .5l1.5-.6 1.1 1.9-1.2 1.1c.1.4.1.8 0 1.2l1.2 1.1-1.1 1.9-1.5-.6c-.3.2-.6.4-1 .5l-.4 1.6H6.9L6.5 10c-.4-.1-.7-.3-1-.5l-1.5.6-1.1-1.9 1.2-1.1C4 6.7 4 6.3 4.1 5.9L2.9 4.8 4 2.9l1.5.6c.3-.2.6-.4 1-.5l.4-1.6Zm1.1 3.7a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8Z" />
+            </svg>
+          </button>
         </div>
         <div className="island-list">
           {items.length === 0 && (
@@ -198,7 +260,7 @@ export function IslandSurface({
             <button
               key={item.id}
               type="button"
-              className={`island-item ${item.priority}${item.unread ? ' is-unread' : ' is-read'}`}
+              className={`island-item ${priorityClass(item.priority)}${item.unread ? ' is-unread' : ' is-read'}`}
               onClick={() => void handleItemClick(item)}
               tabIndex={expanded ? 0 : -1}
             >
@@ -208,6 +270,9 @@ export function IslandSurface({
                 <span className="island-item-subtitle">{itemSubtitle(item.run)}</span>
               </span>
               <span className="island-item-meta">
+                <span className={`island-priority-badge ${priorityClass(item.priority)}`}>
+                  {priorityLabel(item.priority)}
+                </span>
                 <span className="island-tool-badge">{sourceLabelsUpper[item.run.tool]}</span>
                 <span className="island-elapsed">{formatDuration(item.run.elapsedMs)}</span>
                 {item.unread && <span className="island-unread-dot" aria-hidden="true" />}

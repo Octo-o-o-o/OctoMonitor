@@ -8,6 +8,9 @@ import { IslandSurface } from './IslandSurface'
 
 type IslandExpansionTestWindow = Window & {
   __OCTOMONITOR_ISLAND_EXPANDED__?: boolean
+  __TAURI_INTERNALS__?: {
+    invoke?: (command: string, payload?: Record<string, unknown>) => Promise<unknown>
+  }
 }
 
 function islandExpansionWindow(): IslandExpansionTestWindow {
@@ -116,6 +119,9 @@ describe('IslandSurface', () => {
     expect(screen.getByText('Waiting Project')).toBeInTheDocument()
     expect(screen.getByText('Active Project')).toBeInTheDocument()
     expect(screen.getByText('Done Project')).toBeInTheDocument()
+    expect(screen.getByText('Action')).toBeInTheDocument()
+    expect(screen.getByText('Running')).toBeInTheDocument()
+    expect(screen.getByText('Just done')).toBeInTheDocument()
   })
 
   it('uses native notch metrics for the collapsed chrome', () => {
@@ -162,6 +168,31 @@ describe('IslandSurface', () => {
     expect(shell).not.toHaveClass('is-expanded')
   })
 
+  it('collapses immediately from a native outside-click event', () => {
+    const { container } = render(
+      <I18nProvider>
+        <IslandSurface runs={[]} visitedRunIds={new Set()} connected />
+      </I18nProvider>,
+    )
+
+    const shell = container.querySelector('.island-shell')
+    act(() => {
+      window.dispatchEvent(new CustomEvent('octomonitor-island-expansion', {
+        detail: { expanded: true },
+      }))
+      vi.advanceTimersByTime(160)
+    })
+    expect(shell).toHaveClass('is-expanded')
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('octomonitor-island-expansion', {
+        detail: { expanded: false, immediate: true },
+      }))
+    })
+
+    expect(shell).not.toHaveClass('is-expanded')
+  })
+
   it('uses the cached native hover state when the event fired before mount', () => {
     islandExpansionWindow().__OCTOMONITOR_ISLAND_EXPANDED__ = true
 
@@ -177,6 +208,33 @@ describe('IslandSurface', () => {
     })
 
     expect(shell).toHaveClass('is-expanded')
+  })
+
+  it('opens desktop settings from the expanded header button', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke },
+    })
+
+    const { container } = render(
+      <I18nProvider>
+        <IslandSurface runs={[]} visitedRunIds={new Set()} connected />
+      </I18nProvider>,
+    )
+
+    const shell = container.querySelector('.island-shell')
+    act(() => {
+      fireEvent.mouseEnter(shell!)
+      vi.advanceTimersByTime(160)
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /open settings/i }))
+    })
+
+    expect(invoke).toHaveBeenCalledWith('open_dashboard_settings')
+    expect(shell).not.toHaveClass('is-expanded')
   })
 
   it('marks an item visited on click without opening external URLs outside Tauri', () => {

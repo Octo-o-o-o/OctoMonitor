@@ -62,18 +62,22 @@ describe('island builders', () => {
     })
   })
 
-  it('sorts waiting, active, unread done, then visited recent done', () => {
+  it('sorts by status bucket, then latest activity within each bucket', () => {
     const visited = new Set(['done-read'])
     const runs = [
       runFixture({ id: 'done-read', state: 'completed', lastActivityAt: '2026-06-09T10:40:00.000Z' }),
+      runFixture({ id: 'active-new', state: 'active', lastActivityAt: '2026-06-09T10:25:00.000Z' }),
       runFixture({ id: 'active-old', state: 'active', lastActivityAt: '2026-06-09T10:20:00.000Z' }),
       runFixture({ id: 'done-unread', state: 'completed', lastActivityAt: '2026-06-09T10:30:00.000Z' }),
+      runFixture({ id: 'waiting-new', state: 'waitingApproval', lastActivityAt: '2026-06-09T10:15:00.000Z' }),
       runFixture({ id: 'waiting-old', state: 'waitingApproval', lastActivityAt: '2026-06-09T10:10:00.000Z' }),
       runFixture({ id: 'ignored-error', state: 'error', lastActivityAt: '2026-06-09T11:00:00.000Z' }),
     ]
 
     expect(buildIslandItems(runs, visited).map((item) => item.id)).toEqual([
+      'waiting-new',
       'waiting-old',
+      'active-new',
       'active-old',
       'done-unread',
       'done-read',

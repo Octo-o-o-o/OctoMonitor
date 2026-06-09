@@ -24,7 +24,7 @@ const EXTERNAL_CLOSED_HEIGHT: f64 = 38.0;
 const NOTCHED_CLOSED_HEIGHT_FALLBACK: f64 = 32.0;
 const NOTCH_SIDE_RESERVE: f64 = 44.0;
 const NOTCH_WIDTH_BLEED: f64 = 4.0;
-const HOVER_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const HOVER_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const ISLAND_EXPANSION_EVENT: &str = "octomonitor-island-expansion";
 
 static ISLAND_HOVER_BOUNDS: OnceLock<Arc<Mutex<IslandHoverBounds>>> = OnceLock::new();
@@ -103,6 +103,16 @@ tauri_panel! {
 
 fn contains_point(point: ObjcNSPoint, x: f64, y: f64, width: f64, height: f64) -> bool {
     point.x >= x && point.x <= x + width && point.y >= y && point.y <= y + height
+}
+
+fn clicked_outside_expanded_panel(
+    bounds: IslandHoverBounds,
+    point: ObjcNSPoint,
+    expanded: bool,
+    buttons_pressed: bool,
+    last_buttons_pressed: bool,
+) -> bool {
+    expanded && buttons_pressed && !last_buttons_pressed && !bounds.contains_expanded(point)
 }
 
 fn initial_panel_position(app: &AppHandle) -> LogicalPosition<f64> {
@@ -252,15 +262,16 @@ fn configure_panel_mouse_tracking(panel: &dyn Panel) {
     }
 }
 
-fn dispatch_island_expansion(app: &AppHandle, expanded: bool) -> bool {
+fn dispatch_island_expansion(app: &AppHandle, expanded: bool, immediate: bool) -> bool {
     let Some(window) = app.get_webview_window(ISLAND_WINDOW_LABEL) else {
         return false;
     };
     let expanded = if expanded { "true" } else { "false" };
+    let immediate = if immediate { "true" } else { "false" };
     window
         .eval(format!(
             "window.__OCTOMONITOR_ISLAND_EXPANDED__ = {expanded}; \
-             window.dispatchEvent(new CustomEvent('{ISLAND_EXPANSION_EVENT}', {{ detail: {{ expanded: {expanded} }} }}));"
+             window.dispatchEvent(new CustomEvent('{ISLAND_EXPANSION_EVENT}', {{ detail: {{ expanded: {expanded}, immediate: {immediate} }} }}));"
         ))
         .is_ok()
 }
@@ -268,21 +279,36 @@ fn dispatch_island_expansion(app: &AppHandle, expanded: bool) -> bool {
 fn start_hover_monitor(app: AppHandle, bounds: Arc<Mutex<IslandHoverBounds>>) {
     thread::spawn(move || {
         let mut last_expanded: Option<bool> = None;
+        let mut last_buttons_pressed = false;
         loop {
             let point = objc2_app_kit::NSEvent::mouseLocation();
+            let buttons_pressed = objc2_app_kit::NSEvent::pressedMouseButtons() != 0;
             let Ok(bounds) = bounds.lock().map(|bounds| *bounds) else {
                 thread::sleep(HOVER_POLL_INTERVAL);
+                last_buttons_pressed = buttons_pressed;
                 continue;
             };
+            let clicked_outside_expanded = clicked_outside_expanded_panel(
+                bounds,
+                point,
+                last_expanded == Some(true),
+                buttons_pressed,
+                last_buttons_pressed,
+            );
             let should_expand = bounds.contains_closed(point)
                 || (last_expanded == Some(true) && bounds.contains_expanded(point));
 
-            if last_expanded != Some(should_expand)
-                && dispatch_island_expansion(&app, should_expand)
+            if clicked_outside_expanded {
+                if dispatch_island_expansion(&app, false, true) {
+                    last_expanded = Some(false);
+                }
+            } else if last_expanded != Some(should_expand)
+                && dispatch_island_expansion(&app, should_expand, false)
             {
                 last_expanded = Some(should_expand);
             }
 
+            last_buttons_pressed = buttons_pressed;
             thread::sleep(HOVER_POLL_INTERVAL);
         }
     });
@@ -422,5 +448,46 @@ mod tests {
         assert!(bounds.contains_expanded(ObjcNSPoint::new(864.0, 900.0)));
         assert!(!bounds.contains_closed(ObjcNSPoint::new(1120.0, 1101.0)));
         assert!(!bounds.contains_expanded(ObjcNSPoint::new(1200.0, 900.0)));
+    }
+
+    #[test]
+    fn outside_click_dismisses_only_when_expanded_and_press_starts_outside() {
+        let bounds = IslandHoverBounds::from_top_left(
+            ObjcNSPoint::new(544.0, 1117.0),
+            IslandChromeGeometry {
+                closed_width: 277.0,
+                closed_height: 32.0,
+                notched: true,
+            },
+        );
+
+        assert!(clicked_outside_expanded_panel(
+            bounds,
+            ObjcNSPoint::new(100.0, 900.0),
+            true,
+            true,
+            false,
+        ));
+        assert!(!clicked_outside_expanded_panel(
+            bounds,
+            ObjcNSPoint::new(864.0, 900.0),
+            true,
+            true,
+            false,
+        ));
+        assert!(!clicked_outside_expanded_panel(
+            bounds,
+            ObjcNSPoint::new(100.0, 900.0),
+            false,
+            true,
+            false,
+        ));
+        assert!(!clicked_outside_expanded_panel(
+            bounds,
+            ObjcNSPoint::new(100.0, 900.0),
+            true,
+            true,
+            true,
+        ));
     }
 }
