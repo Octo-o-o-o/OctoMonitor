@@ -844,6 +844,249 @@ input, textarea, select { font: inherit; }
   border-radius: var(--hero-radius);
 }
 
+.task-feed-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--cluster-gap);
+  min-height: 0;
+}
+.task-feed-layout.has-rail {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+}
+.task-feed-board,
+.monitor-rail {
+  min-width: 0;
+  border: 1px solid var(--shell-border);
+  background: var(--shell-glass-strong);
+  border-radius: 20px;
+  box-shadow: var(--shell-shadow-soft);
+  overflow: hidden;
+}
+.task-feed-head,
+.monitor-rail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--shell-border);
+  background: color-mix(in srgb, var(--shell-highlight) 80%, transparent);
+}
+.task-feed-head h2 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+.task-feed-head span,
+.monitor-rail-section-head {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+.monitor-rail-section-head strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.task-feed-section + .task-feed-section {
+  border-top: 1px solid var(--shell-border);
+}
+.task-feed-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--bg) 28%, transparent);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+}
+.task-feed-section-head strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.task-feed-list {
+  display: grid;
+}
+.task-feed-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: stretch;
+  width: 100%;
+  padding: 14px 16px;
+  border-top: 1px solid var(--shell-border);
+  text-align: left;
+  transition: background 0.16s ease, opacity 0.16s ease;
+}
+.task-feed-list .task-feed-row:first-child {
+  border-top: none;
+}
+.task-feed-row:hover {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.task-feed-row.state-active {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.task-feed-row.state-waiting {
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.task-feed-row.state-error,
+.task-feed-row.state-error-ack {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.task-feed-row.is-visited {
+  opacity: 0.68;
+}
+.task-status-stripe {
+  border-radius: 999px;
+  background: var(--state-done-bg);
+}
+.task-status-stripe.state-running { background: var(--accent); }
+.task-status-stripe.state-waiting { background: var(--warn); }
+.task-status-stripe.state-error { background: var(--danger); }
+.task-feed-main {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+}
+.task-feed-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.task-feed-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: var(--font-size-body);
+  font-weight: 700;
+}
+.task-feed-meta,
+.task-feed-tail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+}
+.task-feed-tail {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+}
+.task-feed-tail.urgent {
+  color: var(--warn);
+}
+.task-feed-sep {
+  opacity: 0.56;
+}
+.task-tool-pill,
+.task-model-pill,
+.task-feed-metric {
+  min-height: var(--badge-height);
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--shell-border);
+  background: color-mix(in srgb, var(--control-surface-muted) 84%, transparent);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--text);
+  font-size: var(--font-size-3xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.task-tool-pill.accent-claude { border-color: color-mix(in srgb, var(--claude-accent) 42%, var(--shell-border)); color: var(--claude-accent); }
+.task-tool-pill.accent-codex { border-color: color-mix(in srgb, var(--codex-accent) 42%, var(--shell-border)); color: var(--codex-accent); }
+.task-tool-pill.accent-openclaw { border-color: color-mix(in srgb, var(--openclaw-accent) 42%, var(--shell-border)); color: var(--openclaw-accent); }
+.task-tool-pill.accent-hermes { border-color: color-mix(in srgb, var(--hermes-accent) 42%, var(--shell-border)); color: var(--hermes-accent); }
+.task-model-pill {
+  color: var(--muted);
+}
+.task-feed-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  align-content: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 180px;
+}
+.task-feed-metric {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.task-feed-empty {
+  margin: 14px;
+}
+.monitor-rail {
+  align-self: start;
+  display: grid;
+  gap: 0;
+}
+.monitor-rail-section + .monitor-rail-section {
+  border-top: 1px solid var(--shell-border);
+}
+.monitor-issue-list,
+.monitor-cron-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.monitor-issue-item,
+.monitor-cron-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--shell-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 22%, transparent);
+}
+.monitor-issue-item.warn {
+  border-color: color-mix(in srgb, var(--warn) 38%, var(--shell-border));
+}
+.monitor-issue-item.error {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--shell-border));
+}
+.monitor-issue-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.monitor-issue-title strong,
+.monitor-cron-item strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: var(--font-size-xs);
+}
+.monitor-issue-item span,
+.monitor-cron-item span {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.monitor-cron-time {
+  font-family: var(--font-mono);
+}
+
 /* Mobile source tabs - hidden on desktop */
 .mobile-source-tabs { display: none; }
 .mobile-source-tab {
@@ -4090,6 +4333,32 @@ input, textarea, select { font: inherit; }
     background: color-mix(in srgb, var(--shell-glass-strong) 84%, transparent);
   }
   .source-columns-mobile { display: flex; }
+  .task-feed-layout,
+  .task-feed-layout.has-rail {
+    grid-template-columns: 1fr;
+  }
+  .task-feed-row {
+    grid-template-columns: 8px minmax(0, 1fr);
+  }
+  .task-feed-metrics {
+    grid-column: 2;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+  .task-feed-title {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .monitor-filter-bar {
+    flex-wrap: wrap;
+  }
+  .monitor-filter-chips,
+  .monitor-filter-tool,
+  .monitor-filter-search {
+    flex: 1 1 100%;
+  }
   .monitor-board-panel,
   .page-section,
   .settings-section {
@@ -5600,6 +5869,20 @@ input, textarea, select { font: inherit; }
   border-color: var(--accent);
   color: var(--accent-fg, white);
 }
+.monitor-filter-tool {
+  flex: 0 1 220px;
+  min-width: 160px;
+  padding: 6px 32px 6px 10px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 17px) 14px / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 12px) 14px / 6px 6px no-repeat,
+    var(--surface, transparent);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  appearance: none;
+}
 .monitor-filter-search {
   flex: 1;
   padding: 6px 10px;
@@ -5611,6 +5894,10 @@ input, textarea, select { font: inherit; }
   min-width: 180px;
 }
 .monitor-filter-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.monitor-filter-tool:focus {
   outline: none;
   border-color: var(--accent);
 }

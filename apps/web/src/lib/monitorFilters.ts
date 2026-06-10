@@ -1,5 +1,6 @@
+import { sourceLabels } from './constants'
 import type { RunRecord } from './types'
-import type { MonitorQuickFilter } from '../store/monitorStore'
+import type { MonitorQuickFilter, MonitorToolFilter } from '../store/monitorStore'
 
 const attentionStates = new Set([
   'waitingApproval',
@@ -30,6 +31,8 @@ export function runMatchesSearch(run: RunRecord, searchRaw: string): boolean {
     run.lastQuestion ?? '',
     run.firstQuestion ?? '',
     run.lastAction ?? '',
+    sourceLabels[run.tool] ?? run.tool,
+    run.tool,
     run.id,
   ]
     .join(' ')
@@ -37,13 +40,20 @@ export function runMatchesSearch(run: RunRecord, searchRaw: string): boolean {
   return haystack.includes(query)
 }
 
+export function runMatchesToolFilter(run: RunRecord, tool: MonitorToolFilter): boolean {
+  return tool === 'all' || run.tool === tool
+}
+
 export function applyMonitorFilters(
   runs: RunRecord[],
   filter: MonitorQuickFilter,
+  tool: MonitorToolFilter,
   search: string,
 ): RunRecord[] {
-  if (filter === 'all' && search.trim() === '') return runs
+  if (filter === 'all' && tool === 'all' && search.trim() === '') return runs
   return runs.filter(
-    (run) => runMatchesQuickFilter(run, filter) && runMatchesSearch(run, search),
+    (run) => runMatchesQuickFilter(run, filter)
+      && runMatchesToolFilter(run, tool)
+      && runMatchesSearch(run, search),
   )
 }

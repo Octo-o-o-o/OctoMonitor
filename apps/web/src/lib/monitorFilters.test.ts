@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyMonitorFilters, runMatchesQuickFilter, runMatchesSearch } from './monitorFilters'
+import { applyMonitorFilters, runMatchesQuickFilter, runMatchesSearch, runMatchesToolFilter } from './monitorFilters'
 import type { RunRecord } from './types'
 
 function makeRun(overrides: Partial<RunRecord>): RunRecord {
@@ -100,6 +100,10 @@ describe('runMatchesSearch', () => {
     expect(runMatchesSearch(run, 'unrelated')).toBe(false)
   })
 
+  it('matches on tool label', () => {
+    expect(runMatchesSearch(makeRun({ tool: 'claude' }), 'claude code')).toBe(true)
+  })
+
   it('matches on run id prefix', () => {
     const run = makeRun({ id: 'codex-session-abcdef' })
     expect(runMatchesSearch(run, 'abcdef')).toBe(true)
@@ -111,20 +115,29 @@ describe('runMatchesSearch', () => {
   })
 })
 
+describe('runMatchesToolFilter', () => {
+  it('matches all or the exact tool only', () => {
+    expect(runMatchesToolFilter(makeRun({ tool: 'codex' }), 'all')).toBe(true)
+    expect(runMatchesToolFilter(makeRun({ tool: 'codex' }), 'codex')).toBe(true)
+    expect(runMatchesToolFilter(makeRun({ tool: 'codex' }), 'claude')).toBe(false)
+  })
+})
+
 describe('applyMonitorFilters', () => {
   it('short-circuits when filter is all and search empty', () => {
     const runs = [makeRun({ id: 'a' }), makeRun({ id: 'b' })]
-    const out = applyMonitorFilters(runs, 'all', '')
+    const out = applyMonitorFilters(runs, 'all', 'all', '')
     expect(out).toBe(runs) // same reference, no allocation
   })
 
-  it('applies both quick filter and search', () => {
+  it('applies quick, tool, and search filters', () => {
     const runs = [
-      makeRun({ id: 'a', state: 'active', projectName: 'alpha' }),
+      makeRun({ id: 'a', state: 'active', projectName: 'alpha', tool: 'codex' }),
       makeRun({ id: 'b', state: 'active', projectName: 'beta' }),
-      makeRun({ id: 'c', state: 'idle', projectName: 'alpha-other' }),
+      makeRun({ id: 'c', state: 'idle', projectName: 'alpha-other', tool: 'codex' }),
+      makeRun({ id: 'd', state: 'active', projectName: 'alpha', tool: 'claude' }),
     ]
-    const out = applyMonitorFilters(runs, 'active', 'alpha')
+    const out = applyMonitorFilters(runs, 'active', 'codex', 'alpha')
     expect(out.map((r) => r.id)).toEqual(['a'])
   })
 })

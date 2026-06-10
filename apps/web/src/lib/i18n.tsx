@@ -38,6 +38,16 @@ const en = {
   'monitor.offlineTitle': 'Live connection lost',
   'monitor.offlineHint': 'Showing the latest local snapshot. Live updates resume automatically after reconnect.',
   'monitor.capabilitiesShort': 'caps',
+  'monitor.taskFeed': 'Task Feed',
+  'monitor.taskCount': 'tasks',
+  'monitor.section.attention': 'Needs action',
+  'monitor.section.active': 'Running',
+  'monitor.section.error': 'Issues',
+  'monitor.section.done': 'Recently done',
+  'monitor.rail.label': 'Monitor attention panel',
+  'monitor.rail.issues': 'Source issues',
+  'monitor.issue.offline': 'offline',
+  'monitor.issue.warning': 'warning',
 
   // attention
   'attention.required': 'ATTENTION REQUIRED',
@@ -357,6 +367,8 @@ const en = {
   'monitorFilter.all': 'All',
   'monitorFilter.attention': 'Attention',
   'monitorFilter.active': 'Active',
+  'monitorFilter.tool': 'Tool',
+  'monitorFilter.allTools': 'All tools',
   'monitorFilter.searchPlaceholder': 'Search project / workspace / question…',
 
   // unit
@@ -485,6 +497,16 @@ const zh: Record<I18nKey, string> = {
   'monitor.offlineTitle': '\u5B9E\u65F6\u8FDE\u63A5\u5DF2\u65AD\u5F00',
   'monitor.offlineHint': '\u5F53\u524D\u663E\u793A\u7684\u662F\u6700\u65B0\u672C\u5730\u5FEB\u7167\uFF0C\u91CD\u8FDE\u540E\u4F1A\u81EA\u52A8\u6062\u590D\u5B9E\u65F6\u66F4\u65B0\u3002',
   'monitor.capabilitiesShort': '\u80FD\u529B',
+  'monitor.taskFeed': '\u4EFB\u52A1\u6D41',
+  'monitor.taskCount': '\u4E2A\u4EFB\u52A1',
+  'monitor.section.attention': '\u9700\u8981\u5904\u7406',
+  'monitor.section.active': '\u8FD0\u884C\u4E2D',
+  'monitor.section.error': '\u5F02\u5E38',
+  'monitor.section.done': '\u6700\u8FD1\u5B8C\u6210',
+  'monitor.rail.label': '\u76D1\u63A7\u6CE8\u610F\u4E8B\u9879',
+  'monitor.rail.issues': '\u6765\u6E90\u95EE\u9898',
+  'monitor.issue.offline': '\u79BB\u7EBF',
+  'monitor.issue.warning': '\u544A\u8B66',
 
   'attention.required': '\u9700\u8981\u6CE8\u610F',
   'attention.permission': '\u9700\u8981\u6279\u51C6',
@@ -793,6 +815,8 @@ const zh: Record<I18nKey, string> = {
   'monitorFilter.all': '全部',
   'monitorFilter.attention': '需关注',
   'monitorFilter.active': '运行中',
+  'monitorFilter.tool': '工具',
+  'monitorFilter.allTools': '全部工具',
   'monitorFilter.searchPlaceholder': '搜索项目 / 工作区 / 提问…',
 
   'unit.tok': 'tok',

@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OctoMonitor Task-first Monitor Demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d10;
+      --panel: #15181d;
+      --panel-2: #1b1f26;
+      --panel-3: #222730;
+      --border: #343b46;
+      --border-strong: #4a5360;
+      --text: #eef2f5;
+      --muted: #99a3ad;
+      --soft: #6e7884;
+      --green: #50d19a;
+      --cyan: #58c7e8;
+      --amber: #f1bd55;
+      --red: #ef7b8f;
+      --blue: #83aaff;
+      --violet: #b896ff;
+      --orange: #f59f60;
+      --radius: 8px;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+      border: 0;
+      background: none;
+      cursor: pointer;
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 22px;
+    }
+
+    .shell {
+      min-height: calc(100vh - 44px);
+      border: 1px solid var(--border);
+      background: #101215;
+      box-shadow: var(--shadow);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(320px, auto) 1fr auto;
+      gap: 14px;
+      align-items: center;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: #151719;
+    }
+
+    .connection {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .live-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(80, 209, 154, 0.14);
+    }
+
+    .connection strong {
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .connection span {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .nav {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      min-width: 0;
+    }
+
+    .nav button,
+    .seg button,
+    .tool-select,
+    .icon-btn {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--muted);
+      min-height: 34px;
+      border-radius: 999px;
+      padding: 0 13px;
+      transition: 0.14s ease;
+    }
+
+    .nav button.active,
+    .seg button.active,
+    .icon-btn.active {
+      color: var(--text);
+      border-color: var(--border-strong);
+      background: #2a3038;
+    }
+
+    .top-metrics {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .metric-pill {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      min-height: 34px;
+      padding: 0 11px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      background: #181b20;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-pill strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .notice {
+      margin: 18px;
+      border: 1px solid rgba(241, 189, 85, 0.32);
+      background: rgba(241, 189, 85, 0.09);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #eadfc7;
+    }
+
+    .notice strong {
+      white-space: nowrap;
+      color: var(--amber);
+    }
+
+    .view {
+      display: none;
+      padding: 0 18px 18px;
+    }
+
+    .view.active {
+      display: block;
+    }
+
+    .filter-bar {
+      display: grid;
+      grid-template-columns: minmax(220px, auto) minmax(170px, 230px) minmax(240px, 1fr);
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--border);
+      background: #14171b;
+      border-radius: var(--radius);
+      margin-bottom: 14px;
+    }
+
+    .seg {
+      display: flex;
+      gap: 6px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .seg button {
+      min-width: 0;
+      padding: 0 11px;
+      white-space: nowrap;
+    }
+
+    .seg .attention.active {
+      border-color: rgba(241, 189, 85, 0.68);
+      color: var(--amber);
+    }
+
+    .seg .active-run.active {
+      border-color: rgba(80, 209, 154, 0.68);
+      color: var(--green);
+    }
+
+    .tool-select {
+      width: 100%;
+      appearance: none;
+      color: var(--text);
+      padding-right: 32px;
+      background:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 17px) 14px / 6px 6px no-repeat,
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 12px) 14px / 6px 6px no-repeat,
+        var(--panel-2);
+    }
+
+    .search {
+      min-width: 0;
+      width: 100%;
+      min-height: 34px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #0f1114;
+      color: var(--text);
+      padding: 0 13px;
+      outline: none;
+    }
+
+    .search:focus,
+    .tool-select:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 3px rgba(88, 199, 232, 0.16);
+    }
+
+    .monitor-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .board,
+    .rail,
+    .usage-panel,
+    .settings-panel,
+    .drawer-card {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: var(--radius);
+    }
+
+    .board {
+      overflow: hidden;
+    }
+
+    .board-head,
+    .rail-head,
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--border);
+      background: #181b20;
+    }
+
+    .board-head h2,
+    .rail-head h2,
+    .panel-head h2 {
+      margin: 0;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    .board-head span,
+    .panel-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .task-section {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .task-section:last-child {
+      border-bottom: 0;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      font-weight: 700;
+      background: #121418;
+    }
+
+    .section-title strong {
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .task-list {
+      display: grid;
+    }
+
+    .task-row {
+      display: grid;
+      grid-template-columns: 10px minmax(0, 1fr) auto;
+      gap: 13px;
+      align-items: stretch;
+      padding: 13px 14px;
+      border-top: 1px solid var(--border);
+      text-align: left;
+      width: 100%;
+      background: transparent;
+    }
+
+    .task-row:hover {
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .task-row:first-child {
+      border-top: 0;
+    }
+
+    .status-stripe {
+      border-radius: 999px;
+      background: var(--soft);
+    }
+
+    .status-attention .status-stripe { background: var(--amber); }
+    .status-active .status-stripe { background: var(--green); }
+    .status-done .status-stripe { background: var(--blue); }
+    .status-error .status-stripe { background: var(--red); }
+
+    .task-main {
+      min-width: 0;
+      display: grid;
+      gap: 7px;
+    }
+
+    .task-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .task-title strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 15px;
+    }
+
+    .task-meta,
+    .task-tail,
+    .task-metrics {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      min-width: 0;
+      font-size: 12px;
+    }
+
+    .task-tail {
+      color: #bdc5ce;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+    }
+
+    .task-metrics {
+      justify-content: flex-end;
+      align-content: center;
+      min-width: 210px;
+    }
+
+    .badge,
+    .metric-small {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 999px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 100%;
+      white-space: nowrap;
+    }
+
+    .tool-badge {
+      color: var(--text);
+    }
+
+    .type-cli { border-color: rgba(88, 199, 232, 0.42); color: var(--cyan); }
+    .type-ide { border-color: rgba(184, 150, 255, 0.44); color: var(--violet); }
+    .type-orchestrator { border-color: rgba(131, 170, 255, 0.44); color: var(--blue); }
+    .type-passive { border-color: rgba(245, 159, 96, 0.44); color: var(--orange); }
+
+    .state-chip {
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .state-chip.attention { background: rgba(241, 189, 85, 0.14); color: var(--amber); }
+    .state-chip.active { background: rgba(80, 209, 154, 0.13); color: var(--green); }
+    .state-chip.done { background: rgba(131, 170, 255, 0.12); color: #a7bcff; }
+    .state-chip.error { background: rgba(239, 123, 143, 0.13); color: var(--red); }
+
+    .rail {
+      position: sticky;
+      top: 14px;
+      overflow: hidden;
+    }
+
+    .rail-body {
+      padding: 12px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .source-summary {
+      display: grid;
+      gap: 8px;
+    }
+
+    .source-row {
+      display: grid;
+      grid-template-columns: 8px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: center;
+      padding: 9px;
+      background: #111419;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .health-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--soft);
+    }
+
+    .health-dot.live { background: var(--green); }
+    .health-dot.warn { background: var(--amber); }
+    .health-dot.passive { background: var(--orange); }
+    .health-dot.offline { background: var(--red); }
+
+    .source-main {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+
+    .source-main strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+
+    .source-main span,
+    .source-count {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .attention-list,
+    .source-compact-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .attention-row {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #111419;
+    }
+
+    .attention-row.warn { border-color: rgba(241, 189, 85, 0.34); }
+    .attention-row.error { border-color: rgba(239, 123, 143, 0.34); }
+
+    .attention-row strong {
+      font-size: 12px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .attention-row span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .rail-section {
+      display: grid;
+      gap: 8px;
+    }
+
+    .rail-section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .bar {
+      height: 8px;
+      background: #101216;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--green);
+    }
+
+    .usage-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .usage-panel {
+      overflow: hidden;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat-card {
+      background: #111419;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 11px;
+      min-width: 0;
+    }
+
+    .stat-card span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .stat-card strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 18px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .usage-list {
+      display: grid;
+    }
+
+    .usage-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 120px 96px;
+      gap: 14px;
+      align-items: center;
+      padding: 12px 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .usage-row:first-child {
+      border-top: 0;
+    }
+
+    .usage-name {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+    }
+
+    .usage-name strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .usage-name span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .settings-panel {
+      overflow: hidden;
+    }
+
+    .settings-tools {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .tool-card {
+      border: 1px solid var(--border);
+      background: #111419;
+      border-radius: var(--radius);
+      padding: 11px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .tool-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .tool-card-top strong {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .switch-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .switch {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #191d23;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .switch.on {
+      border-color: rgba(80, 209, 154, 0.48);
+      color: var(--green);
+    }
+
+    .drawer-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 420px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .drawer-card {
+      overflow: hidden;
+    }
+
+    .drawer-body {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .drawer-title {
+      display: grid;
+      gap: 7px;
+    }
+
+    .drawer-title h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .drawer-title span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .drawer-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .drawer-cell {
+      background: #111419;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .drawer-cell span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .drawer-cell strong {
+      overflow-wrap: anywhere;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 9px;
+    }
+
+    .timeline-item {
+      border-left: 2px solid var(--border-strong);
+      padding-left: 10px;
+      display: grid;
+      gap: 3px;
+    }
+
+    .timeline-item strong {
+      font-size: 13px;
+    }
+
+    .timeline-item span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .empty {
+      padding: 28px;
+      text-align: center;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+
+    .muted { color: var(--muted); }
+    .nowrap { white-space: nowrap; }
+
+    @media (max-width: 1180px) {
+      .topbar,
+      .filter-bar,
+      .monitor-grid,
+      .usage-layout,
+      .drawer-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .top-metrics,
+      .nav {
+        justify-content: flex-start;
+      }
+
+      .rail {
+        position: static;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .app { padding: 10px; }
+      .shell { min-height: calc(100vh - 20px); border-radius: 10px; }
+      .notice { margin: 12px; align-items: flex-start; flex-direction: column; gap: 5px; }
+      .view { padding: 0 12px 12px; }
+      .topbar { padding: 12px; }
+      .nav { overflow-x: auto; justify-content: flex-start; padding-bottom: 2px; }
+      .filter-bar { padding: 8px; }
+      .task-row {
+        grid-template-columns: 8px minmax(0, 1fr);
+      }
+      .task-metrics {
+        grid-column: 2;
+        justify-content: flex-start;
+        min-width: 0;
+      }
+      .task-title strong {
+        white-space: normal;
+      }
+      .stat-grid,
+      .drawer-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+      .usage-row {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="shell">
+      <header class="topbar">
+        <div class="connection">
+          <span class="live-dot" aria-hidden="true"></span>
+          <strong>OctoMonitor</strong>
+          <span>本地实时监控 · 任务优先布局 Demo</span>
+        </div>
+        <nav class="nav" aria-label="Demo views">
+          <button type="button" class="active" data-view-tab="monitor">监控</button>
+          <button type="button" data-view-tab="usage">用量</button>
+          <button type="button" data-view-tab="settings">设置</button>
+          <button type="button" data-view-tab="drawer">详情</button>
+        </nav>
+        <div class="top-metrics">
+          <span class="metric-pill">活跃 <strong id="topActive">0</strong></span>
+          <span class="metric-pill">待批准 <strong id="topWaiting">0</strong></span>
+          <span class="metric-pill">已完成 <strong id="topDone">0</strong></span>
+          <span class="metric-pill">USD <strong>$748.73</strong></span>
+        </div>
+      </header>
+
+      <div class="notice">
+        <strong>需要注意</strong>
+        <span>主看板只回答“现在要看哪些任务”。工具和类型作为识别与缩小范围的辅助信息，不再占用主布局。</span>
+      </div>
+
+      <section id="monitorView" class="view active">
+        <div class="filter-bar" role="toolbar" aria-label="任务筛选">
+          <div class="seg" aria-label="范围">
+            <button type="button" class="active" data-scope="all">全部任务</button>
+            <button type="button" class="active-run" data-scope="current">当前任务</button>
+            <button type="button" class="attention" data-scope="attention">只看需处理</button>
+          </div>
+          <select id="toolFilter" class="tool-select" aria-label="工具">
+            <option value="all">全部工具</option>
+            <option value="claude">Claude Code</option>
+            <option value="codex">Codex</option>
+            <option value="openClaw">OpenClaw</option>
+            <option value="hermes">Hermes</option>
+            <option value="gemini">Gemini CLI</option>
+            <option value="cursor">Cursor Agent</option>
+            <option value="windsurf">Windsurf</option>
+          </select>
+          <input id="taskSearch" class="search" type="search" placeholder="搜索任务、项目、工具...">
+        </div>
+
+        <div class="monitor-grid">
+          <article class="board">
+            <div class="board-head">
+              <h2>任务流</h2>
+              <span id="taskCountLabel">0 个任务</span>
+            </div>
+            <div id="taskSections"></div>
+          </article>
+
+          <aside class="rail" aria-label="系统注意事项">
+            <div class="rail-head">
+              <h2>注意事项</h2>
+              <span class="badge">只显示异常</span>
+            </div>
+            <div class="rail-body">
+              <div class="rail-section">
+                <div class="rail-section-title">
+                  <span>来源问题</span>
+                  <span>2</span>
+                </div>
+                <div class="attention-list">
+                  <div class="attention-row warn">
+                    <strong>Hermes gateway 状态不一致</strong>
+                    <span>默认 profile 停止，但 ops profile 仍在运行。</span>
+                  </div>
+                  <div class="attention-row error">
+                    <strong>Amp 未找到本地配置</strong>
+                    <span>保留在设置页，不出现在默认任务流。</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="usageView" class="view">
+        <div class="filter-bar" role="toolbar" aria-label="用量筛选">
+          <div class="seg" aria-label="维度">
+            <button type="button" class="active">按项目</button>
+            <button type="button">按任务</button>
+          </div>
+          <select class="tool-select" aria-label="工具">
+            <option>全部工具</option>
+            <option>Codex</option>
+            <option>Claude Code</option>
+            <option>OpenClaw</option>
+            <option>Hermes</option>
+          </select>
+          <input class="search" type="search" placeholder="搜索项目、任务、工具...">
+        </div>
+
+        <div class="usage-layout">
+          <article class="usage-panel">
+            <div class="panel-head">
+              <h2>用量明细</h2>
+              <span>默认按任务/项目排序，工具作为可筛选属性</span>
+            </div>
+            <div class="stat-grid">
+              <div class="stat-card"><span>Tokens</span><strong>1,056.1M</strong></div>
+              <div class="stat-card"><span>Cost</span><strong>$748.73</strong></div>
+              <div class="stat-card"><span>Inputs</span><strong>3,284</strong></div>
+              <div class="stat-card"><span>Items</span><strong>86</strong></div>
+            </div>
+            <div class="usage-list">
+              <div class="usage-row">
+                <div class="usage-name">
+                  <strong>OctoMonitor · Inspect drawer timeline</strong>
+                  <span>Codex · 4 sessions</span>
+                </div>
+                <span class="bar"><span style="width: 100%; background: var(--green);"></span></span>
+                <strong class="nowrap">248.4M</strong>
+              </div>
+              <div class="usage-row">
+                <div class="usage-name">
+                  <strong>Hermes scheduler probe</strong>
+                  <span>Hermes · 7 sessions</span>
+                </div>
+                <span class="bar"><span style="width: 62%; background: var(--blue);"></span></span>
+                <strong class="nowrap">154.2M</strong>
+              </div>
+              <div class="usage-row">
+                <div class="usage-name">
+                  <strong>Passive source integration sweep</strong>
+                  <span>Amazon Q, Aider, Windsurf</span>
+                </div>
+                <span class="bar"><span style="width: 38%; background: var(--orange);"></span></span>
+                <strong class="nowrap">92.7M</strong>
+              </div>
+            </div>
+          </article>
+
+          <aside class="rail">
+            <div class="rail-head">
+              <h2>来源汇总</h2>
+              <span class="badge">二级视图</span>
+            </div>
+            <div class="rail-body">
+              <div class="source-row">
+                <span class="health-dot live"></span>
+                <span class="source-main"><strong>Codex</strong><span>248.4M tokens · $182.40</span></span>
+                <span class="source-count">23%</span>
+              </div>
+              <div class="source-row">
+                <span class="health-dot warn"></span>
+                <span class="source-main"><strong>Claude Code</strong><span>210.8M tokens · $168.03</span></span>
+                <span class="source-count">20%</span>
+              </div>
+              <div class="source-row">
+                <span class="health-dot passive"></span>
+                <span class="source-main"><strong>Windsurf</strong><span>0 tokens · read-only</span></span>
+                <span class="source-count">0%</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="settingsView" class="view">
+        <div class="filter-bar" role="toolbar" aria-label="设置筛选">
+          <div class="seg" aria-label="设置范围">
+            <button type="button" class="active">全部来源</button>
+            <button type="button">有问题</button>
+            <button type="button">已隐藏</button>
+          </div>
+          <select class="tool-select" aria-label="工具">
+            <option>全部工具</option>
+            <option>Codex</option>
+            <option>Claude Code</option>
+            <option>OpenClaw</option>
+            <option>Hermes</option>
+          </select>
+          <input class="search" type="search" placeholder="搜索工具、来源、路径...">
+        </div>
+
+        <article class="settings-panel">
+          <div class="panel-head">
+            <h2>来源控制</h2>
+            <span>设置页保留按具体工具管理，避免长列表失控</span>
+          </div>
+          <div class="settings-tools">
+            <div class="tool-card">
+              <div class="tool-card-top"><strong>Codex</strong></div>
+              <div class="switch-row"><span class="switch on">扫描开启</span><span class="switch on">看板显示</span><span class="switch on">Hook ready</span></div>
+              <span class="muted">source: jsonl + app-server · confidence official</span>
+            </div>
+            <div class="tool-card">
+              <div class="tool-card-top"><strong>OpenClaw</strong></div>
+              <div class="switch-row"><span class="switch on">扫描开启</span><span class="switch on">看板显示</span><span class="switch">Gateway warning</span></div>
+              <span class="muted">source: rpc + status probe · 3 scheduled jobs</span>
+            </div>
+            <div class="tool-card">
+              <div class="tool-card-top"><strong>Amazon Q</strong></div>
+              <div class="switch-row"><span class="switch on">扫描开启</span><span class="switch">默认折叠</span><span class="switch">无操作能力</span></div>
+              <span class="muted">Read-only passive source probe · no tokens source</span>
+            </div>
+            <div class="tool-card">
+              <div class="tool-card-top"><strong>Cursor Agent</strong></div>
+              <div class="switch-row"><span class="switch on">扫描开启</span><span class="switch on">看板显示</span><span class="switch">metadata only</span></div>
+              <span class="muted">source: workspace metadata · privacy note enabled</span>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="drawerView" class="view">
+        <div class="drawer-layout">
+          <article class="board">
+            <div class="board-head">
+              <h2>上下文任务</h2>
+              <span>详情抽屉从任务行进入，保持工具标签一致</span>
+            </div>
+            <div id="drawerTaskList" class="task-list"></div>
+          </article>
+
+          <aside class="drawer-card">
+            <div class="panel-head">
+              <h2>任务详情</h2>
+              <span class="badge state-chip active">运行中</span>
+            </div>
+            <div class="drawer-body">
+              <div class="drawer-title">
+                <h2>实现 task-first Monitor layout</h2>
+                <span>OctoMonitor · apps/web/src/components/monitor/MonitorView.tsx</span>
+                <div class="task-meta">
+                  <span class="badge tool-badge">Codex</span>
+                  <span class="badge">live · hot</span>
+                </div>
+              </div>
+              <div class="drawer-grid">
+                <div class="drawer-cell"><span>模型</span><strong>gpt-5-codex</strong></div>
+                <div class="drawer-cell"><span>耗时</span><strong>1h 14m</strong></div>
+                <div class="drawer-cell"><span>Tokens</span><strong>84.2M</strong></div>
+                <div class="drawer-cell"><span>Cost</span><strong>$42.18</strong></div>
+              </div>
+              <div class="timeline">
+                <div class="timeline-item">
+                  <strong>Tool call · shell</strong>
+                  <span>rg source-columns, SourceColumn, buildVisibleRunsBySource</span>
+                </div>
+                <div class="timeline-item">
+                  <strong>Reasoning</strong>
+                  <span>工具数量不应再决定主布局宽度，任务状态和最近活动应优先。</span>
+                </div>
+                <div class="timeline-item">
+                  <strong>Next action</strong>
+                  <span>拆分 TaskFeed、SourceFilter、SourceHealthRail，并更新键盘导航顺序。</span>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const tools = [
+      { id: 'claude', name: 'Claude Code', type: 'cli', health: 'warn', mode: 'statusline + jsonl', count: 4 },
+      { id: 'codex', name: 'Codex', type: 'cli', health: 'live', mode: 'jsonl + events', count: 8 },
+      { id: 'openClaw', name: 'OpenClaw', type: 'orchestrator', health: 'live', mode: 'gateway + rpc', count: 5 },
+      { id: 'hermes', name: 'Hermes', type: 'orchestrator', health: 'warn', mode: 'sessions + cron', count: 3 },
+      { id: 'gemini', name: 'Gemini CLI', type: 'cli', health: 'live', mode: 'passive scan', count: 2 },
+      { id: 'qwen', name: 'Qwen Code', type: 'cli', health: 'live', mode: 'passive scan', count: 1 },
+      { id: 'cursor', name: 'Cursor Agent', type: 'ide', health: 'passive', mode: 'metadata only', count: 3 },
+      { id: 'cline', name: 'Cline', type: 'ide', health: 'passive', mode: 'metadata only', count: 1 },
+      { id: 'windsurf', name: 'Windsurf', type: 'ide', health: 'passive', mode: 'read-only probe', count: 1 },
+      { id: 'amazonQ', name: 'Amazon Q', type: 'passive', health: 'passive', mode: 'read-only probe', count: 0 },
+      { id: 'aider', name: 'Aider', type: 'passive', health: 'passive', mode: 'read-only probe', count: 0 },
+      { id: 'codebuff', name: 'Codebuff', type: 'passive', health: 'passive', mode: 'read-only probe', count: 0 },
+      { id: 'amp', name: 'Amp', type: 'passive', health: 'offline', mode: 'not found', count: 0 },
+    ];
+
+    const stateLabels = {
+      attention: '需关注',
+      active: '运行中',
+      done: '已完成',
+      error: '异常',
+    };
+
+    const tasks = [
+      { id: 't1', status: 'attention', tool: 'claude', title: '审批 bash: cargo test --workspace', project: 'OctoMonitor', workspace: '~/WorkSpace/OctoMonitor', tail: '等待用户批准执行测试命令', duration: '36m', updated: '2m', tokens: '24.8M', cost: '$16.42' },
+      { id: 't2', status: 'attention', tool: 'openClaw', title: 'Hermes adapter gateway health mismatch', project: 'agent-control-plane', workspace: '~/WorkSpace/OctoMonitor', tail: 'gateway running, rpc stale. 需要检查默认 profile', duration: '1h 08m', updated: '5m', tokens: '42.1M', cost: '$21.72' },
+      { id: 't3', status: 'active', tool: 'codex', title: '实现 task-first Monitor layout', project: 'OctoMonitor', workspace: 'apps/web', tail: '正在拆分 TaskFeed、SourceHealthRail、SourceFilterBar', duration: '1h 14m', updated: 'now', tokens: '84.2M', cost: '$42.18' },
+      { id: 't4', status: 'active', tool: 'gemini', title: 'Review responsive density for narrow dashboard', project: 'OctoMonitor', workspace: 'apps/web/src/styles.css', tail: '正在检查 768px 以下的工具筛选和任务行换行', duration: '18m', updated: '1m', tokens: '8.9M', cost: '$3.12' },
+      { id: 't5', status: 'active', tool: 'hermes', title: 'Nightly source probe verification', project: 'local agents', workspace: 'default profile', tail: '3 个 cron 即将运行，下一次 23:30', duration: '9m', updated: '3m', tokens: '0', cost: '$0.00' },
+      { id: 't6', status: 'done', tool: 'codex', title: 'Codex event timeline fallback behavior', project: 'OctoMonitor', workspace: 'InspectDrawer.tsx', tail: '已完成，详情抽屉可显示 structured JSONL events', duration: '42m', updated: '12m', tokens: '31.6M', cost: '$12.88' },
+      { id: 't7', status: 'done', tool: 'cursor', title: 'Workspace metadata privacy audit', project: 'source-controls', workspace: '~/Library/Application Support/Cursor', tail: 'metadata only, no raw prompts rendered', duration: '17m', updated: '24m', tokens: '2.4M', cost: '$0.00' },
+      { id: 't8', status: 'done', tool: 'qwen', title: 'Usage history date range smoke test', project: 'OctoMonitor', workspace: 'lib/history.ts', tail: 'history mode loaded, no truncation warning', duration: '26m', updated: '41m', tokens: '9.2M', cost: '$2.31' },
+      { id: 't9', status: 'done', tool: 'windsurf', title: 'Read-only passive source probe', project: 'integration support', workspace: 'detector', tail: '仅检测安装和最近活动，不显示为主列', duration: '3m', updated: '1h', tokens: '0', cost: '$0.00' },
+      { id: 't10', status: 'error', tool: 'amp', title: 'Amp probe target missing', project: 'integration support', workspace: 'detector', tail: '未发现本地配置，保留在来源健康列表', duration: '1m', updated: '1h', tokens: '0', cost: '$0.00' },
+    ];
+
+    const filters = {
+      scope: 'all',
+      tool: 'all',
+      search: '',
+    };
+
+    const byId = (id) => document.getElementById(id);
+    const toolMap = new Map(tools.map((tool) => [tool.id, tool]));
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function typeClass(type) {
+      return `type-${type}`;
+    }
+
+    function filteredTasks() {
+      const query = filters.search.trim().toLowerCase();
+      return tasks.filter((task) => {
+        const tool = toolMap.get(task.tool);
+        if (!tool) return false;
+        if (filters.scope === 'current' && !['attention', 'active', 'error'].includes(task.status)) return false;
+        if (filters.scope === 'attention' && !['attention', 'error'].includes(task.status)) return false;
+        if (filters.tool !== 'all' && task.tool !== filters.tool) return false;
+        if (!query) return true;
+        return [task.title, task.project, task.workspace, task.tail, tool.name]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      });
+    }
+
+    function taskRow(task) {
+      const tool = toolMap.get(task.tool);
+      const statusClass = task.status === 'error' ? 'status-error' : `status-${task.status}`;
+      return `
+        <button type="button" class="task-row ${statusClass}" data-task-id="${escapeHtml(task.id)}">
+          <span class="status-stripe" aria-hidden="true"></span>
+          <span class="task-main">
+            <span class="task-title">
+              <span class="badge state-chip ${task.status}">${stateLabels[task.status]}</span>
+              <strong>${escapeHtml(task.title)}</strong>
+            </span>
+            <span class="task-meta">
+              <span>${escapeHtml(task.project)}</span>
+              <span>·</span>
+              <span>${escapeHtml(task.workspace)}</span>
+              <span class="badge tool-badge">${escapeHtml(tool.name)}</span>
+            </span>
+            <span class="task-tail">${escapeHtml(task.tail)}</span>
+          </span>
+          <span class="task-metrics">
+            <span class="metric-small">${escapeHtml(task.updated)}</span>
+            <span class="metric-small">${escapeHtml(task.duration)}</span>
+            <span class="metric-small">${escapeHtml(task.tokens)} tok</span>
+          </span>
+        </button>
+      `;
+    }
+
+    function renderTaskSections() {
+      const visible = filteredTasks();
+      const groups = [
+        ['attention', '需要处理'],
+        ['active', '运行中'],
+        ['error', '异常'],
+        ['done', '最近完成'],
+      ];
+      byId('taskCountLabel').textContent = `${visible.length} 个任务`;
+      byId('topActive').textContent = tasks.filter((task) => task.status === 'active').length;
+      byId('topWaiting').textContent = tasks.filter((task) => task.status === 'attention').length;
+      byId('topDone').textContent = tasks.filter((task) => task.status === 'done').length;
+
+      const html = groups.map(([status, label]) => {
+        const items = visible.filter((task) => task.status === status);
+        if (items.length === 0) return '';
+        return `
+          <section class="task-section">
+            <div class="section-title">
+              <span>${label}</span>
+              <strong>${items.length}</strong>
+            </div>
+            <div class="task-list">${items.map(taskRow).join('')}</div>
+          </section>
+        `;
+      }).join('');
+      byId('taskSections').innerHTML = html || '<div class="empty">没有匹配的任务</div>';
+      byId('drawerTaskList').innerHTML = filteredTasks().slice(0, 5).map(taskRow).join('') || '<div class="empty">没有匹配的任务</div>';
+    }
+
+    function bindFilters() {
+      document.querySelectorAll('[data-scope]').forEach((button) => {
+        button.addEventListener('click', () => {
+          filters.scope = button.dataset.scope;
+          document.querySelectorAll('[data-scope]').forEach((item) => item.classList.toggle('active', item === button));
+          renderTaskSections();
+        });
+      });
+
+      byId('toolFilter').addEventListener('change', (event) => {
+        filters.tool = event.target.value;
+        renderTaskSections();
+      });
+
+      byId('taskSearch').addEventListener('input', (event) => {
+        filters.search = event.target.value;
+        renderTaskSections();
+      });
+
+      document.querySelectorAll('[data-view-tab]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const view = button.dataset.viewTab;
+          document.querySelectorAll('[data-view-tab]').forEach((item) => item.classList.toggle('active', item === button));
+          document.querySelectorAll('.view').forEach((section) => section.classList.remove('active'));
+          byId(`${view}View`).classList.add('active');
+        });
+      });
+    }
+
+    renderTaskSections();
+    bindFilters();
+  </script>
+</body>
+</html>

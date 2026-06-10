@@ -129,7 +129,7 @@ describe('monitor visibility selectors', () => {
     })
   })
 
-  it('applies panel order and filtering to keyboard-visible run ids', () => {
+  it('applies filtering and task-feed order to keyboard-visible run ids', () => {
     const sessionsBySource = buildVisibleRunsBySource([
       createRun({
         id: 'codex-a',
@@ -163,9 +163,9 @@ describe('monitor visibility selectors', () => {
       { tool: 'claude', enabled: true },
     ])
 
-    expect(buildVisibleRunIds(sessionsBySource, visiblePanels, 'name')).toEqual([
-      'openclaw-a',
+    expect(buildVisibleRunIds(sessionsBySource, visiblePanels)).toEqual([
       'codex-a',
+      'openclaw-a',
     ])
   })
 })

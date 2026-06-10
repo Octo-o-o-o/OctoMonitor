@@ -1,17 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useMonitorStore, type AgentDisplayFormat } from '../../store/monitorStore'
-import { useI18n } from '../../lib/i18n'
+import { useI18n, type I18nKey } from '../../lib/i18n'
 import { stateLabelKeys } from '../../lib/i18nMaps'
-import { formatTokens, formatDuration, formatLastUpdated, formatAgentHandle, formatAgentTag, getGroupKey } from '../../lib/format'
-import { buildVisiblePanels, buildVisibleRunsBySource, monitorPeriodLongLabels, summarizeRunsByState } from '../../lib/monitor'
+import { formatTokens, formatDuration, formatLastUpdated, formatAgentHandle } from '../../lib/format'
+import {
+  buildVisiblePanels,
+  buildVisibleRunsBySource,
+  flattenVisibleRunsBySource,
+  getMonitorTaskSection,
+  type MonitorTaskSection,
+} from '../../lib/monitor'
 import { applyMonitorFilters } from '../../lib/monitorFilters'
-import { NARROW_LAYOUT_QUERY, useMediaQuery } from '../../lib/responsive'
 import { AttentionBanner } from './AttentionBanner'
 import { MonitorFilterBar } from './MonitorFilterBar'
 import { MonitorSkeleton } from './Skeleton'
 import type { AdapterHealth, PendingCron, RunRecord, ToolKind } from '../../lib/types'
 
-import { allTools, sourceLabelsUpper as sourceLabels } from '../../lib/constants'
+import { sourceLabels } from '../../lib/constants'
+
 const sourceAccents: Partial<Record<ToolKind, string>> = {
   claude: 'accent-claude',
   codex: 'accent-codex',
@@ -29,9 +35,17 @@ const stateStyles: Record<string, { badge: string; row: string }> = {
   gatewayOffline: { badge: 'state-error', row: 'state-error' },
   limitExceeded: { badge: 'state-error', row: 'state-error' },
   contextExceeded: { badge: 'state-error', row: 'state-error' },
+  cancelled: { badge: 'state-done', row: 'state-done' },
 }
 
 const defaultStateStyle = { badge: 'state-done', row: 'state-done' }
+
+const taskSections: Array<{ key: MonitorTaskSection; labelKey: I18nKey }> = [
+  { key: 'attention', labelKey: 'monitor.section.attention' },
+  { key: 'active', labelKey: 'monitor.section.active' },
+  { key: 'error', labelKey: 'monitor.section.error' },
+  { key: 'done', labelKey: 'monitor.section.done' },
+]
 
 function getSourceIndicator(health: AdapterHealth | undefined) {
   if (health?.gatewayStatus) {
@@ -46,67 +60,42 @@ function getSourceIndicator(health: AdapterHealth | undefined) {
   }
 }
 
-const tagPalette = [
-  { bg: 'var(--tag-violet-bg)', text: 'var(--tag-violet-text)' },
-  { bg: 'var(--tag-cyan-bg)', text: 'var(--tag-cyan-text)' },
-  { bg: 'var(--tag-rose-bg)', text: 'var(--tag-rose-text)' },
-  { bg: 'var(--tag-amber-bg)', text: 'var(--tag-amber-text)' },
-  { bg: 'var(--tag-emerald-bg)', text: 'var(--tag-emerald-text)' },
-  { bg: 'var(--tag-blue-bg)', text: 'var(--tag-blue-text)' },
-  { bg: 'var(--tag-fuchsia-bg)', text: 'var(--tag-fuchsia-text)' },
-  { bg: 'var(--tag-lime-bg)', text: 'var(--tag-lime-text)' },
-  { bg: 'var(--tag-orange-bg)', text: 'var(--tag-orange-text)' },
-  { bg: 'var(--tag-teal-bg)', text: 'var(--tag-teal-text)' },
-]
-
-function getTagColor(tag: string): { bg: string; text: string } {
-  let hash = 0
-  for (let i = 0; i < tag.length; i++) {
-    hash = ((hash << 5) - hash) + tag.charCodeAt(i)
-    hash = hash & hash
-  }
-  return tagPalette[Math.abs(hash) % tagPalette.length]
+function firstMeaningfulText(...values: Array<string | null | undefined>): string {
+  return values
+    .map((value) => value?.trim())
+    .find((value): value is string => Boolean(value))
+    ?? ''
 }
 
-function getStateCategory(state: string): 'active' | 'waiting' | 'done' {
-  if (state === 'active') return 'active'
-  if (state === 'waitingApproval') return 'waiting'
-  return 'done'
+function runTitle(run: RunRecord): string {
+  return firstMeaningfulText(
+    run.lastQuestion,
+    run.firstQuestion,
+    run.lastAction,
+    run.projectName,
+    sourceLabels[run.tool],
+  )
 }
 
-interface ProjectGroup {
-  key: string
-  runs: RunRecord[]
+function runWorkspaceLabel(run: RunRecord): string | undefined {
+  return firstMeaningfulText(run.workspaceShort, run.workspacePath) || undefined
 }
 
-function groupRunsByProject(runs: RunRecord[], agentDisplayFormat: AgentDisplayFormat): { active: ProjectGroup[]; waiting: ProjectGroup[]; done: ProjectGroup[] } {
-  const buckets: Record<'active' | 'waiting' | 'done', Map<string, RunRecord[]>> = {
-    active: new Map(),
-    waiting: new Map(),
-    done: new Map(),
-  }
-  for (const run of runs) {
-    const cat = getStateCategory(run.state)
-    const key = getGroupKey(run, agentDisplayFormat)
-    const list = buckets[cat].get(key)
-    if (list) list.push(run)
-    else buckets[cat].set(key, [run])
-  }
-  const toGroups = (m: Map<string, RunRecord[]>): ProjectGroup[] =>
-    Array.from(m.entries()).map(([key, runs]) => ({ key, runs }))
-  return { active: toGroups(buckets.active), waiting: toGroups(buckets.waiting), done: toGroups(buckets.done) }
-}
-
-function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRecord; onClick: () => void; focused?: boolean; hideTag?: boolean; hideBadge?: boolean }) {
-  const agentDisplayFormat = useMonitorStore((s) => s.settings.agentDisplayFormat)
+function TaskRow({
+  run,
+  focused,
+  onClick,
+}: {
+  run: RunRecord
+  focused?: boolean
+  onClick: () => void
+}) {
   const acknowledgedErrors = useMonitorStore((s) => s.acknowledgedErrors)
   const acknowledgeError = useMonitorStore((s) => s.acknowledgeError)
   const visitedRunIds = useMonitorStore((s) => s.visitedRunIds)
   const markRunVisited = useMonitorStore((s) => s.markRunVisited)
   const { t } = useI18n()
-  const tag = run.tool === 'openClaw'
-    ? formatAgentTag(run, agentDisplayFormat)
-    : run.workspaceShort
+
   const stateLabel = t(stateLabelKeys[run.state])
   const style = stateStyles[run.state] ?? defaultStateStyle
   const isError = style.row === 'state-error'
@@ -118,13 +107,8 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
   const isVisitedDone = supportsVisitedVisual && visitedRunIds.has(run.id)
   const isUnvisitedDone = supportsVisitedVisual && !isVisitedDone
   const rowClass = isAcknowledged ? 'state-error-ack' : style.row
-  const tagColor = getTagColor(tag)
+  const workspace = runWorkspaceLabel(run)
   const isWaiting = run.state === 'waitingApproval'
-
-  const originBadge = run.tool === 'openClaw' && run.originProvider && run.originProvider !== 'heartbeat'
-    ? run.originLabel ?? run.originProvider
-    : undefined
-  const capabilityCount = run.capabilities?.length ?? 0
 
   const handleClick = () => {
     if (isError && !isAcknowledged) {
@@ -136,118 +120,55 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
 
   return (
     <button
-      className={`session-row ${rowClass}${focused ? ' session-focused' : ''}${isVisitedDone ? ' is-visited' : ''}`}
+      className={`task-feed-row ${rowClass}${focused ? ' session-focused' : ''}${isVisitedDone ? ' is-visited' : ''}`}
       data-run-id={run.id}
       onClick={handleClick}
     >
-      <div className="session-header">
-        {!hideBadge && <span className={`state-badge ${style.badge}`}>{stateLabel}</span>}
-        {isUnvisitedDone && <span className="session-unvisited-dot" aria-hidden="true" />}
-        <span className="session-duration">{formatDuration(run.elapsedMs)}</span>
-        <span className="session-updated">{formatLastUpdated(run.lastActivityAt)}</span>
-        {run.tool === 'openClaw' && run.model && (
-          <span className="model-badge">{run.model}</span>
-        )}
-        <span className="session-header-right">
-          {run.messageCount > 0 && (
-            <span className="session-msg-count">{run.messageCount} {t('ui.inputCount')}</span>
+      <span className={`task-status-stripe ${style.badge}`} aria-hidden="true" />
+      <span className="task-feed-main">
+        <span className="task-feed-title-row">
+          <span className={`state-badge ${style.badge}`}>{stateLabel}</span>
+          {isUnvisitedDone && <span className="session-unvisited-dot" aria-hidden="true" />}
+          <span className="task-feed-title">{runTitle(run)}</span>
+        </span>
+        <span className="task-feed-meta">
+          <span>{run.projectName}</span>
+          {workspace && (
+            <>
+              <span className="task-feed-sep">·</span>
+              <span>{workspace}</span>
+            </>
           )}
-          <span className="session-tokens">{formatTokens(run.tokens.total)}</span>
+          <span className={`task-tool-pill ${sourceAccents[run.tool] ?? 'accent-generic'}`}>
+            {sourceLabels[run.tool]}
+          </span>
+          {run.model && <span className="task-model-pill">{run.model}</span>}
         </span>
-      </div>
-      <div className="session-title">{run.lastQuestion ?? run.firstQuestion ?? run.lastAction ?? run.projectName}</div>
-      <div className="session-footer">
-        {!hideTag && (
-          <span
-            className="session-tag"
-            style={{ background: tagColor.bg, color: tagColor.text }}
-          >
-            {tag}
+        {(run.lastTail || run.errorMessage) && (
+          <span className={`task-feed-tail${isWaiting ? ' urgent' : ''}`}>
+            {run.errorMessage ?? run.lastTail}
           </span>
         )}
-        {originBadge && (
-          <span className="session-origin">{originBadge}</span>
-        )}
-        <span className={`session-confidence confidence-${run.source.confidence}`}>
-          {run.source.confidence} · {run.source.freshness}
-        </span>
-        {capabilityCount > 0 && (
-          <span className="session-capability-count">
-            {capabilityCount} {t('monitor.capabilitiesShort')}
-          </span>
-        )}
-        <span className={`session-detail${isWaiting ? ' urgent' : ''}`}>
-          {run.lastTail ?? ''}
-        </span>
-      </div>
+      </span>
+      <span className="task-feed-metrics">
+        <span className="task-feed-metric">{formatLastUpdated(run.lastActivityAt)}</span>
+        <span className="task-feed-metric">{formatDuration(run.elapsedMs)}</span>
+        <span className="task-feed-metric">{formatTokens(run.tokens.total)}</span>
+      </span>
     </button>
   )
 }
 
-function ProjectGroupSection({ group, selectRun, focusedRunId }: { group: ProjectGroup; selectRun: (id: string) => void; focusedRunId?: string }) {
-  const tagColor = getTagColor(group.key)
-  const firstStyle = stateStyles[group.runs[0].state] ?? defaultStateStyle
-  const uniformState = group.runs.every(
-    (r) => (stateStyles[r.state] ?? defaultStateStyle).badge === firstStyle.badge,
-  )
-  const groupRowClass = uniformState ? firstStyle.row : ''
-  const isMulti = group.runs.length > 1
-  return (
-    <div className={`project-group has-header ${groupRowClass}`}>
-      <div className="project-group-header">
-        <span
-          className="session-tag"
-          style={{ background: tagColor.bg, color: tagColor.text }}
-        >
-          {group.key}
-        </span>
-        {isMulti && <span className="project-group-count">{group.runs.length}</span>}
-      </div>
-      {group.runs.map((run) => (
-        <SessionRow
-          key={run.id}
-          run={run}
-          focused={run.id === focusedRunId}
-          onClick={() => selectRun(run.id)}
-          hideTag
-          hideBadge={uniformState}
-        />
-      ))}
-    </div>
-  )
-}
-
-function QuotaBar({ label, pct, loading }: { label: string; pct: number | null | undefined; loading?: boolean }) {
-  const color = 'var(--accent)'
-  if (loading) {
-    return (
-      <span className="quota-bar-wrap quota-loading">
-        <span className="quota-bar-inner">
-          <span className="quota-label">{label}</span>
-          <span className="quota-pct quota-pct-loading">—</span>
-        </span>
-      </span>
-    )
-  }
-  if (pct == null) return null
-  return (
-    <span className="quota-bar-wrap">
-      <span className="quota-fill" style={{ width: `${pct}%`, background: color }} />
-      <span className="quota-bar-inner">
-        <span className="quota-label">{label}</span>
-        <span className="quota-pct">{pct}%</span>
-      </span>
-    </span>
-  )
-}
-
-function PayAsYouGoBadge() {
-  const { t } = useI18n()
-  return (
-    <div className="quota-bars quota-bars-payg">
-      <span className="quota-payg">{t('ui.payAsYouGo')}</span>
-    </div>
-  )
+function groupRunsByTaskSection(runs: RunRecord[]): Record<MonitorTaskSection, RunRecord[]> {
+  return runs.reduce<Record<MonitorTaskSection, RunRecord[]>>((groups, run) => {
+    groups[getMonitorTaskSection(run)].push(run)
+    return groups
+  }, {
+    attention: [],
+    active: [],
+    error: [],
+    done: [],
+  })
 }
 
 function cronParseField(field: string, max: number): number[] {
@@ -355,18 +276,69 @@ function formatCronAgent(
   return formatAgentHandle(cron.agentId, cron.agentDisplayName ?? nameMap.get(cron.agentId), format)
 }
 
-function CronList({ crons }: { crons: PendingCron[] }) {
+type SourceIssue = {
+  tool: ToolKind
+  severity: 'warn' | 'error'
+  title: string
+  detail: string
+}
+
+function buildSourceIssues(
+  healthRows: AdapterHealth[],
+  visibleTools: ToolKind[],
+  t: (key: I18nKey) => string,
+): SourceIssue[] {
+  const visible = new Set(visibleTools)
+  const issues: SourceIssue[] = []
+
+  for (const health of healthRows) {
+    if (!visible.has(health.tool)) continue
+    const sourceName = sourceLabels[health.tool]
+    const indicator = getSourceIndicator(health)
+    const gatewayLabel = indicator.labelKey ? t(indicator.labelKey) : undefined
+
+    if (!health.online) {
+      issues.push({
+        tool: health.tool,
+        severity: 'error',
+        title: `${sourceName} ${t('monitor.issue.offline')}`,
+        detail: health.lastError ?? health.gatewayDetail ?? health.mode,
+      })
+      continue
+    }
+
+    if (health.gatewayStatus && health.gatewayStatus !== 'running') {
+      issues.push({
+        tool: health.tool,
+        severity: health.gatewayStatus === 'stopped' ? 'error' : 'warn',
+        title: `${sourceName} ${gatewayLabel ?? health.gatewayStatus}`,
+        detail: health.gatewayDetail ?? health.mode,
+      })
+      continue
+    }
+
+    if (health.lastError) {
+      issues.push({
+        tool: health.tool,
+        severity: 'warn',
+        title: `${sourceName} ${t('monitor.issue.warning')}`,
+        detail: health.lastError,
+      })
+    }
+  }
+
+  return issues
+}
+
+function PendingCronList({ crons, runs }: { crons: PendingCron[]; runs: RunRecord[] }) {
   const agentDisplayFormat = useMonitorStore((s) => s.settings.agentDisplayFormat)
-  const runs = useMonitorStore((s) => s.data?.runs)
   const { t } = useI18n()
 
   const nameMap = useMemo(() => {
     const m = new Map<string, string>()
-    if (runs) {
-      for (const r of runs) {
-        if (r.tool === 'openClaw' && r.agentName && r.agentDisplayName) {
-          m.set(r.agentName, r.agentDisplayName)
-        }
+    for (const r of runs) {
+      if (r.tool === 'openClaw' && r.agentName && r.agentDisplayName) {
+        m.set(r.agentName, r.agentDisplayName)
       }
     }
     return m
@@ -374,189 +346,79 @@ function CronList({ crons }: { crons: PendingCron[] }) {
 
   const sorted = useMemo(() => expandCrons(crons), [crons])
   if (sorted.length === 0) return null
+
   return (
-    <div className="cron-list">
-      <div className="cron-list-header">{t('ui.scheduled')}</div>
-      {sorted.map((cron) => {
-        const agent = formatCronAgent(cron, agentDisplayFormat, nameMap)
-        return (
-          <div key={cron.id} className="cron-row">
-            <span className="cron-schedule">{formatScheduleHuman(cron.scheduleHuman)}</span>
-            <span className="cron-name">{cron.name}</span>
-            {agent && <span className="cron-agent">{agent}</span>}
-          </div>
-        )
-      })}
+    <div className="monitor-rail-section">
+      <div className="monitor-rail-section-head">
+        <span>{t('ui.scheduled')}</span>
+        <strong>{sorted.length}</strong>
+      </div>
+      <div className="monitor-cron-list">
+        {sorted.slice(0, 6).map((cron) => {
+          const agent = formatCronAgent(cron, agentDisplayFormat, nameMap)
+          return (
+            <div key={cron.id} className="monitor-cron-item">
+              <span className="monitor-cron-time">{formatScheduleHuman(cron.scheduleHuman)}</span>
+              <strong>{cron.name}</strong>
+              {agent && <span>{agent}</span>}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
-function SourceColumn({
-  tool,
-  runs,
+function MonitorRail({
+  issues,
   crons,
-  showEmptyState = true,
+  runs,
 }: {
-  tool: ToolKind
+  issues: SourceIssue[]
+  crons: PendingCron[]
   runs: RunRecord[]
-  crons?: PendingCron[]
-  showEmptyState?: boolean
 }) {
   const { t } = useI18n()
-  const selectRun = useMonitorStore((s) => s.selectRun)
-  const focusedRunId = useMonitorStore((s) => s.focusedRunId)
-  const health = useMonitorStore((s) => s.data?.adapterHealth.find((h) => h.tool === tool))
-  const identity = useMonitorStore((s) => s.data?.identities.find((id) => id.tool === tool))
-  const agentDisplayFormat = useMonitorStore((s) => s.settings.agentDisplayFormat)
-  const monitorPeriod = useMonitorStore((s) => s.settings.monitorPeriod)
-
-  const counts = useMemo(() => {
-    const { active, waiting, done } = summarizeRunsByState(runs)
-    return { running: active, waiting, done }
-  }, [runs])
-
-  const grouped = useMemo(() => groupRunsByProject(runs, agentDisplayFormat), [runs, agentDisplayFormat])
-
-  const authMode = identity?.authMode ?? runs[0]?.authMode
-  const isApiKey = authMode === 'api_key'
-
-  const quota = useMemo(() => {
-    const activeRun = runs.find((r) => r.quota.fiveHourUsedPct != null || r.quota.sevenDayUsedPct != null)
-    return activeRun?.quota
-  }, [runs])
-
-  const hasQuotaConcept = tool !== 'openClaw'
-  const subscriptionHasRuns = hasQuotaConcept && !isApiKey && runs.length > 0
-  const expectsQuotaSource = tool !== 'claude' || Boolean(quota) || runs.some((r) => r.sourceMode === 'claude_statusline')
-  const quotaLoading = subscriptionHasRuns && expectsQuotaSource && !quota
-
-  const healthTitle = health
-    ? [
-        health.gatewayStatus ? `gateway ${health.gatewayStatus}` : undefined,
-        health.gatewayDetail,
-        health.mode,
-        health.online ? 'online' : 'offline',
-        health.freshness,
-        health.lastError,
-      ]
-        .filter((value): value is string => Boolean(value))
-        .join(' | ')
-    : undefined
-  const sourceIndicator = getSourceIndicator(health)
-  const gatewayStatusLabel = sourceIndicator.labelKey ? t(sourceIndicator.labelKey) : undefined
+  if (issues.length === 0 && crons.length === 0) return null
 
   return (
-    <div
-      className={`source-column ${sourceAccents[tool] ?? 'accent-generic'}`}
-      role="region"
-      aria-label={`${sourceLabels[tool]} sessions`}
-      tabIndex={0}
-    >
-      <div className="source-header">
-        <div className="source-top-row">
-          <div className="source-name-row">
-            <h3 className="source-name">{sourceLabels[tool]}</h3>
-            <span
-              className={`source-dot ${sourceIndicator.dotClass}`}
-              title={healthTitle}
-            />
-            {gatewayStatusLabel && (
-              <span
-                className={`source-gateway-status ${sourceIndicator.dotClass}`}
-                title={healthTitle}
-              >
-                {gatewayStatusLabel}
-              </span>
-            )}
+    <aside className="monitor-rail" aria-label={t('monitor.rail.label')}>
+      {issues.length > 0 && (
+        <div className="monitor-rail-section">
+          <div className="monitor-rail-section-head">
+            <span>{t('monitor.rail.issues')}</span>
+            <strong>{issues.length}</strong>
           </div>
-          {isApiKey ? (
-            <PayAsYouGoBadge />
-          ) : quotaLoading ? (
-            <div className="quota-bars quota-bars-metered">
-              <QuotaBar label="5hrs" pct={undefined} loading />
-              <QuotaBar label="7days" pct={undefined} loading />
-            </div>
-          ) : quota ? (
-            <div className="quota-bars quota-bars-metered">
-              <QuotaBar label="5hrs" pct={quota.fiveHourUsedPct} />
-              <QuotaBar label="7days" pct={quota.sevenDayUsedPct} />
-            </div>
-          ) : null}
-        </div>
-        <div className="source-meta">
-          <span className={`source-count${counts.running > 0 ? ' has-running' : ''}`}>
-            <span className="dot-running" /> {counts.running} {t('stateCount.running').toLowerCase()}
-          </span>
-          <span className={`source-count${counts.waiting > 0 ? ' has-waiting' : ''}`}>
-            <span className="dot-waiting" /> {counts.waiting} {t('stateCount.waiting').toLowerCase()}
-          </span>
-          <span className="source-count">
-            <span className="dot-done" /> {counts.done} {t('stateCount.done').toLowerCase()}
-          </span>
-        </div>
-      </div>
-      <div className="session-list">
-        {showEmptyState && runs.length === 0 && (
-          <div className="empty-state">{t('monitor.noSessions')}</div>
-        )}
-        {grouped.active.map((g) => (
-          <ProjectGroupSection key={`a-${g.key}`} group={g} selectRun={selectRun} focusedRunId={focusedRunId} />
-        ))}
-        {grouped.waiting.map((g) => (
-          <ProjectGroupSection key={`w-${g.key}`} group={g} selectRun={selectRun} focusedRunId={focusedRunId} />
-        ))}
-        {grouped.done.length > 0 && (
-          <div className="done-divider">
-            <span className="done-divider-label">
-              {t('monitor.doneIn').replace('{period}', monitorPeriodLongLabels[monitorPeriod] ?? monitorPeriod)}
-            </span>
+          <div className="monitor-issue-list">
+            {issues.map((issue) => (
+              <div key={`${issue.tool}-${issue.title}`} className={`monitor-issue-item ${issue.severity}`}>
+                <div className="monitor-issue-title">
+                  <span className={`source-dot ${issue.severity === 'error' ? 'stopped' : 'warning'}`} />
+                  <strong>{issue.title}</strong>
+                </div>
+                <span>{issue.detail}</span>
+              </div>
+            ))}
           </div>
-        )}
-        {grouped.done.map((g) => (
-          <ProjectGroupSection key={`d-${g.key}`} group={g} selectRun={selectRun} focusedRunId={focusedRunId} />
-        ))}
-      </div>
-      {crons && crons.length > 0 && <CronList crons={crons} />}
-    </div>
-  )
-}
-
-function MobileSourceTabs({
-  selected,
-  onSelect,
-  counts,
-  visibleTools,
-}: {
-  selected: ToolKind
-  onSelect: (t: ToolKind) => void
-  counts: Record<ToolKind, number>
-  visibleTools: ToolKind[]
-}) {
-  return (
-    <div className="mobile-source-tabs">
-      {visibleTools.map((tool) => (
-        <button
-          key={tool}
-          className={`mobile-source-tab ${sourceAccents[tool] ?? 'accent-generic'} ${selected === tool ? 'active' : ''}`}
-          onClick={() => onSelect(tool)}
-        >
-          {sourceLabels[tool]} ({counts[tool]})
-        </button>
-      ))}
-    </div>
+        </div>
+      )}
+      <PendingCronList crons={crons} runs={runs} />
+    </aside>
   )
 }
 
 export function MonitorView() {
   const data = useMonitorStore((s) => s.data)
   const connectionStatus = useMonitorStore((s) => s.connectionStatus)
-  const columnLayout = useMonitorStore((s) => s.settings.columnLayout)
   const monitorPeriod = useMonitorStore((s) => s.settings.monitorPeriod)
   const panelConfig = useMonitorStore((s) => s.settings.panelConfig)
   const filterRules = useMonitorStore((s) => s.settings.filterRules)
-  const [mobileSource, setMobileSource] = useState<ToolKind>('claude')
+  const quickFilter = useMonitorStore((s) => s.monitorQuickFilter)
+  const toolFilter = useMonitorStore((s) => s.monitorToolFilter)
+  const searchQuery = useMonitorStore((s) => s.monitorSearch)
+  const selectRun = useMonitorStore((s) => s.selectRun)
+  const focusedRunId = useMonitorStore((s) => s.focusedRunId)
   const { t } = useI18n()
-  const isNarrowLayout = useMediaQuery(NARROW_LAYOUT_QUERY)
 
   const visiblePanels = useMemo(
     () => {
@@ -566,31 +428,27 @@ export function MonitorView() {
     [data?.config.hiddenSources, panelConfig],
   )
 
-  const quickFilter = useMonitorStore((s) => s.monitorQuickFilter)
-  const searchQuery = useMonitorStore((s) => s.monitorSearch)
+  const effectiveToolFilter = toolFilter === 'all' || visiblePanels.includes(toolFilter)
+    ? toolFilter
+    : 'all'
 
-  const sessionsBySource = useMemo(() => {
-    if (!data) {
-      return Object.fromEntries(
-        allTools.map((tool) => [tool, [] as RunRecord[]]),
-      ) as unknown as Record<ToolKind, RunRecord[]>
-    }
+  const visibleRuns = useMemo(() => {
+    if (!data) return []
     const base = buildVisibleRunsBySource(data.runs, filterRules, monitorPeriod)
-    if (quickFilter === 'all' && searchQuery.trim() === '') return base
-    return Object.fromEntries(
-      allTools.map((tool) => [tool, applyMonitorFilters(base[tool], quickFilter, searchQuery)]),
-    ) as unknown as Record<ToolKind, RunRecord[]>
-  }, [data, monitorPeriod, filterRules, quickFilter, searchQuery])
+    return applyMonitorFilters(
+      flattenVisibleRunsBySource(base, visiblePanels),
+      quickFilter,
+      effectiveToolFilter,
+      searchQuery,
+    )
+  }, [data, effectiveToolFilter, filterRules, monitorPeriod, quickFilter, searchQuery, visiblePanels])
 
-  const hasVisibleRuns = visiblePanels.some((tool) => sessionsBySource[tool].length > 0)
-
-  const adaptiveStyle = useMemo(() => {
-    if (columnLayout !== 'adaptive') return undefined
-    const cols = visiblePanels
-      .map((tool) => `${Math.max(sessionsBySource[tool].length, 1)}fr`)
-      .join(' ')
-    return { gridTemplateColumns: cols }
-  }, [columnLayout, sessionsBySource, visiblePanels])
+  const groupedRuns = useMemo(() => groupRunsByTaskSection(visibleRuns), [visibleRuns])
+  const issues = useMemo(
+    () => data ? buildSourceIssues(data.adapterHealth, visiblePanels, t) : [],
+    [data, t, visiblePanels],
+  )
+  const showRail = Boolean(data && (issues.length > 0 || data.pendingCrons.length > 0))
 
   if (!data) {
     if (connectionStatus === 'connecting') return <MonitorSkeleton />
@@ -605,14 +463,6 @@ export function MonitorView() {
     )
   }
 
-  const sourceCounts = Object.fromEntries(
-    allTools.map((tool) => [tool, sessionsBySource[tool].length]),
-  ) as unknown as Record<ToolKind, number>
-
-  const effectiveMobileSource = visiblePanels.includes(mobileSource)
-    ? mobileSource
-    : visiblePanels[0] ?? 'claude'
-
   return (
     <div className="monitor-view">
       {connectionStatus === 'offline' && (
@@ -622,47 +472,52 @@ export function MonitorView() {
         </div>
       )}
       <AttentionBanner items={data.attentions} />
-      <MonitorFilterBar />
-      {!hasVisibleRuns && (
-        <div className="empty-state-panel">
-          <strong>{t('monitor.emptyTitle')}</strong>
-          <span>{t('monitor.emptyHint')}</span>
-        </div>
-      )}
+      <MonitorFilterBar visibleTools={visiblePanels} />
       <section className="monitor-board-panel">
-        {isNarrowLayout ? (
-          <>
-            <MobileSourceTabs
-              selected={effectiveMobileSource}
-              onSelect={setMobileSource}
-              counts={sourceCounts}
-              visibleTools={visiblePanels}
-            />
-            <div className="source-columns-mobile">
-              <SourceColumn
-                tool={effectiveMobileSource}
-                runs={sessionsBySource[effectiveMobileSource]}
-                crons={effectiveMobileSource === 'openClaw' || effectiveMobileSource === 'hermes' ? data.pendingCrons : undefined}
-                showEmptyState={hasVisibleRuns}
-              />
+        <div className={`task-feed-layout${showRail ? ' has-rail' : ''}`}>
+          <article className="task-feed-board">
+            <div className="task-feed-head">
+              <h2>{t('monitor.taskFeed')}</h2>
+              <span>{visibleRuns.length} {t('monitor.taskCount')}</span>
             </div>
-          </>
-        ) : (
-          <div
-            className={`source-columns source-columns-desktop ${columnLayout === 'adaptive' ? 'adaptive' : ''}`}
-            style={adaptiveStyle}
-          >
-            {visiblePanels.map((tool) => (
-              <SourceColumn
-                key={tool}
-                tool={tool}
-                runs={sessionsBySource[tool]}
-                crons={tool === 'openClaw' || tool === 'hermes' ? data.pendingCrons : undefined}
-                showEmptyState={hasVisibleRuns}
-              />
-            ))}
-          </div>
-        )}
+            {visibleRuns.length === 0 ? (
+              <div className="empty-state-panel task-feed-empty">
+                <strong>{t('monitor.emptyTitle')}</strong>
+                <span>{t('monitor.emptyHint')}</span>
+              </div>
+            ) : (
+              taskSections.map((section) => {
+                const runs = groupedRuns[section.key]
+                if (runs.length === 0) return null
+                return (
+                  <section key={section.key} className="task-feed-section">
+                    <div className="task-feed-section-head">
+                      <span>{t(section.labelKey)}</span>
+                      <strong>{runs.length}</strong>
+                    </div>
+                    <div className="task-feed-list">
+                      {runs.map((run) => (
+                        <TaskRow
+                          key={run.id}
+                          run={run}
+                          focused={run.id === focusedRunId}
+                          onClick={() => selectRun(run.id)}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )
+              })
+            )}
+          </article>
+          {showRail && (
+            <MonitorRail
+              issues={issues}
+              crons={data.pendingCrons}
+              runs={data.runs}
+            />
+          )}
+        </div>
       </section>
     </div>
   )

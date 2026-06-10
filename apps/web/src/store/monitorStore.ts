@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppConfig, BootstrapPayload, RunRecord } from '../lib/types'
+import type { AppConfig, BootstrapPayload, RunRecord, ToolKind } from '../lib/types'
 import {
   loadFrontendSettings,
   saveFrontendSettings,
@@ -63,6 +63,7 @@ export type {
 export type ConnectionStatus = 'connecting' | 'live' | 'offline'
 
 export type MonitorQuickFilter = 'all' | 'attention' | 'active'
+export type MonitorToolFilter = 'all' | ToolKind
 
 interface MonitorState {
   data: BootstrapPayload | null
@@ -76,6 +77,7 @@ interface MonitorState {
   dismissedAttentionKeys: Set<string>
   visitedRunIds: Set<string>
   monitorQuickFilter: MonitorQuickFilter
+  monitorToolFilter: MonitorToolFilter
   monitorSearch: string
   setData: (data: BootstrapPayload | null) => void
   setConfig: (config: AppConfig) => void
@@ -90,6 +92,7 @@ interface MonitorState {
   setActiveTab: (tab: ActiveTab) => void
   updateSettings: (patch: Partial<FrontendSettings>) => void
   setMonitorQuickFilter: (filter: MonitorQuickFilter) => void
+  setMonitorToolFilter: (filter: MonitorToolFilter) => void
   setMonitorSearch: (value: string) => void
 }
 
@@ -103,6 +106,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   dismissedAttentionKeys: new Set<string>(loadDismissedAttentionKeys()),
   visitedRunIds: new Set<string>(loadVisitedRunIds()),
   monitorQuickFilter: 'all',
+  monitorToolFilter: 'all',
   monitorSearch: '',
   setData: (data) => set({ data }),
   setConfig: (config) => set((s) => (s.data ? { data: { ...s.data, config } } : {})),
@@ -154,6 +158,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     }
   },
   setMonitorQuickFilter: (monitorQuickFilter) => set({ monitorQuickFilter }),
+  setMonitorToolFilter: (monitorToolFilter) => set({ monitorToolFilter }),
   setMonitorSearch: (monitorSearch) => set({ monitorSearch }),
 }))
 

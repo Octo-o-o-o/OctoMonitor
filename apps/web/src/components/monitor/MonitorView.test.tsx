@@ -95,7 +95,7 @@ function runFixture(overrides: Partial<RunRecord>): RunRecord {
   }
 }
 
-describe('MonitorView gateway status', () => {
+describe('MonitorView task feed', () => {
   beforeEach(() => {
     localStorage.clear()
     localStorage.setItem(STORAGE_KEYS.locale, 'en')
@@ -109,6 +109,9 @@ describe('MonitorView gateway status', () => {
         selectedRunId: undefined,
         focusedRunId: undefined,
         visitedRunIds: new Set<string>(),
+        monitorQuickFilter: 'all',
+        monitorToolFilter: 'all',
+        monitorSearch: '',
         settings: {
           ...defaultSettings,
           panelConfig: [
@@ -132,23 +135,26 @@ describe('MonitorView gateway status', () => {
         selectedRunId: undefined,
         focusedRunId: undefined,
         visitedRunIds: new Set<string>(),
+        monitorQuickFilter: 'all',
+        monitorToolFilter: 'all',
+        monitorSearch: '',
         settings: defaultSettings,
       })
     })
     localStorage.clear()
   })
 
-  it('renders gateway status badges for OpenClaw and Hermes', () => {
+  it('renders concrete source issues without tool-type grouping', () => {
     render(
       <I18nProvider>
         <MonitorView />
       </I18nProvider>,
     )
 
-    expect(screen.getByText('OPENCLAW')).toBeInTheDocument()
-    expect(screen.getByText('HERMES')).toBeInTheDocument()
-    expect(screen.getByText('RUNNING')).toBeInTheDocument()
-    expect(screen.getByText('STOPPED')).toBeInTheDocument()
+    expect(screen.getByText('Task Feed')).toBeInTheDocument()
+    expect(screen.getByText('Source issues')).toBeInTheDocument()
+    expect(screen.getByText('Hermes STOPPED')).toBeInTheDocument()
+    expect(screen.queryByText('OPENCLAW')).not.toBeInTheDocument()
   })
 
   it('marks completed rows as visited and removes the unread dot on click', () => {
@@ -184,5 +190,36 @@ describe('MonitorView gateway status', () => {
     expect(useMonitorStore.getState().visitedRunIds.has('done-1')).toBe(true)
     expect(row).toHaveClass('is-visited')
     expect(container.querySelector('.session-unvisited-dot')).toBeNull()
+  })
+
+  it('filters the task feed by exact tool', () => {
+    const codex = runFixture({ id: 'codex-1', tool: 'codex', lastAction: 'Fix parser' })
+    const claude = runFixture({ id: 'claude-1', tool: 'claude', lastAction: 'Write docs' })
+    act(() => {
+      useMonitorStore.setState({
+        data: { ...createBootstrap(), runs: [codex, claude] },
+        settings: {
+          ...defaultSettings,
+          panelConfig: [
+            { tool: 'claude', enabled: true },
+            { tool: 'codex', enabled: true },
+          ],
+        },
+      })
+    })
+
+    render(
+      <I18nProvider>
+        <MonitorView />
+      </I18nProvider>,
+    )
+
+    expect(screen.getByText('Fix parser')).toBeInTheDocument()
+    expect(screen.getByText('Write docs')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Tool'), { target: { value: 'claude' } })
+
+    expect(screen.queryByText('Fix parser')).not.toBeInTheDocument()
+    expect(screen.getByText('Write docs')).toBeInTheDocument()
   })
 })

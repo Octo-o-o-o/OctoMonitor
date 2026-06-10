@@ -21,7 +21,8 @@ import {
   saveDesktopZoom,
   type DesktopZoomAction,
 } from './lib/desktopZoom'
-import { buildVisiblePanels, buildVisibleRunIds, buildVisibleRunsBySource } from './lib/monitor'
+import { applyMonitorFilters } from './lib/monitorFilters'
+import { buildVisiblePanels, buildVisibleRunsBySource, flattenVisibleRunsBySource } from './lib/monitor'
 import { isTauriEnvironment } from './lib/runtimeEnvironment'
 import { getRuntimeMode, type RuntimeMode } from './lib/runtimeMode'
 import { useI18n, type I18nKey } from './lib/i18n'
@@ -83,7 +84,9 @@ function useKeyboardShortcuts(runtimeMode: RuntimeMode, activeTab: string) {
   const monitorPeriod = useMonitorStore((s) => s.settings.monitorPeriod)
   const panelConfig = useMonitorStore((s) => s.settings.panelConfig)
   const filterRules = useMonitorStore((s) => s.settings.filterRules)
-  const agentDisplayFormat = useMonitorStore((s) => s.settings.agentDisplayFormat)
+  const quickFilter = useMonitorStore((s) => s.monitorQuickFilter)
+  const toolFilter = useMonitorStore((s) => s.monitorToolFilter)
+  const searchQuery = useMonitorStore((s) => s.monitorSearch)
   const focusedRunId = useMonitorStore((s) => s.focusedRunId)
   const setFocusedRunId = useMonitorStore((s) => s.setFocusedRunId)
   const selectRun = useMonitorStore((s) => s.selectRun)
@@ -91,10 +94,19 @@ function useKeyboardShortcuts(runtimeMode: RuntimeMode, activeTab: string) {
 
   const runIds = useMemo(() => {
     if (!data || activeTab !== 'monitor') return []
-    const visiblePanels = buildVisiblePanels(panelConfig)
+    const hidden = new Set(data.config.hiddenSources)
+    const visiblePanels = buildVisiblePanels(panelConfig).filter((tool) => !hidden.has(tool))
+    const effectiveToolFilter = toolFilter === 'all' || visiblePanels.includes(toolFilter)
+      ? toolFilter
+      : 'all'
     const sessionsBySource = buildVisibleRunsBySource(data.runs, filterRules, monitorPeriod)
-    return buildVisibleRunIds(sessionsBySource, visiblePanels, agentDisplayFormat)
-  }, [activeTab, agentDisplayFormat, data, filterRules, monitorPeriod, panelConfig])
+    return applyMonitorFilters(
+      flattenVisibleRunsBySource(sessionsBySource, visiblePanels),
+      quickFilter,
+      effectiveToolFilter,
+      searchQuery,
+    ).map((run) => run.id)
+  }, [activeTab, data, filterRules, monitorPeriod, panelConfig, quickFilter, searchQuery, toolFilter])
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {

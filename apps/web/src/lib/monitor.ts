@@ -1,6 +1,5 @@
 import { allTools } from './constants'
-import { getGroupKey } from './format'
-import type { AgentDisplayFormat, FilterRules, MonitorPeriod, PanelEntry, ToolFilter } from './preferences'
+import type { FilterRules, MonitorPeriod, PanelEntry, ToolFilter } from './preferences'
 import type { RunRecord, ToolKind } from './types'
 
 export interface MonitorRunCounts {
@@ -8,6 +7,10 @@ export interface MonitorRunCounts {
   waiting: number
   done: number
 }
+
+export type MonitorTaskSection = 'attention' | 'active' | 'error' | 'done'
+
+const errorStates = new Set(['error', 'gatewayOffline', 'limitExceeded', 'contextExceeded'])
 
 export const periodToMs: Record<MonitorPeriod, number> = {
   '30m': 30 * 60_000,
@@ -28,10 +31,22 @@ export const monitorPeriodLongLabels: Record<MonitorPeriod, string> = {
   '24h': '24 hours',
 }
 
-function sortRunsForMonitor(runs: RunRecord[]): RunRecord[] {
-  const order: Record<string, number> = { active: 0, waitingApproval: 1 }
+export function getMonitorTaskSection(run: RunRecord): MonitorTaskSection {
+  if (run.state === 'waitingApproval' || run.pendingApproval) return 'attention'
+  if (run.state === 'active') return 'active'
+  if (errorStates.has(run.state)) return 'error'
+  return 'done'
+}
+
+export function sortRunsForMonitor(runs: RunRecord[]): RunRecord[] {
+  const order: Record<MonitorTaskSection, number> = {
+    attention: 0,
+    active: 1,
+    error: 2,
+    done: 3,
+  }
   return [...runs].sort((a, b) => {
-    const stateDelta = (order[a.state] ?? 2) - (order[b.state] ?? 2)
+    const stateDelta = order[getMonitorTaskSection(a)] - order[getMonitorTaskSection(b)]
     if (stateDelta !== 0) return stateDelta
     return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
   })
@@ -112,29 +127,21 @@ export function buildVisibleRunsBySource(
   return sessionsBySource
 }
 
+export function flattenVisibleRunsBySource(
+  sessionsBySource: Record<ToolKind, RunRecord[]>,
+  visiblePanels: ToolKind[],
+): RunRecord[] {
+  const visible = new Set(visiblePanels)
+  return sortRunsForMonitor(
+    visiblePanels.flatMap((tool) => (
+      visible.has(tool) ? sessionsBySource[tool] ?? [] : []
+    )),
+  )
+}
+
 export function buildVisibleRunIds(
   sessionsBySource: Record<ToolKind, RunRecord[]>,
   visiblePanels: ToolKind[],
-  agentDisplayFormat: AgentDisplayFormat,
 ): string[] {
-  const runIds: string[] = []
-
-  for (const tool of visiblePanels) {
-    const buckets = new Map<string, string[]>()
-    for (const run of sessionsBySource[tool]) {
-      const key = getGroupKey(run, agentDisplayFormat)
-      const existing = buckets.get(key)
-      if (existing) {
-        existing.push(run.id)
-      } else {
-        buckets.set(key, [run.id])
-      }
-    }
-
-    for (const ids of buckets.values()) {
-      runIds.push(...ids)
-    }
-  }
-
-  return runIds
+  return flattenVisibleRunsBySource(sessionsBySource, visiblePanels).map((run) => run.id)
 }

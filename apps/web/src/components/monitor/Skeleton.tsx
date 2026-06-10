@@ -9,31 +9,21 @@ function repeat(count: number, className: string) {
 export function MonitorSkeleton() {
   const isNarrowLayout = useMediaQuery(NARROW_LAYOUT_QUERY)
 
-  if (isNarrowLayout) {
-    return (
-      <div className="monitor-view">
-        <div className="mobile-source-tabs">
-          {repeat(3, 'skeleton-pill')}
-        </div>
-        <div className="source-columns-mobile skeleton-flex">
-          <div className="source-column">
-            <div className="skeleton-header" />
-            {repeat(4, 'skeleton-card')}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="monitor-view">
-      <div className="source-columns source-columns-desktop skeleton-grid-3">
-        {Array.from({ length: 3 }, (_, i) => (
-          <div key={i} className="source-column">
+      <div className="monitor-board-panel">
+        <div className={`task-feed-layout${isNarrowLayout ? '' : ' has-rail'}`}>
+          <div className="task-feed-board">
             <div className="skeleton-header" />
-            {repeat(3, 'skeleton-card')}
+            {repeat(6, 'skeleton-row')}
           </div>
-        ))}
+          {!isNarrowLayout && (
+            <div className="monitor-rail">
+              <div className="skeleton-header" />
+              {repeat(2, 'skeleton-card')}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
