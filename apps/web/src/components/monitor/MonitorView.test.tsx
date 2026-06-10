@@ -47,6 +47,8 @@ function createBootstrap(): BootstrapPayload {
       historyDays: 30,
       companionEnabled: false,
       localIp: null,
+      disabledSources: [],
+      hiddenSources: [],
     },
   }
 }

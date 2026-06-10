@@ -23,6 +23,8 @@ function bootstrapWithConfig(): BootstrapPayload {
       historyDays: 30,
       companionEnabled: false,
       localIp: null,
+      disabledSources: [],
+      hiddenSources: [],
     },
   }
 }

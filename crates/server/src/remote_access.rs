@@ -1,17 +1,17 @@
 use std::net::SocketAddr;
 
 use axum::{
-    Router,
     extract::{
-        Json, Request, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
+        Json, Request, State,
     },
     http::{
-        HeaderMap, StatusCode,
         header::{COOKIE, SET_COOKIE},
+        HeaderMap, StatusCode,
     },
     response::{IntoResponse, Response},
     routing::{get, post},
+    Router,
 };
 use octomonitor_companion::{
     claim_pairing, pairing_is_expired, pairing_matches, session_is_expired, touch_viewer_session,
@@ -357,6 +357,8 @@ fn redact_config(config: &AppConfig) -> AppConfig {
         history_days: config.history_days,
         companion_enabled: config.companion_enabled,
         local_ip: None,
+        disabled_sources: config.disabled_sources.clone(),
+        hidden_sources: config.hidden_sources.clone(),
     }
 }
 
@@ -550,7 +552,7 @@ mod tests {
         body::Body,
         http::{Method, Request, StatusCode},
     };
-    use octomonitor_companion::{ViewerSession, request_pairing};
+    use octomonitor_companion::{request_pairing, ViewerSession};
     use octomonitor_core::{
         AppConfig, AttentionItem, CommitAttributionLink, CommitAttributionMethod, CommitRecord,
         CommitSourceStat, CompletionRecord, Freshness, IdentityState, MoneyValue, QuotaValue,
@@ -589,20 +591,16 @@ mod tests {
         assert!(run.capabilities.as_ref().is_some_and(Vec::is_empty));
         assert!(run.jump_targets.as_ref().is_some_and(Vec::is_empty));
         assert_eq!(run.tool_specific, Some(serde_json::json!({})));
-        assert!(
-            run.lifecycle
-                .as_ref()
-                .is_some_and(|lifecycle| lifecycle.error.is_none())
-        );
-        assert!(
-            run.data_sources
-                .as_ref()
-                .is_some_and(|sources| sources.iter().all(|source| {
-                    source.path.is_none()
-                        && source.api_endpoint.is_none()
-                        && source.errors.is_empty()
-                }))
-        );
+        assert!(run
+            .lifecycle
+            .as_ref()
+            .is_some_and(|lifecycle| lifecycle.error.is_none()));
+        assert!(run
+            .data_sources
+            .as_ref()
+            .is_some_and(|sources| sources.iter().all(|source| {
+                source.path.is_none() && source.api_endpoint.is_none() && source.errors.is_empty()
+            })));
 
         let vcs = run.vcs.as_ref().expect("redacted vcs");
         assert!(vcs.repo_name.is_empty());
@@ -674,6 +672,8 @@ mod tests {
             history_days: 30,
             companion_enabled: true,
             local_ip: Some("192.168.0.10".into()),
+            disabled_sources: Vec::new(),
+            hidden_sources: Vec::new(),
         };
         payload.runs.push(RunRecord {
             id: "run-1".into(),

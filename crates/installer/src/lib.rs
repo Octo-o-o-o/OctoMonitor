@@ -6,46 +6,105 @@ use std::os::unix::fs::PermissionsExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum SupportLevel {
+    Monitored,
+    Experimental,
+    Candidate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolCapability {
     pub tool: &'static str,
     pub detected: bool,
+    pub detected_command: Option<&'static str>,
     pub mode: &'static str,
+    pub support_level: SupportLevel,
     pub notes: String,
 }
 
 struct ToolSpec {
     name: &'static str,
     label: &'static str,
+    commands: &'static [&'static str],
     mode: &'static str,
     capability: &'static str,
+    support_level: SupportLevel,
 }
 
 const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "claude",
         label: "Claude CLI",
+        commands: &["claude"],
         mode: "statusline+hooks",
         capability: "hook/statusline monitoring path available",
+        support_level: SupportLevel::Monitored,
     },
     ToolSpec {
         name: "codex",
         label: "Codex CLI",
+        commands: &["codex"],
         mode: "app-server+hooks",
         capability: "app-server/hook monitoring path available",
+        support_level: SupportLevel::Monitored,
     },
     ToolSpec {
         name: "openclaw",
         label: "OpenClaw CLI",
+        commands: &["openclaw"],
         mode: "gateway+status",
         capability: "gateway/status monitoring path available",
+        support_level: SupportLevel::Monitored,
     },
     ToolSpec {
         name: "hermes",
         label: "Hermes Agent CLI (experimental)",
+        commands: &["hermes"],
         mode: "gateway+sessions",
         capability: "gateway/sessions monitoring path available",
+        support_level: SupportLevel::Experimental,
+    },
+    ToolSpec {
+        name: "gemini",
+        label: "Gemini CLI",
+        commands: &["gemini"],
+        mode: "hooks+telemetry candidate",
+        capability: "official hooks and local/OpenTelemetry paths exist; OctoMonitor adapter not implemented",
+        support_level: SupportLevel::Candidate,
+    },
+    ToolSpec {
+        name: "cursor",
+        label: "Cursor Agent CLI",
+        commands: &["agent"],
+        mode: "ACP+stream-json candidate",
+        capability: "ACP and stream-json paths exist; OctoMonitor adapter not implemented",
+        support_level: SupportLevel::Candidate,
+    },
+    ToolSpec {
+        name: "workbuddy",
+        label: "WorkBuddy / CodeBuddy CLI",
+        commands: &["workbuddy", "codebuddy"],
+        mode: "stream-json+plugins candidate",
+        capability: "CodeBuddy/WorkBuddy CLI paths exist; OctoMonitor adapter not implemented",
+        support_level: SupportLevel::Candidate,
+    },
+    ToolSpec {
+        name: "pi",
+        label: "Pi Coding Agent CLI",
+        commands: &["pi"],
+        mode: "json/rpc candidate",
+        capability: "JSON/RPC session paths exist; OctoMonitor adapter not implemented",
+        support_level: SupportLevel::Candidate,
     },
 ];
+
+fn detected_command(commands: &[&'static str]) -> Option<&'static str> {
+    commands
+        .iter()
+        .copied()
+        .find(|command| command_exists(command))
+}
 
 fn command_exists(name: &str) -> bool {
     let candidate = Path::new(name);
@@ -110,15 +169,27 @@ pub fn detect_tools() -> Vec<ToolCapability> {
     TOOLS
         .iter()
         .map(|spec| {
-            let detected = command_exists(spec.name);
+            let detected_command = detected_command(spec.commands);
+            let detected = detected_command.is_some();
             ToolCapability {
                 tool: spec.name,
                 detected,
+                detected_command,
                 mode: spec.mode,
+                support_level: spec.support_level.clone(),
                 notes: if detected {
-                    format!("{} detected; {}", spec.label, spec.capability)
+                    format!(
+                        "{} detected via {}; {}",
+                        spec.label,
+                        detected_command.unwrap_or(spec.name),
+                        spec.capability
+                    )
                 } else {
-                    format!("{} not found on PATH", spec.label)
+                    format!(
+                        "{} not found on PATH (expected: {})",
+                        spec.label,
+                        spec.commands.join(", ")
+                    )
                 },
             }
         })
@@ -127,21 +198,52 @@ pub fn detect_tools() -> Vec<ToolCapability> {
 
 pub fn doctor_report() -> Vec<String> {
     let tools = detect_tools();
-    let detected = tools.iter().filter(|tool| tool.detected).count();
-    let total = tools.len();
+    let monitored_total = tools
+        .iter()
+        .filter(|tool| {
+            matches!(
+                tool.support_level,
+                SupportLevel::Monitored | SupportLevel::Experimental
+            )
+        })
+        .count();
+    let monitored_detected = tools
+        .iter()
+        .filter(|tool| {
+            tool.detected
+                && matches!(
+                    tool.support_level,
+                    SupportLevel::Monitored | SupportLevel::Experimental
+                )
+        })
+        .count();
+    let candidate_total = tools
+        .iter()
+        .filter(|tool| matches!(tool.support_level, SupportLevel::Candidate))
+        .count();
+    let candidate_detected = tools
+        .iter()
+        .filter(|tool| tool.detected && matches!(tool.support_level, SupportLevel::Candidate))
+        .count();
 
     let mut checks = vec![
         "No database configured — expected for local-first mode".to_string(),
         "Companion access disabled by default until config changes".to_string(),
         "Environment & Doctor is read-only — no tool config files are modified automatically"
             .to_string(),
-        format!("Detected {detected}/{total} monitored CLIs on current PATH"),
+        format!("Detected {monitored_detected}/{monitored_total} monitored CLIs on current PATH"),
+        format!("Detected {candidate_detected}/{candidate_total} candidate CLIs on current PATH"),
     ];
     checks.extend(tools.into_iter().map(|tool| {
+        let level = match tool.support_level {
+            SupportLevel::Monitored => "monitored",
+            SupportLevel::Experimental => "experimental",
+            SupportLevel::Candidate => "candidate",
+        };
         if tool.detected {
-            format!("{}: detected ({})", tool.tool, tool.mode)
+            format!("{}: detected ({}, {level})", tool.tool, tool.mode)
         } else {
-            format!("{}: missing from PATH", tool.tool)
+            format!("{}: missing from PATH ({level})", tool.tool)
         }
     }));
     checks
@@ -152,9 +254,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detect_tools_returns_four() {
+    fn detect_tools_returns_known_tools() {
         let tools = detect_tools();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 8);
+        assert!(tools.iter().any(|tool| tool.tool == "gemini"));
+        assert!(tools.iter().any(|tool| tool.tool == "cursor"));
+        assert!(tools.iter().any(|tool| tool.tool == "workbuddy"));
+        assert!(tools.iter().any(|tool| tool.tool == "pi"));
     }
 
     #[test]

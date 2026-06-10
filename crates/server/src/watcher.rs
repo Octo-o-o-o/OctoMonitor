@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+use octomonitor_core::ToolKind;
 
 use crate::platform::home_dir;
 use crate::state::AppState;
@@ -21,9 +23,9 @@ fn env_path_or(home: &std::path::Path, vars: &[&str], fallback: &str) -> PathBuf
 /// Resolves the home root via `platform::home_dir()` and delegates to the
 /// pure `watch_dirs_for_home`, which is unit-testable without touching the
 /// process-global `HOME` env.
-fn watch_dirs() -> Vec<PathBuf> {
+fn watch_dirs(disabled_sources: &[ToolKind]) -> Vec<PathBuf> {
     let home = home_dir().unwrap_or_else(|| PathBuf::from("."));
-    watch_dirs_for_home(&home)
+    watch_dirs_for_home_with_disabled(&home, disabled_sources)
 }
 
 /// Pure helper: given a home directory, return every adapter session
@@ -33,6 +35,13 @@ fn watch_dirs() -> Vec<PathBuf> {
 /// but the supplied `home` becomes the fallback. Filesystem reads under the
 /// Hermes `profiles/` tree are also relative to whatever `home` is given.
 pub(crate) fn watch_dirs_for_home(home: &std::path::Path) -> Vec<PathBuf> {
+    watch_dirs_for_home_with_disabled(home, &[])
+}
+
+pub(crate) fn watch_dirs_for_home_with_disabled(
+    home: &std::path::Path,
+    disabled_sources: &[ToolKind],
+) -> Vec<PathBuf> {
     let claude_base = env_path_or(home, &["CLAUDE_CONFIG_DIR"], ".claude");
     let codex_base = env_path_or(home, &["CODEX_HOME"], ".codex");
     let openclaw_base = env_path_or(home, &["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"], ".openclaw");
@@ -51,33 +60,38 @@ pub(crate) fn watch_dirs_for_home(home: &std::path::Path) -> Vec<PathBuf> {
     let cline_base = env_path_or(home, &["CLINE_HOME", "CLINE_DATA_DIR"], ".cline");
     let kiro_base = env_path_or(home, &["KIRO_HOME"], ".kiro");
 
-    let mut dirs = vec![
-        claude_base.join("projects"),
-        codex_base.join("sessions"),
-        openclaw_base.join("agents"),
-        // Default Hermes sessions
-        hermes_base.join("sessions"),
-        codebuddy_base.join("projects"),
-        codebuddy_base.join("sessions"),
-        gemini_base.join("tmp"),
-        pi_base.join("sessions"),
-        opencode_base,
-        copilot_base.join("session-state"),
-        openhands_base.join("conversations"),
-        continue_base.join("sessions"),
-        qwen_base.join("projects"),
-        kimi_base.join("sessions"),
-        goose_base.join("sessions"),
-        cursor_base.join("chats"),
-        cline_base,
-        kiro_base,
-    ];
+    let mut dirs = Vec::new();
+    let mut push = |tool: ToolKind, path: PathBuf| {
+        if !disabled_sources.contains(&tool) {
+            dirs.push(path);
+        }
+    };
+    push(ToolKind::Claude, claude_base.join("projects"));
+    push(ToolKind::Codex, codex_base.join("sessions"));
+    push(ToolKind::OpenClaw, openclaw_base.join("agents"));
+    push(ToolKind::Hermes, hermes_base.join("sessions"));
+    push(ToolKind::CodeBuddy, codebuddy_base.join("projects"));
+    push(ToolKind::CodeBuddy, codebuddy_base.join("sessions"));
+    push(ToolKind::Gemini, gemini_base.join("tmp"));
+    push(ToolKind::Pi, pi_base.join("sessions"));
+    push(ToolKind::OpenCode, opencode_base);
+    push(ToolKind::Copilot, copilot_base.join("session-state"));
+    push(ToolKind::OpenHands, openhands_base.join("conversations"));
+    push(ToolKind::ContinueCn, continue_base.join("sessions"));
+    push(ToolKind::Qwen, qwen_base.join("projects"));
+    push(ToolKind::Kimi, kimi_base.join("sessions"));
+    push(ToolKind::Goose, goose_base.join("sessions"));
+    push(ToolKind::Cursor, cursor_base.join("chats"));
+    push(ToolKind::Cline, cline_base);
+    push(ToolKind::Kiro, kiro_base);
 
     let hermes_profiles = hermes_base.join("profiles");
-    if let Ok(entries) = std::fs::read_dir(&hermes_profiles) {
-        for entry in entries.flatten() {
-            if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
-                dirs.push(entry.path().join("sessions"));
+    if !disabled_sources.contains(&ToolKind::Hermes) {
+        if let Ok(entries) = std::fs::read_dir(&hermes_profiles) {
+            for entry in entries.flatten() {
+                if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+                    dirs.push(entry.path().join("sessions"));
+                }
             }
         }
     }
@@ -99,38 +113,68 @@ pub fn spawn_fs_watcher(state: AppState) {
             }
         };
 
-        let dirs = watch_dirs();
-        let mut watching = 0usize;
-        for dir in &dirs {
-            if !dir.exists() {
-                tracing::debug!("Watch dir does not exist (yet): {}", dir.display());
-                continue;
-            }
-            match debouncer
-                .watcher()
-                .watch(dir, notify::RecursiveMode::Recursive)
-            {
-                Ok(()) => {
-                    watching += 1;
-                    tracing::info!("Watching {}", dir.display());
-                }
-                Err(e) => {
-                    tracing::warn!("Cannot watch {}: {e}", dir.display());
-                }
-            }
-        }
+        let mut watched: HashSet<PathBuf> = HashSet::new();
+        let mut idle_reported = false;
+        let mut reconcile_watches = |watched: &mut HashSet<PathBuf>| {
+            let disabled_sources = state
+                .bootstrap
+                .blocking_read()
+                .config
+                .disabled_sources
+                .clone();
+            let desired: HashSet<PathBuf> = watch_dirs(&disabled_sources)
+                .into_iter()
+                .filter(|dir| dir.exists())
+                .collect();
 
-        if watching == 0 {
-            tracing::info!("No adapter directories found to watch; fs watcher idle");
-        }
+            for dir in watched.difference(&desired).cloned().collect::<Vec<_>>() {
+                match debouncer.watcher().unwatch(&dir) {
+                    Ok(()) => {
+                        tracing::info!("Stopped watching {}", dir.display());
+                    }
+                    Err(e) => {
+                        tracing::warn!("Cannot unwatch {}: {e}", dir.display());
+                    }
+                }
+                watched.remove(&dir);
+            }
+
+            for dir in desired.difference(watched).cloned().collect::<Vec<_>>() {
+                match debouncer
+                    .watcher()
+                    .watch(&dir, notify::RecursiveMode::Recursive)
+                {
+                    Ok(()) => {
+                        tracing::info!("Watching {}", dir.display());
+                        watched.insert(dir);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Cannot watch {}: {e}", dir.display());
+                    }
+                }
+            }
+
+            if watched.is_empty() && !idle_reported {
+                tracing::info!("No adapter directories found to watch; fs watcher idle");
+                idle_reported = true;
+            } else if !watched.is_empty() {
+                idle_reported = false;
+            }
+        };
+
+        reconcile_watches(&mut watched);
 
         // Block this thread, forwarding debounced events → probe wake.
         loop {
-            match rx.recv() {
+            match rx.recv_timeout(Duration::from_secs(5)) {
                 Ok(Ok(events)) => {
+                    reconcile_watches(&mut watched);
                     let dominated_by_data =
                         events.iter().any(|e| e.kind == DebouncedEventKind::Any);
-                    if dominated_by_data {
+                    let active_watch = events
+                        .iter()
+                        .any(|e| watched.iter().any(|dir| e.path.starts_with(dir)));
+                    if dominated_by_data && active_watch {
                         tracing::debug!(
                             "FS change detected ({} events), waking probe",
                             events.len()
@@ -140,6 +184,9 @@ pub fn spawn_fs_watcher(state: AppState) {
                 }
                 Ok(Err(err)) => {
                     tracing::warn!("Watch error: {err}");
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    reconcile_watches(&mut watched);
                 }
                 Err(_) => {
                     // Channel closed — debouncer dropped.
@@ -155,9 +202,10 @@ pub fn spawn_fs_watcher(state: AppState) {
 mod tests {
     use std::fs;
 
+    use octomonitor_core::ToolKind;
     use tempfile::tempdir;
 
-    use super::watch_dirs_for_home;
+    use super::{watch_dirs_for_home, watch_dirs_for_home_with_disabled};
 
     #[test]
     fn watch_dirs_for_home_uses_dot_directory_defaults() {
@@ -223,5 +271,21 @@ mod tests {
             !dirs.iter().any(|d| d == &readme_subpath),
             "non-directory entries should not become watch paths"
         );
+    }
+
+    #[test]
+    fn watch_dirs_for_home_omits_disabled_sources() {
+        let temp = tempdir().unwrap();
+        let home = temp.path();
+        let dirs = watch_dirs_for_home_with_disabled(
+            home,
+            &[ToolKind::Claude, ToolKind::Hermes, ToolKind::CodeBuddy],
+        );
+
+        assert!(!dirs.iter().any(|d| d == &home.join(".claude/projects")));
+        assert!(!dirs.iter().any(|d| d == &home.join(".hermes/sessions")));
+        assert!(!dirs.iter().any(|d| d == &home.join(".codebuddy/projects")));
+        assert!(!dirs.iter().any(|d| d == &home.join(".codebuddy/sessions")));
+        assert!(dirs.iter().any(|d| d == &home.join(".codex/sessions")));
     }
 }

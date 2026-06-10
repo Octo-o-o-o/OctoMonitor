@@ -1,5 +1,7 @@
-use axum::Json;
+use axum::{extract::State, Json};
 use octomonitor_installer::{detect_tools, doctor_report};
+
+use crate::state::AppState;
 
 pub async fn installer_detect() -> Json<serde_json::Value> {
     Json(serde_json::json!({"capabilities": detect_tools()}))
@@ -7,6 +9,28 @@ pub async fn installer_detect() -> Json<serde_json::Value> {
 
 pub async fn installer_doctor() -> Json<serde_json::Value> {
     Json(serde_json::json!({"checks": doctor_report()}))
+}
+
+pub async fn installer_verify(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let payload = state.bootstrap.read().await;
+    let mut checks = doctor_report();
+    checks.push(format!(
+        "Source controls: {} disabled, {} hidden",
+        payload.config.disabled_sources.len(),
+        payload.config.hidden_sources.len()
+    ));
+    checks.push(format!(
+        "Adapter health rows: {} current source reports",
+        payload.adapter_health.len()
+    ));
+
+    Json(serde_json::json!({
+        "ok": true,
+        "checks": checks,
+        "disabledSources": payload.config.disabled_sources.clone(),
+        "hiddenSources": payload.config.hidden_sources.clone(),
+        "adapterHealth": payload.adapter_health.clone(),
+    }))
 }
 
 #[cfg(test)]
@@ -42,9 +66,9 @@ mod tests {
             .get("capabilities")
             .and_then(|v| v.as_array())
             .expect("capabilities array present");
-        // Four well-known tools are always reported (detection result varies
+        // Monitored and candidate tools are always reported (detection result varies
         // per host, but the envelope shape is fixed by the installer crate).
-        assert_eq!(capabilities.len(), 4);
+        assert_eq!(capabilities.len(), 8);
     }
 
     #[tokio::test]
@@ -54,6 +78,20 @@ mod tests {
         assert!(
             payload.get("checks").and_then(|v| v.as_array()).is_some(),
             "doctor payload should expose `checks` array: {payload}"
+        );
+    }
+
+    #[tokio::test]
+    async fn installer_verify_returns_read_only_source_control_state() {
+        let harness = ServerTestHarness::new();
+        let payload = fetch_json(&harness, "/api/installer/verify").await;
+        assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(true));
+        assert!(
+            payload
+                .get("disabledSources")
+                .and_then(|v| v.as_array())
+                .is_some(),
+            "verify payload should expose source controls: {payload}"
         );
     }
 }

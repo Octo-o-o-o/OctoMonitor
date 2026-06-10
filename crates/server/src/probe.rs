@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 
@@ -48,6 +48,29 @@ struct ProbeScanResult {
     pending_crons: Vec<PendingCron>,
 }
 
+#[derive(Clone, Debug)]
+struct SourceGate {
+    disabled: HashSet<ToolKind>,
+}
+
+impl SourceGate {
+    fn from_config(config: &AppConfig) -> Self {
+        Self {
+            disabled: config.disabled_sources.iter().copied().collect(),
+        }
+    }
+
+    fn all_enabled() -> Self {
+        Self {
+            disabled: HashSet::new(),
+        }
+    }
+
+    fn enabled(&self, tool: ToolKind) -> bool {
+        !self.disabled.contains(&tool)
+    }
+}
+
 fn has_active_runs(payload: &BootstrapPayload) -> bool {
     payload.runs.iter().any(|r| {
         matches!(
@@ -64,6 +87,8 @@ fn default_app_config() -> AppConfig {
         history_days: 30,
         companion_enabled: false,
         local_ip: None,
+        disabled_sources: Vec::new(),
+        hidden_sources: Vec::new(),
     }
 }
 
@@ -719,44 +744,88 @@ async fn scan_adapters_isolated(
     p0_adapter::P0Snapshot,
 ) {
     let started_at = Instant::now();
+    let gate = {
+        let payload = state.bootstrap.read().await;
+        SourceGate::from_config(&payload.config)
+    };
     let claude_cache = state.claude_probe_cache.clone();
     let codex_cache = state.codex_probe_cache.clone();
     let openclaw_cache = state.openclaw_probe_cache.clone();
     let hermes_cache = state.hermes_probe_cache.clone();
+    let claude_enabled = gate.enabled(ToolKind::Claude);
+    let codex_enabled = gate.enabled(ToolKind::Codex);
+    let openclaw_enabled = gate.enabled(ToolKind::OpenClaw);
+    let hermes_enabled = gate.enabled(ToolKind::Hermes);
+    let p0_tools: Vec<_> = p0_adapter::all_p0_tools()
+        .into_iter()
+        .filter(|tool| gate.enabled(p0_tool_kind(*tool)))
+        .collect();
     let (claude_probe, codex_probe, openclaw_probe, hermes_probe, p0_probe) = tokio::join!(
+        async move {
+            if claude_enabled {
+                run_probe_task(
+                    "claude",
+                    move || match claude_cache.try_lock() {
+                        Ok(mut cache) => claude_adapter::probe_with_cache(&mut cache),
+                        Err(_) => failed_claude_snapshot(PROBE_CACHE_BUSY.into()),
+                    },
+                    failed_claude_snapshot,
+                )
+                .await
+            } else {
+                failed_claude_snapshot("source disabled".into())
+            }
+        },
+        async move {
+            if codex_enabled {
+                run_probe_task(
+                    "codex",
+                    move || match codex_cache.try_lock() {
+                        Ok(mut cache) => codex_adapter::probe_with_cache(&mut cache),
+                        Err(_) => failed_codex_snapshot(PROBE_CACHE_BUSY.into()),
+                    },
+                    failed_codex_snapshot,
+                )
+                .await
+            } else {
+                failed_codex_snapshot("source disabled".into())
+            }
+        },
+        async move {
+            if openclaw_enabled {
+                run_probe_task(
+                    "openclaw",
+                    move || match openclaw_cache.try_lock() {
+                        Ok(mut cache) => openclaw_adapter::probe_with_cache(&mut cache),
+                        Err(_) => failed_openclaw_snapshot(PROBE_CACHE_BUSY.into()),
+                    },
+                    failed_openclaw_snapshot,
+                )
+                .await
+            } else {
+                failed_openclaw_snapshot("source disabled".into())
+            }
+        },
+        async move {
+            if hermes_enabled {
+                run_probe_task(
+                    "hermes",
+                    move || match hermes_cache.try_lock() {
+                        Ok(mut cache) => hermes_adapter::probe_with_cache(&mut cache),
+                        Err(_) => failed_hermes_snapshot(PROBE_CACHE_BUSY.into()),
+                    },
+                    failed_hermes_snapshot,
+                )
+                .await
+            } else {
+                failed_hermes_snapshot("source disabled".into())
+            }
+        },
         run_probe_task(
-            "claude",
-            move || match claude_cache.try_lock() {
-                Ok(mut cache) => claude_adapter::probe_with_cache(&mut cache),
-                Err(_) => failed_claude_snapshot(PROBE_CACHE_BUSY.into()),
-            },
-            failed_claude_snapshot
+            "p0",
+            move || p0_adapter::probe_tools(p0_tools),
+            failed_p0_snapshot
         ),
-        run_probe_task(
-            "codex",
-            move || match codex_cache.try_lock() {
-                Ok(mut cache) => codex_adapter::probe_with_cache(&mut cache),
-                Err(_) => failed_codex_snapshot(PROBE_CACHE_BUSY.into()),
-            },
-            failed_codex_snapshot
-        ),
-        run_probe_task(
-            "openclaw",
-            move || match openclaw_cache.try_lock() {
-                Ok(mut cache) => openclaw_adapter::probe_with_cache(&mut cache),
-                Err(_) => failed_openclaw_snapshot(PROBE_CACHE_BUSY.into()),
-            },
-            failed_openclaw_snapshot
-        ),
-        run_probe_task(
-            "hermes",
-            move || match hermes_cache.try_lock() {
-                Ok(mut cache) => hermes_adapter::probe_with_cache(&mut cache),
-                Err(_) => failed_hermes_snapshot(PROBE_CACHE_BUSY.into()),
-            },
-            failed_hermes_snapshot
-        ),
-        run_probe_task("p0", p0_adapter::probe, failed_p0_snapshot),
     );
     let p0_sessions: usize = p0_probe
         .reports
@@ -1017,6 +1086,7 @@ fn hermes_source_mode_label(gateway_running: bool) -> &'static str {
 
 fn collect_probe_scan_from_snapshots(
     include_placeholder_runs: bool,
+    gate: &SourceGate,
     claude_probe: claude_adapter::ClaudeSnapshot,
     codex_probe: codex_adapter::CodexSnapshot,
     openclaw_probe: openclaw_adapter::OpenClawSnapshot,
@@ -1046,35 +1116,46 @@ fn collect_probe_scan_from_snapshots(
         }
     }
 
-    extend_or_placeholder(
-        &mut runs,
-        &claude_probe.sessions,
-        include_placeholder_runs,
-        |s| build_run_from_claude_session(s, &claude_probe),
-        || build_probe_run_from_claude(&claude_probe),
-    );
-    extend_or_placeholder(
-        &mut runs,
-        &codex_probe.sessions,
-        include_placeholder_runs,
-        |s| build_run_from_codex_session(s, &codex_probe),
-        || build_probe_run_from_codex(&codex_probe),
-    );
-    extend_or_placeholder(
-        &mut runs,
-        &openclaw_probe.sessions,
-        include_placeholder_runs,
-        |s| build_run_from_openclaw_session(s, &openclaw_probe),
-        || build_probe_run_from_openclaw(&openclaw_probe),
-    );
-    extend_or_placeholder(
-        &mut runs,
-        &hermes_probe.sessions,
-        include_placeholder_runs,
-        |s| build_run_from_hermes_session(s, &hermes_probe),
-        || build_probe_run_from_hermes(&hermes_probe),
-    );
+    if gate.enabled(ToolKind::Claude) {
+        extend_or_placeholder(
+            &mut runs,
+            &claude_probe.sessions,
+            include_placeholder_runs,
+            |s| build_run_from_claude_session(s, &claude_probe),
+            || build_probe_run_from_claude(&claude_probe),
+        );
+    }
+    if gate.enabled(ToolKind::Codex) {
+        extend_or_placeholder(
+            &mut runs,
+            &codex_probe.sessions,
+            include_placeholder_runs,
+            |s| build_run_from_codex_session(s, &codex_probe),
+            || build_probe_run_from_codex(&codex_probe),
+        );
+    }
+    if gate.enabled(ToolKind::OpenClaw) {
+        extend_or_placeholder(
+            &mut runs,
+            &openclaw_probe.sessions,
+            include_placeholder_runs,
+            |s| build_run_from_openclaw_session(s, &openclaw_probe),
+            || build_probe_run_from_openclaw(&openclaw_probe),
+        );
+    }
+    if gate.enabled(ToolKind::Hermes) {
+        extend_or_placeholder(
+            &mut runs,
+            &hermes_probe.sessions,
+            include_placeholder_runs,
+            |s| build_run_from_hermes_session(s, &hermes_probe),
+            || build_probe_run_from_hermes(&hermes_probe),
+        );
+    }
     for report in &p0_probe.reports {
+        if !gate.enabled(p0_tool_kind(report.tool)) {
+            continue;
+        }
         if report.sessions.is_empty() {
             if include_placeholder_runs {
                 runs.push(build_probe_run_from_p0_report(report));
@@ -1104,54 +1185,67 @@ fn collect_probe_scan_from_snapshots(
     let openclaw_auth = gateway_auth_mode_label(openclaw_probe.gateway_status_ok);
     let hermes_auth = gateway_auth_mode_label(hermes_probe.gateway_running);
 
-    let mut identities = vec![
-        make_identity(
+    let mut identities = Vec::new();
+    if gate.enabled(ToolKind::Claude) {
+        identities.push(make_identity(
             ToolKind::Claude,
             claude_auth,
             "claude",
             claude_probe.cli_available,
             claude_probe.config_exists,
             SourceConfidence::Live,
-        ),
-        make_identity(
+        ));
+    }
+    if gate.enabled(ToolKind::Codex) {
+        identities.push(make_identity(
             ToolKind::Codex,
             codex_auth,
             "openai",
             codex_probe.cli_available,
             codex_probe.config_exists,
             SourceConfidence::Live,
-        ),
-        make_identity(
+        ));
+    }
+    if gate.enabled(ToolKind::OpenClaw) {
+        identities.push(make_identity(
             ToolKind::OpenClaw,
             openclaw_auth,
             "openclaw",
             openclaw_probe.cli_available,
             openclaw_probe.sessions_dir_exists || openclaw_probe.state_file_exists,
             SourceConfidence::Official,
-        ),
-        make_identity(
+        ));
+    }
+    if gate.enabled(ToolKind::Hermes) {
+        identities.push(make_identity(
             ToolKind::Hermes,
             hermes_auth,
             "hermes",
             hermes_probe.cli_available,
             !hermes_probe.instances.is_empty(),
             SourceConfidence::Live,
-        ),
-    ];
-    identities.extend(p0_probe.reports.iter().map(|report| {
-        make_identity(
-            p0_tool_kind(report.tool),
-            if report.cli_available {
-                "configured"
-            } else {
-                "unavailable"
-            },
-            p0_tool_provider(report.tool),
-            report.cli_available,
-            report.root_exists || !report.sessions.is_empty(),
-            p0_source_confidence(report.tool),
-        )
-    }));
+        ));
+    }
+    identities.extend(
+        p0_probe
+            .reports
+            .iter()
+            .filter(|report| gate.enabled(p0_tool_kind(report.tool)))
+            .map(|report| {
+                make_identity(
+                    p0_tool_kind(report.tool),
+                    if report.cli_available {
+                        "configured"
+                    } else {
+                        "unavailable"
+                    },
+                    p0_tool_provider(report.tool),
+                    report.cli_available,
+                    report.root_exists || !report.sessions.is_empty(),
+                    p0_source_confidence(report.tool),
+                )
+            }),
+    );
 
     let openclaw_mode = if openclaw_probe.gateway_status_ok {
         "gateway+status+probe"
@@ -1174,8 +1268,9 @@ fn collect_probe_scan_from_snapshots(
         map_openclaw_gateway_status(&openclaw_probe);
     let (hermes_gateway_status, hermes_gateway_detail) = map_hermes_gateway_status(&hermes_probe);
 
-    let mut adapter_health = vec![
-        make_adapter_health(
+    let mut adapter_health = Vec::new();
+    if gate.enabled(ToolKind::Claude) {
+        adapter_health.push(make_adapter_health(
             ToolKind::Claude,
             "hook+statusline+probe",
             claude_probe.cli_available,
@@ -1183,8 +1278,10 @@ fn collect_probe_scan_from_snapshots(
             None,
             &now,
             claude_error,
-        ),
-        make_adapter_health(
+        ));
+    }
+    if gate.enabled(ToolKind::Codex) {
+        adapter_health.push(make_adapter_health(
             ToolKind::Codex,
             "app-server+hook+probe",
             codex_probe.cli_available,
@@ -1192,8 +1289,10 @@ fn collect_probe_scan_from_snapshots(
             None,
             &now,
             codex_error,
-        ),
-        make_adapter_health(
+        ));
+    }
+    if gate.enabled(ToolKind::OpenClaw) {
+        adapter_health.push(make_adapter_health(
             ToolKind::OpenClaw,
             openclaw_mode,
             openclaw_probe.cli_available,
@@ -1201,8 +1300,10 @@ fn collect_probe_scan_from_snapshots(
             openclaw_gateway_detail,
             &now,
             openclaw_error,
-        ),
-        make_adapter_health(
+        ));
+    }
+    if gate.enabled(ToolKind::Hermes) {
+        adapter_health.push(make_adapter_health(
             ToolKind::Hermes,
             hermes_mode,
             hermes_probe.cli_available || !hermes_probe.instances.is_empty(),
@@ -1210,48 +1311,60 @@ fn collect_probe_scan_from_snapshots(
             hermes_gateway_detail,
             &now,
             hermes_error,
-        ),
-    ];
-    adapter_health.extend(p0_probe.reports.iter().map(|report| {
-        make_adapter_health(
-            p0_tool_kind(report.tool),
-            p0_report_mode(report),
-            report.cli_available || report.root_exists || !report.sessions.is_empty(),
-            None,
-            None,
-            &now,
-            first_probe_error(&report.command_probes),
-        )
-    }));
+        ));
+    }
+    adapter_health.extend(
+        p0_probe
+            .reports
+            .iter()
+            .filter(|report| gate.enabled(p0_tool_kind(report.tool)))
+            .map(|report| {
+                make_adapter_health(
+                    p0_tool_kind(report.tool),
+                    p0_report_mode(report),
+                    report.cli_available || report.root_exists || !report.sessions.is_empty(),
+                    None,
+                    None,
+                    &now,
+                    first_probe_error(&report.command_probes),
+                )
+            }),
+    );
 
-    let mut pending_crons: Vec<PendingCron> = openclaw_probe
-        .cron_jobs
-        .iter()
-        .filter(|j| j.enabled)
-        .map(|j| PendingCron {
-            id: j.id.clone(),
-            name: j.name.clone(),
-            agent_id: j.agent_id.clone(),
-            schedule_expr: j.schedule_expr.clone(),
-            schedule_tz: j.schedule_tz.clone(),
-            schedule_human: j.schedule_human.clone(),
-        })
-        .collect();
-
-    pending_crons.extend(
-        hermes_probe
+    let mut pending_crons: Vec<PendingCron> = if gate.enabled(ToolKind::OpenClaw) {
+        openclaw_probe
             .cron_jobs
             .iter()
             .filter(|j| j.enabled)
             .map(|j| PendingCron {
-                id: format!("hermes-{}-{}", j.profile_name, j.id),
+                id: j.id.clone(),
                 name: j.name.clone(),
-                agent_id: Some(j.profile_name.clone()),
+                agent_id: j.agent_id.clone(),
                 schedule_expr: j.schedule_expr.clone(),
                 schedule_tz: j.schedule_tz.clone(),
                 schedule_human: j.schedule_human.clone(),
-            }),
-    );
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    if gate.enabled(ToolKind::Hermes) {
+        pending_crons.extend(
+            hermes_probe
+                .cron_jobs
+                .iter()
+                .filter(|j| j.enabled)
+                .map(|j| PendingCron {
+                    id: format!("hermes-{}-{}", j.profile_name, j.id),
+                    name: j.name.clone(),
+                    agent_id: Some(j.profile_name.clone()),
+                    schedule_expr: j.schedule_expr.clone(),
+                    schedule_tz: j.schedule_tz.clone(),
+                    schedule_human: j.schedule_human.clone(),
+                }),
+        );
+    }
 
     let result = ProbeScanResult {
         generated_at: now,
@@ -1278,6 +1391,7 @@ fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
         scan_adapters_blocking();
     collect_probe_scan_from_snapshots(
         include_placeholder_runs,
+        &SourceGate::all_enabled(),
         claude_probe,
         codex_probe,
         openclaw_probe,
@@ -1292,8 +1406,13 @@ async fn collect_probe_scan_isolated(
 ) -> ProbeScanResult {
     let (claude_probe, codex_probe, openclaw_probe, hermes_probe, p0_probe) =
         scan_adapters_isolated(state).await;
+    let gate = {
+        let payload = state.bootstrap.read().await;
+        SourceGate::from_config(&payload.config)
+    };
     collect_probe_scan_from_snapshots(
         include_placeholder_runs,
+        &gate,
         claude_probe,
         codex_probe,
         openclaw_probe,
@@ -2986,6 +3105,8 @@ mod tests {
                 history_days,
                 companion_enabled: false,
                 local_ip: None,
+                disabled_sources: Vec::new(),
+                hidden_sources: Vec::new(),
             },
         }
     }
@@ -3124,6 +3245,8 @@ mod tests {
                 history_days: 7,
                 companion_enabled: false,
                 local_ip: None,
+                disabled_sources: Vec::new(),
+                hidden_sources: Vec::new(),
             },
         };
         let previous = BootstrapPayload {
@@ -3191,6 +3314,8 @@ mod tests {
                 history_days: 7,
                 companion_enabled: false,
                 local_ip: None,
+                disabled_sources: Vec::new(),
+                hidden_sources: Vec::new(),
             },
         };
         let previous = BootstrapPayload {
@@ -3374,6 +3499,8 @@ mod tests {
                 history_days: 7,
                 companion_enabled: false,
                 local_ip: None,
+                disabled_sources: Vec::new(),
+                hidden_sources: Vec::new(),
             },
         };
 

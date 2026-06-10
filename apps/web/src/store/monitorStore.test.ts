@@ -21,6 +21,8 @@ function bootstrapWithRuns(runs: RunRecord[]): BootstrapPayload {
       historyDays: 30,
       companionEnabled: false,
       localIp: null,
+      disabledSources: [],
+      hiddenSources: [],
     },
   }
 }

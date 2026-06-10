@@ -128,6 +128,20 @@ fn resume_capabilities(has_resume_id: bool, include_deeplink: bool) -> Vec<Capab
     capabilities
 }
 
+async fn source_ingest_enabled(state: &AppState, tool: ToolKind) -> bool {
+    let payload = state.bootstrap.read().await;
+    payload.config.source_enabled(tool)
+}
+
+fn disabled_source_response(tool: ToolKind) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "ok": false,
+        "ignored": true,
+        "reason": "source disabled",
+        "tool": tool,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeStatuslineIngest {
@@ -175,6 +189,9 @@ pub async fn ingest_claude_statusline(
     State(state): State<AppState>,
     Json(input): Json<ClaudeStatuslineIngest>,
 ) -> Json<serde_json::Value> {
+    if !source_ingest_enabled(&state, ToolKind::Claude).await {
+        return disabled_source_response(ToolKind::Claude);
+    }
     let session_id = input.session_id;
     let workspace_path = input.workspace_path.unwrap_or_else(|| "~/.claude".into());
     let quota = statusline_quota(
@@ -282,6 +299,9 @@ pub async fn ingest_claude_hook(
     State(state): State<AppState>,
     Json(input): Json<ClaudeHookIngest>,
 ) -> Json<serde_json::Value> {
+    if !source_ingest_enabled(&state, ToolKind::Claude).await {
+        return disabled_source_response(ToolKind::Claude);
+    }
     let event = input.event.unwrap_or_else(|| "notification".into());
     let pending = event.contains("permission");
     let workspace_path = input.cwd.unwrap_or_else(|| "~/.claude".into());
@@ -371,6 +391,9 @@ pub async fn ingest_codex_hook(
     State(state): State<AppState>,
     Json(input): Json<CodexHookIngest>,
 ) -> Json<serde_json::Value> {
+    if !source_ingest_enabled(&state, ToolKind::Codex).await {
+        return disabled_source_response(ToolKind::Codex);
+    }
     let pending = input.waiting_on_approval.unwrap_or(false);
     let event = input.event.unwrap_or_else(|| "hook".into());
     let workspace_path = input
@@ -770,5 +793,39 @@ mod tests {
             .expect("codex stop run");
         assert_eq!(run.state, RunState::Completed);
         assert_eq!(run.tokens.total, 200);
+    }
+
+    #[tokio::test]
+    async fn disabled_sources_ignore_hook_ingest() {
+        let state = test_state();
+        state
+            .bootstrap
+            .write()
+            .await
+            .config
+            .disabled_sources
+            .push(ToolKind::Codex);
+
+        let response = ingest_codex_hook(
+            State(state.clone()),
+            Json(CodexHookIngest {
+                thread_id: Some("disabled".into()),
+                cwd: Some("/tmp/octomonitor".into()),
+                model: Some("gpt-5".into()),
+                event: Some("start".into()),
+                waiting_on_approval: None,
+                total_tokens: Some(200),
+            }),
+        )
+        .await;
+
+        assert_eq!(
+            response.0.get("ignored").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(
+            state.bootstrap.read().await.runs.is_empty(),
+            "disabled source hook must not create runtime runs"
+        );
     }
 }

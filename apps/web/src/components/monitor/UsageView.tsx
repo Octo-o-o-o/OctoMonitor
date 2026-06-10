@@ -106,8 +106,17 @@ export function UsageView() {
     () => (data ? buildUsageDateRange(data.runs, data.usageBuckets) : null),
     [data],
   )
+  const hiddenSources = useMemo(
+    () => new Set<ToolKind>(data?.config.hiddenSources ?? []),
+    [data?.config.hiddenSources],
+  )
+  const visibleTools = useMemo(
+    () => allTools.filter((tool) => !hiddenSources.has(tool)),
+    [hiddenSources],
+  )
 
-  const activeRuns = (mode === 'history' ? historyData?.runs : data?.runs) ?? []
+  const activeRuns = ((mode === 'history' ? historyData?.runs : data?.runs) ?? [])
+    .filter((run) => !hiddenSources.has(run.tool))
   const activeBuckets = (mode === 'history' ? historyData?.usageBuckets : data?.usageBuckets) ?? []
 
   const effectiveRange = useMemo(() => {
@@ -129,7 +138,7 @@ export function UsageView() {
 
   const grouped = useMemo((): GroupedUsage[] => {
     const map = Object.fromEntries(
-      allTools.map((tool) => [tool, { tool, totalTokens: 0, totalCost: 0, items: [] }]),
+      visibleTools.map((tool) => [tool, { tool, totalTokens: 0, totalCost: 0, items: [] }]),
     ) as unknown as Record<ToolKind, GroupedUsage>
 
     const tagMap: Record<string, Record<string, { tokens: number; cost: number }>> = {}
@@ -143,7 +152,7 @@ export function UsageView() {
       tagMap[tool][tag].cost += usage.costUsd ?? 0
     }
 
-    for (const tool of allTools) {
+    for (const tool of visibleTools) {
       const entries = tagMap[tool] ?? {}
       const items = Object.entries(entries)
         .map(([tag, val]) => ({ tag, tokens: val.tokens, cost: val.cost }))
@@ -153,8 +162,8 @@ export function UsageView() {
       map[tool].totalCost = items.reduce((sum, item) => sum + item.cost, 0)
     }
 
-    return allTools.map((tool) => map[tool])
-  }, [agentDisplayFormat, runUsageSlices])
+    return visibleTools.map((tool) => map[tool])
+  }, [agentDisplayFormat, runUsageSlices, visibleTools])
 
   const totals = useMemo(() => {
     const meteredSummary = sumUsageSlices(

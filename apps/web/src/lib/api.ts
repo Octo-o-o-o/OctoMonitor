@@ -7,6 +7,8 @@ const DEFAULT_CONFIG: BootstrapPayload['config'] = {
   historyDays: 30,
   companionEnabled: false,
   localIp: null,
+  disabledSources: [],
+  hiddenSources: [],
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -37,6 +39,8 @@ export function normalizeBootstrapPayload(payload: unknown): BootstrapPayload {
       historyDays: typeof config?.historyDays === 'number' ? config.historyDays : DEFAULT_CONFIG.historyDays,
       companionEnabled: typeof config?.companionEnabled === 'boolean' ? config.companionEnabled : DEFAULT_CONFIG.companionEnabled,
       localIp: typeof config?.localIp === 'string' ? config.localIp : null,
+      disabledSources: asArray(config?.disabledSources),
+      hiddenSources: asArray(config?.hiddenSources),
     },
   }
 }

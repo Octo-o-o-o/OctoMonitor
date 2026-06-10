@@ -317,8 +317,12 @@ pub fn all_p0_tools() -> Vec<P0Tool> {
 }
 
 pub fn probe() -> P0Snapshot {
+    probe_tools(all_p0_tools())
+}
+
+pub fn probe_tools(tools: Vec<P0Tool>) -> P0Snapshot {
     let probed_at = Utc::now().to_rfc3339();
-    let reports = all_p0_tools()
+    let reports = tools
         .into_iter()
         .map(|tool| probe_tool(tool, &probed_at))
         .collect();
@@ -1728,6 +1732,12 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../fixtures/agents")
             .join(path)
+    }
+
+    #[test]
+    fn probe_tools_can_skip_all_sources() {
+        let snapshot = probe_tools(Vec::new());
+        assert!(snapshot.reports.is_empty());
     }
 
     #[test]

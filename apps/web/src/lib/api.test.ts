@@ -63,6 +63,8 @@ describe('api helpers', () => {
     expect(normalized.commits).toEqual([])
     expect(normalized.runs).toEqual([])
     expect(normalized.config.listenPort).toBe(46321)
+    expect(normalized.config.disabledSources).toEqual([])
+    expect(normalized.config.hiddenSources).toEqual([])
   })
 
   it('falls back to the server default history window when config is incomplete', async () => {

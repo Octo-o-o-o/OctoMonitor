@@ -1,4 +1,4 @@
-use octomonitor_core::AppConfig;
+use octomonitor_core::{AppConfig, ToolKind};
 use serde::{Deserialize, Serialize};
 
 use crate::platform::home_relative_path;
@@ -11,6 +11,18 @@ pub struct ConfigPatch {
     pub version: Option<u8>,
     pub companion_enabled: Option<bool>,
     pub history_days: Option<u8>,
+    pub disabled_sources: Option<Vec<ToolKind>>,
+    pub hidden_sources: Option<Vec<ToolKind>>,
+}
+
+pub fn normalize_tool_list(input: Vec<ToolKind>) -> Vec<ToolKind> {
+    let mut output = Vec::new();
+    for tool in input {
+        if !output.contains(&tool) {
+            output.push(tool);
+        }
+    }
+    output
 }
 
 pub fn config_path() -> std::path::PathBuf {
@@ -32,9 +44,11 @@ pub fn save_config(config: &AppConfig) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let patch = ConfigPatch {
-        version: Some(2),
+        version: Some(3),
         companion_enabled: Some(config.companion_enabled),
         history_days: Some(config.history_days),
+        disabled_sources: Some(normalize_tool_list(config.disabled_sources.clone())),
+        hidden_sources: Some(normalize_tool_list(config.hidden_sources.clone())),
     };
     let json = serde_json::to_string_pretty(&patch).map_err(std::io::Error::other)?;
     std::fs::write(&path, json)

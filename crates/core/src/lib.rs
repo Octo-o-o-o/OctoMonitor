@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum ToolKind {
@@ -618,6 +618,20 @@ pub struct AppConfig {
     pub history_days: u8,
     pub companion_enabled: bool,
     pub local_ip: Option<String>,
+    #[serde(default)]
+    pub disabled_sources: Vec<ToolKind>,
+    #[serde(default)]
+    pub hidden_sources: Vec<ToolKind>,
+}
+
+impl AppConfig {
+    pub fn source_enabled(&self, tool: ToolKind) -> bool {
+        !self.disabled_sources.contains(&tool)
+    }
+
+    pub fn source_visible(&self, tool: ToolKind) -> bool {
+        !self.hidden_sources.contains(&tool)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -1339,6 +1353,8 @@ mod tests {
                 history_days: 7,
                 companion_enabled: false,
                 local_ip: None,
+                disabled_sources: Vec::new(),
+                hidden_sources: Vec::new(),
             },
         }
     }

@@ -545,8 +545,11 @@ export function MonitorView() {
   const isNarrowLayout = useMediaQuery(NARROW_LAYOUT_QUERY)
 
   const visiblePanels = useMemo(
-    () => buildVisiblePanels(panelConfig),
-    [panelConfig],
+    () => {
+      const hidden = new Set(data?.config.hiddenSources ?? [])
+      return buildVisiblePanels(panelConfig).filter((tool) => !hidden.has(tool))
+    },
+    [data?.config.hiddenSources, panelConfig],
   )
 
   const quickFilter = useMonitorStore((s) => s.monitorQuickFilter)

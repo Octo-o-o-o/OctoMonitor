@@ -22,7 +22,7 @@ use axum::{
 };
 use tower_http::cors::CorsLayer;
 
-use config::{load_config, save_config};
+use config::{load_config, normalize_tool_list, save_config};
 use handlers::{
     bootstrap, config as config_handler, events, history, ingest, inspect, installer, remote,
     resume, stream,
@@ -80,6 +80,7 @@ pub(crate) fn build_app(state: AppState) -> Router {
         )
         .route("/api/installer/detect", get(installer::installer_detect))
         .route("/api/installer/doctor", get(installer::installer_doctor))
+        .route("/api/installer/verify", get(installer::installer_verify))
         .route(
             "/api/remote/access",
             get(remote::get_remote_access).patch(remote::patch_remote_access),
@@ -109,16 +110,22 @@ fn apply_saved_config(initial: &mut octomonitor_core::BootstrapPayload) -> bool 
     if let Some(v) = saved.companion_enabled {
         initial.config.companion_enabled = v;
     }
-    let Some(days) = saved.history_days else {
-        return false;
-    };
-    let clamped = days.clamp(1, 180);
-    let needs_migration =
-        saved.version.unwrap_or(0) < SNAPSHOT_WINDOW_MIGRATION_VERSION && clamped == 7;
-    if needs_migration {
-        initial.config.history_days = 30;
-    } else {
-        initial.config.history_days = clamped;
+    let mut needs_migration = false;
+    if let Some(days) = saved.history_days {
+        let clamped = days.clamp(1, 180);
+        needs_migration =
+            saved.version.unwrap_or(0) < SNAPSHOT_WINDOW_MIGRATION_VERSION && clamped == 7;
+        if needs_migration {
+            initial.config.history_days = 30;
+        } else {
+            initial.config.history_days = clamped;
+        }
+    }
+    if let Some(disabled_sources) = saved.disabled_sources {
+        initial.config.disabled_sources = normalize_tool_list(disabled_sources);
+    }
+    if let Some(hidden_sources) = saved.hidden_sources {
+        initial.config.hidden_sources = normalize_tool_list(hidden_sources);
     }
     needs_migration
 }
