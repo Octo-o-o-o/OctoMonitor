@@ -18,9 +18,9 @@ html[data-surface="island"] #root {
 }
 
 .island-shell {
-  --island-width: 360px;
+  --island-width: 340px;
   --island-expanded-width: 640px;
-  --island-collapsed-height: 38px;
+  --island-collapsed-height: 34px;
   --island-expanded-height: 560px;
   position: relative;
   width: var(--island-width);
@@ -28,10 +28,8 @@ html[data-surface="island"] #root {
   overflow: hidden;
   border: 0;
   border-radius: 0 0 calc(var(--island-collapsed-height) / 2) calc(var(--island-collapsed-height) / 2);
-  background:
-    linear-gradient(180deg, rgba(7, 8, 10, 0.99), rgba(0, 0, 0, 0.98)),
-    #000;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  background: #000;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.34);
   pointer-events: auto;
   transition:
     width 180ms ease,
@@ -45,7 +43,7 @@ html[data-surface="island"] #root {
   width: min(var(--island-expanded-width), 100vw);
   height: min(var(--island-expanded-height), 100vh);
   border-radius: 0 0 22px 22px;
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 18px 64px rgba(0, 0, 0, 0.42);
 }
 
 .island-collapsed,
@@ -59,8 +57,8 @@ html[data-surface="island"] #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 0 14px;
+  gap: 10px;
+  padding: 0 15px;
   opacity: 1;
   transform: translateY(0);
 }
@@ -74,15 +72,15 @@ html[data-surface="island"] #root {
 .island-expanded {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px 16px;
+  gap: 12px;
+  padding: 12px 15px 15px;
   opacity: 0;
   transform: translateY(10px);
   pointer-events: none;
 }
 
 .island-shell.is-notched .island-expanded {
-  padding-top: calc(var(--island-collapsed-height) + 12px);
+  padding-top: 12px;
 }
 
 .island-shell.is-expanded .island-expanded {
@@ -92,30 +90,65 @@ html[data-surface="island"] #root {
 }
 
 .island-mark {
-  width: 28px;
-  height: 28px;
+  position: relative;
+  width: 24px;
+  height: 18px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: transparent;
 }
 
 .island-mark-dot,
 .island-status-dot {
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--muted);
+}
+
+.island-mark::before,
+.island-mark::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  width: 3px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.82;
+}
+
+.island-mark::before {
+  left: 4px;
+}
+
+.island-mark::after {
+  right: 4px;
+  height: 5px;
+  transform: translateY(1px);
 }
 
 .island-mark.is-live .island-mark-dot,
 .island-status-dot.is-live {
   background: var(--accent);
-  box-shadow: 0 0 16px rgba(var(--codex-accent-rgb), 0.55);
+  box-shadow: 0 0 10px rgba(var(--codex-accent-rgb), 0.42);
+}
+
+.island-mark.is-live::before,
+.island-mark.is-live::after {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--codex-accent-rgb), 0.22);
 }
 
 .island-mark.is-offline .island-mark-dot,
 .island-status-dot.is-offline {
+  background: var(--danger);
+}
+
+.island-mark.is-offline::before,
+.island-mark.is-offline::after {
   background: var(--danger);
 }
 
@@ -128,13 +161,16 @@ html[data-surface="island"] #root {
 }
 
 .island-count-summary {
-  min-width: 28px;
+  min-width: 22px;
   display: inline-block;
   color: #fff;
   font-family: var(--font-mono);
-  font-size: var(--font-size-md);
-  font-weight: 800;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  line-height: 1;
   text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.94;
 }
 
 .island-count {
@@ -161,9 +197,9 @@ html[data-surface="island"] #root {
   display: grid;
   grid-template-columns: auto 1fr auto auto;
   align-items: center;
-  gap: 8px;
-  min-height: 22px;
-  padding: 0 4px;
+  gap: 7px;
+  min-height: 24px;
+  padding: 0 3px;
 }
 
 .island-header-title {
@@ -171,7 +207,7 @@ html[data-surface="island"] #root {
   overflow: hidden;
   color: var(--text);
   font-size: var(--font-size-sm);
-  font-weight: 700;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -210,8 +246,8 @@ html[data-surface="island"] #root {
 }
 
 .island-settings-button {
-  width: 24px;
-  height: 24px;
+  width: 23px;
+  height: 23px;
   display: inline-grid;
   place-items: center;
   border: 0;
@@ -231,15 +267,15 @@ html[data-surface="island"] #root {
 }
 
 .island-settings-button svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   fill: currentColor;
 }
 
 .island-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
   overflow: auto;
   scrollbar-width: none;
@@ -251,15 +287,15 @@ html[data-surface="island"] #root {
 
 .island-item {
   width: 100%;
-  min-height: 58px;
+  min-height: 55px;
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) 108px;
+  grid-template-columns: 8px minmax(0, 1fr) 100px;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 8px 10px;
   border: 1px solid transparent;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.045);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.04);
   color: inherit;
   cursor: pointer;
   text-align: left;
@@ -268,8 +304,8 @@ html[data-surface="island"] #root {
 
 .island-item:hover,
 .island-item:focus-visible {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.065);
   outline: none;
   transform: translateY(-1px);
 }
@@ -279,8 +315,8 @@ html[data-surface="island"] #root {
 }
 
 .island-agent-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
 }
 
@@ -307,12 +343,14 @@ html[data-surface="island"] #root {
 .island-item-title {
   color: var(--text);
   font-size: var(--font-size-sm);
-  font-weight: 700;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
 .island-item-subtitle {
   color: var(--muted);
   font-size: var(--font-size-xs);
+  line-height: 1.2;
 }
 
 .island-item-meta {
@@ -325,7 +363,7 @@ html[data-surface="island"] #root {
 
 .island-priority-badge,
 .island-tool-badge {
-  max-width: 86px;
+  max-width: 78px;
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--font-size-3xs);
