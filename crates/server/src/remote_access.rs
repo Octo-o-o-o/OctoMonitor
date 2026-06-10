@@ -644,7 +644,14 @@ mod tests {
 
         for (method, uri) in [
             (Method::PATCH, "/api/config"),
+            (Method::GET, "/api/history/usage"),
             (Method::POST, "/api/ingest/codex/hook"),
+            (Method::GET, "/api/hooks"),
+            (Method::GET, "/api/hooks/codex/plan"),
+            (Method::POST, "/api/hooks/codex/apply"),
+            (Method::GET, "/api/remote/access"),
+            (Method::PATCH, "/api/remote/access"),
+            (Method::GET, "/api/runs/run-1/inspect"),
             (Method::GET, "/api/runs/run-1/events"),
             (Method::GET, "/api/runs/run-1/resume-command"),
             (Method::GET, "/api/runs/run-1/operations"),

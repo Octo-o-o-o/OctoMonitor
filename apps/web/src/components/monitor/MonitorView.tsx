@@ -124,6 +124,7 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
   const originBadge = run.tool === 'openClaw' && run.originProvider && run.originProvider !== 'heartbeat'
     ? run.originLabel ?? run.originProvider
     : undefined
+  const capabilityCount = run.capabilities?.length ?? 0
 
   const handleClick = () => {
     if (isError && !isAcknowledged) {
@@ -166,6 +167,14 @@ function SessionRow({ run, onClick, focused, hideTag, hideBadge }: { run: RunRec
         )}
         {originBadge && (
           <span className="session-origin">{originBadge}</span>
+        )}
+        <span className={`session-confidence confidence-${run.source.confidence}`}>
+          {run.source.confidence} · {run.source.freshness}
+        </span>
+        {capabilityCount > 0 && (
+          <span className="session-capability-count">
+            {capabilityCount} {t('monitor.capabilitiesShort')}
+          </span>
         )}
         <span className={`session-detail${isWaiting ? ' urgent' : ''}`}>
           {run.lastTail ?? ''}
@@ -437,7 +446,12 @@ function SourceColumn({
   const gatewayStatusLabel = sourceIndicator.labelKey ? t(sourceIndicator.labelKey) : undefined
 
   return (
-    <div className={`source-column ${sourceAccents[tool] ?? 'accent-generic'}`}>
+    <div
+      className={`source-column ${sourceAccents[tool] ?? 'accent-generic'}`}
+      role="region"
+      aria-label={`${sourceLabels[tool]} sessions`}
+      tabIndex={0}
+    >
       <div className="source-header">
         <div className="source-top-row">
           <div className="source-name-row">

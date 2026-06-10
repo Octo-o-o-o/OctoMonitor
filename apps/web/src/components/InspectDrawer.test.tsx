@@ -121,10 +121,7 @@ describe('InspectDrawer', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('fetches the Codex events endpoint when a Codex run is selected in local mode', async () => {
-    // Codex runs in local mode have a structured event timeline. The drawer
-    // should hit /api/runs/{id}/events on mount and then poll; for this test
-    // we only assert the initial call so we don't have to drive the timer.
+  it('fetches the Codex events endpoint only after explicit transcript load', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input) => {
@@ -156,16 +153,25 @@ describe('InspectDrawer', () => {
     )
 
     await act(async () => { await flushPromises() })
-    const calls = fetchSpy.mock.calls.map(([input]) =>
+    let calls = fetchSpy.mock.calls.map(([input]) =>
+      typeof input === 'string' ? input : (input as Request | URL).toString(),
+    )
+    expect(calls.some((url) => url.includes('/events'))).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load transcript' }))
+    await act(async () => { await flushPromises() })
+
+    calls = fetchSpy.mock.calls.map(([input]) =>
       typeof input === 'string' ? input : (input as Request | URL).toString(),
     )
     expect(
       calls.some((url) => url.includes(`/api/runs/${encodeURIComponent('codex-1')}/events`)),
       `expected an events fetch, saw: ${JSON.stringify(calls)}`,
     ).toBe(true)
+    expect(screen.getByText('No transcript entries found.')).toBeInTheDocument()
   })
 
-  it('falls back to the legacy /inspect endpoint for Claude runs', async () => {
+  it('falls back to the legacy /inspect endpoint only after explicit transcript load', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input) => {
@@ -197,13 +203,22 @@ describe('InspectDrawer', () => {
     )
 
     await act(async () => { await flushPromises() })
-    const calls = fetchSpy.mock.calls.map(([input]) =>
+    let calls = fetchSpy.mock.calls.map(([input]) =>
+      typeof input === 'string' ? input : (input as Request | URL).toString(),
+    )
+    expect(calls.some((url) => url.includes('/inspect'))).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load transcript' }))
+    await act(async () => { await flushPromises() })
+
+    calls = fetchSpy.mock.calls.map(([input]) =>
       typeof input === 'string' ? input : (input as Request | URL).toString(),
     )
     expect(
       calls.some((url) => url.includes(`/api/runs/${encodeURIComponent('claude-1')}/inspect`)),
       `expected a legacy inspect fetch, saw: ${JSON.stringify(calls)}`,
     ).toBe(true)
+    expect(screen.getByText('No transcript entries found.')).toBeInTheDocument()
     // And it should NOT have hit /events for a non-Codex run.
     expect(calls.some((url) => url.includes('/events'))).toBe(false)
   })
@@ -412,6 +427,9 @@ describe('InspectDrawer', () => {
     await act(async () => { await flushPromises() })
 
     expect(screen.getByText('Jump links')).toBeInTheDocument()
+    expect(screen.getByText('Control Plane')).toBeInTheDocument()
+    expect(screen.getByText('No operation capabilities')).toBeInTheDocument()
+    expect(screen.getByText('derived · warm')).toBeInTheDocument()
     expect(screen.getByText('Copy resume command')).toBeInTheDocument()
     expect(screen.getByText("codex resume 'thread with spaces'")).toBeInTheDocument()
     expect(screen.getByText('codex://threads/thread%20with%20spaces')).toBeInTheDocument()

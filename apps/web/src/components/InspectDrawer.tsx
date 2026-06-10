@@ -9,7 +9,7 @@ import { getRuntimeMode } from '../lib/runtimeMode'
 import { isTauriEnvironment } from '../lib/runtimeEnvironment'
 import { buildCodexDeepLink, getRunOpenAffordance } from '../lib/runTarget'
 import { openExternalUrl } from '../lib/openExternal'
-import type { JumpTarget } from '../lib/types'
+import type { JumpTarget, RunRecord } from '../lib/types'
 import { CopyButton } from './common/CopyButton'
 import { useToastStore } from '../store/toastStore'
 
@@ -79,6 +79,20 @@ function jumpMeta(target: JumpTarget): string {
     target.requiresConfirmation ? 'confirm' : null,
   ].filter(Boolean)
   return parts.join(' · ')
+}
+
+function formatFlag(value: boolean, label: string): string | null {
+  return value ? label : null
+}
+
+function formatUsageSemantics(run: RunRecord) {
+  const semantics = run.usageSemantics
+  if (!semantics) return '—'
+  return [
+    semantics.source,
+    semantics.costKind,
+    semantics.entersUsageTotals ? 'totals' : 'excluded',
+  ].join(' · ')
 }
 
 type CodexEventKind =
@@ -161,6 +175,7 @@ export function InspectDrawer() {
   const [resumeCommand, setResumeCommand] = useState<ResumeCommandPayload | null>(null)
   const [operations, setOperations] = useState<OperationDescriptor[]>([])
   const [operationBusy, setOperationBusy] = useState<string | null>(null)
+  const [transcriptUnlocked, setTranscriptUnlocked] = useState(false)
   const [events, setEvents] = useState<CodexEvent[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
   const [openingCodex, setOpeningCodex] = useState(false)
@@ -178,6 +193,8 @@ export function InspectDrawer() {
   )
   const openWorkspaceOperation = operations.find((operation) => operation.id === 'open.workspace')
   const jumpTargets = selectedRun?.jumpTargets ?? []
+  const capabilities = selectedRun?.capabilities ?? []
+  const dataSources = selectedRun?.dataSources ?? []
   const usageBucketIndex = useMemo(
     () => buildUsageBucketIndex(usageBuckets ?? []),
     [usageBuckets],
@@ -185,6 +202,16 @@ export function InspectDrawer() {
   const selectedRunCost = selectedRunId == null
     ? undefined
     : usageBucketIndex.get(selectedRunId)?.costUsd
+
+  useEffect(() => {
+    setTranscriptUnlocked(false)
+    setEntries([])
+    setEntriesLoading(false)
+    setEvents([])
+    setEventsLoading(false)
+    setExpandedEventIds(new Set())
+    cursorRef.current = undefined
+  }, [selectedRunId])
 
   useEffect(() => {
     if (!selectedRun) return
@@ -251,7 +278,7 @@ export function InspectDrawer() {
     setEntries([])
     setEntriesLoading(false)
 
-    if (!selectedRun || runtimeMode === 'remoteViewer' || useCodexEvents) {
+    if (!selectedRun || runtimeMode === 'remoteViewer' || useCodexEvents || !transcriptUnlocked) {
       return () => { cancelled = true }
     }
 
@@ -270,11 +297,11 @@ export function InspectDrawer() {
     })()
 
     return () => { cancelled = true }
-  }, [runtimeMode, selectedRun, useCodexEvents])
+  }, [runtimeMode, selectedRun, transcriptUnlocked, useCodexEvents])
 
   // Codex events fetch + polling loop.
   useEffect(() => {
-    if (!selectedRun || !useCodexEvents) {
+    if (!selectedRun || !useCodexEvents || !transcriptUnlocked) {
       setEvents([])
       cursorRef.current = undefined
       return () => { /* no cleanup */ }
@@ -345,7 +372,7 @@ export function InspectDrawer() {
       if (timer) clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [selectedRun, useCodexEvents])
+  }, [selectedRun, transcriptUnlocked, useCodexEvents])
 
   // Near-bottom scroll lock: stay pinned to the newest event unless the
   // user has scrolled upward.
@@ -486,6 +513,54 @@ export function InspectDrawer() {
             </div>
           )}
 
+          <div className="inspect-section inspect-control-plane">
+            <span className="inspect-section-label">{t('drawer.controlPlane')}</span>
+            <div className="inspect-signal-grid">
+              <div className="inspect-signal">
+                <span className="inspect-signal-label">{t('drawer.sourceConfidence')}</span>
+                <span className="inspect-signal-value">
+                  {selectedRun.source.confidence} · {selectedRun.source.freshness}
+                </span>
+              </div>
+              <div className="inspect-signal">
+                <span className="inspect-signal-label">{t('drawer.usageConfidence')}</span>
+                <span className="inspect-signal-value">{selectedRun.cost.confidence}</span>
+              </div>
+              <div className="inspect-signal">
+                <span className="inspect-signal-label">{t('drawer.usageSemantics')}</span>
+                <span className="inspect-signal-value">{formatUsageSemantics(selectedRun)}</span>
+              </div>
+              <div className="inspect-signal">
+                <span className="inspect-signal-label">{t('drawer.dataSources')}</span>
+                <span className="inspect-signal-value">
+                  {dataSources.length === 0 ? '0' : dataSources.map((source) => (
+                    `${source.sourceType}:${source.schemaConfidence}${source.errors.length > 0 ? `/${source.errors.length} errors` : ''}`
+                  )).join(' · ')}
+                </span>
+              </div>
+            </div>
+            <div className="inspect-capability-list">
+              {capabilities.length === 0 ? (
+                <span className="inspect-capability-empty">{t('drawer.noCapabilities')}</span>
+              ) : capabilities.map((capability) => {
+                const flags = [
+                  formatFlag(capability.requiresUserConfirmation, t('drawer.capability.requiresConfirmation')),
+                  formatFlag(capability.mutatesState, t('drawer.capability.mutates')),
+                  formatFlag(capability.requiresManagedProcess, t('drawer.capability.managed')),
+                  formatFlag(capability.canExposeSecrets, t('drawer.capability.exposesSecrets')),
+                ].filter(Boolean)
+                return (
+                  <span key={capability.id} className="inspect-capability-chip">
+                    <strong>{capability.id}</strong>
+                    <span>{capability.confidence}</span>
+                    <span>{capability.auditLevel}</span>
+                    {flags.length > 0 && <span>{flags.join(' · ')}</span>}
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+
           {runtimeMode === 'local' && (
             <div className="inspect-section">
               {showOpenInCodex && (
@@ -611,7 +686,23 @@ export function InspectDrawer() {
             </div>
           )}
 
-          {useCodexEvents && (eventsLoading || events.length > 0) && (
+          {runtimeMode === 'local' && !transcriptUnlocked && (
+            <div className="inspect-section inspect-transcript-gate">
+              <span className="inspect-section-label">{t('drawer.timeline')}</span>
+              <button
+                type="button"
+                className="inspect-transcript-button"
+                onClick={() => setTranscriptUnlocked(true)}
+              >
+                {t('drawer.loadTranscript')}
+              </button>
+              <span className="inspect-open-codex-hint">
+                {t('drawer.transcriptGateHint')}
+              </span>
+            </div>
+          )}
+
+          {useCodexEvents && transcriptUnlocked && (
             <div className="inspect-section">
               <span className="inspect-section-label">{t('drawer.timeline')}</span>
               <div
@@ -621,6 +712,9 @@ export function InspectDrawer() {
               >
                 {eventsLoading && events.length === 0 && (
                   <div className="inspect-io-empty">{t('drawer.loadingEntries')}</div>
+                )}
+                {!eventsLoading && events.length === 0 && (
+                  <div className="inspect-io-empty">{t('drawer.noTimelineEntries')}</div>
                 )}
                 {events.map((ev, index) => {
                   const id = `${ev.timestamp}-${ev.callId ?? ''}-${index}`
@@ -671,12 +765,15 @@ export function InspectDrawer() {
             </div>
           )}
 
-          {!useCodexEvents && runtimeMode === 'local' && (entriesLoading || entries.length > 0) && (
+          {!useCodexEvents && runtimeMode === 'local' && transcriptUnlocked && (
             <div className="inspect-section">
               <span className="inspect-section-label">{t('drawer.timeline')}</span>
               <div className="inspect-io-list">
                 {entriesLoading && (
                   <div className="inspect-io-empty">{t('drawer.loadingEntries')}</div>
+                )}
+                {!entriesLoading && entries.length === 0 && (
+                  <div className="inspect-io-empty">{t('drawer.noTimelineEntries')}</div>
                 )}
                 {!entriesLoading && entries.map((entry, index) => (
                   <div

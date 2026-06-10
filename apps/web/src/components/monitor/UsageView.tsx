@@ -5,7 +5,7 @@ import { buildUsageDateRange } from '../../lib/dateRange'
 import { formatCost, formatTokens, getGroupKey } from '../../lib/format'
 import { createHistorySelection, fetchUsageHistory, type DataMode } from '../../lib/history'
 import { buildSnapshotRange, isSnapshotWindowClamped } from '../../lib/snapshotWindow'
-import { collectRunUsageSlices, hasUsage, sumUsageSlices } from '../../lib/usage'
+import { buildUsageBucketIndex, collectRunUsageSlices, hasUsage, sumUsageSlices } from '../../lib/usage'
 import { FixedSizeVirtualList } from '../FixedSizeVirtualList'
 import { DataModeSwitch } from './DataModeSwitch'
 import { SnapshotWindowSwitch } from './SnapshotWindowSwitch'
@@ -60,6 +60,10 @@ interface GroupedUsage {
   tool: ToolKind
   totalTokens: number
   totalCost: number
+  confidence: string
+  costKinds: string
+  usageSources: string
+  excludedCount: number
   items: { tag: string; tokens: number; cost: number }[]
 }
 
@@ -135,21 +139,51 @@ export function UsageView() {
     ),
     [activeBuckets, activeRuns, effectiveRange],
   )
+  const usageBucketByRunId = useMemo(
+    () => buildUsageBucketIndex(activeBuckets),
+    [activeBuckets],
+  )
 
   const grouped = useMemo((): GroupedUsage[] => {
     const map = Object.fromEntries(
-      visibleTools.map((tool) => [tool, { tool, totalTokens: 0, totalCost: 0, items: [] }]),
+      visibleTools.map((tool) => [tool, {
+        tool,
+        totalTokens: 0,
+        totalCost: 0,
+        confidence: 'N/A',
+        costKinds: 'N/A',
+        usageSources: 'N/A',
+        excludedCount: 0,
+        items: [],
+      }]),
     ) as unknown as Record<ToolKind, GroupedUsage>
 
     const tagMap: Record<string, Record<string, { tokens: number; cost: number }>> = {}
+    const confidenceMap: Record<string, Set<string>> = {}
+    const costKindMap: Record<string, Set<string>> = {}
+    const usageSourceMap: Record<string, Set<string>> = {}
+    const excludedMap: Record<string, number> = {}
     for (const { run, usage } of runUsageSlices) {
       if (!hasUsage(usage)) continue
       const tool = run.tool
       if (!tagMap[tool]) tagMap[tool] = {}
+      if (!confidenceMap[tool]) confidenceMap[tool] = new Set()
+      if (!costKindMap[tool]) costKindMap[tool] = new Set()
+      if (!usageSourceMap[tool]) usageSourceMap[tool] = new Set()
       const tag = getGroupKey(run, agentDisplayFormat)
       if (!tagMap[tool][tag]) tagMap[tool][tag] = { tokens: 0, cost: 0 }
       tagMap[tool][tag].tokens += usage.totalTokens
       tagMap[tool][tag].cost += usage.costUsd ?? 0
+      const bucket = usageBucketByRunId.get(run.id)
+      confidenceMap[tool].add(bucket?.confidence ?? run.source.confidence)
+      const semantics = bucket?.usageSemantics ?? run.usageSemantics
+      if (semantics) {
+        costKindMap[tool].add(semantics.costKind)
+        usageSourceMap[tool].add(semantics.source)
+        if (!semantics.entersUsageTotals) {
+          excludedMap[tool] = (excludedMap[tool] ?? 0) + 1
+        }
+      }
     }
 
     for (const tool of visibleTools) {
@@ -160,10 +194,14 @@ export function UsageView() {
       map[tool].items = items
       map[tool].totalTokens = items.reduce((sum, item) => sum + item.tokens, 0)
       map[tool].totalCost = items.reduce((sum, item) => sum + item.cost, 0)
+      map[tool].confidence = Array.from(confidenceMap[tool] ?? []).sort().join(' / ') || 'N/A'
+      map[tool].costKinds = Array.from(costKindMap[tool] ?? []).sort().join(' / ') || 'N/A'
+      map[tool].usageSources = Array.from(usageSourceMap[tool] ?? []).sort().join(' / ') || 'N/A'
+      map[tool].excludedCount = excludedMap[tool] ?? 0
     }
 
     return visibleTools.map((tool) => map[tool])
-  }, [agentDisplayFormat, runUsageSlices, visibleTools])
+  }, [agentDisplayFormat, runUsageSlices, usageBucketByRunId, visibleTools])
 
   const totals = useMemo(() => {
     const meteredSummary = sumUsageSlices(
@@ -289,6 +327,14 @@ export function UsageView() {
                 </div>
                 <div className="usage-source-totals">
                   {formatTokens(group.totalTokens)} tokens &nbsp; {formatCost(group.totalCost)}
+                </div>
+                <div className="usage-source-confidence">
+                  <span>{t('usage.confidence')}: {group.confidence}</span>
+                  <span>{t('usage.costKind')}: {group.costKinds}</span>
+                  <span>{group.usageSources}</span>
+                  {group.excludedCount > 0 && (
+                    <span>{t('usage.excluded')}: {group.excludedCount}</span>
+                  )}
                 </div>
                 <div
                   className="usage-source-items"
