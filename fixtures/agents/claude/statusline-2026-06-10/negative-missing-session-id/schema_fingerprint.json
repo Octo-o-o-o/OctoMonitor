@@ -1,0 +1,20 @@
+{
+  "tool_id": "claude",
+  "fixture_version": "statusline-2026-06-10",
+  "case_id": "negative-missing-session-id",
+  "format": "json",
+  "schema_version": "claude-statusline-2026-06-10",
+  "schema_confidence": "high",
+  "required_fields": [
+    "session_id",
+    "transcript_path",
+    "model.display_name",
+    "workspace.project_dir"
+  ],
+  "negative_signals": [
+    "missing session_id",
+    "missing transcript_path",
+    "notification_type != permission_prompt"
+  ],
+  "fingerprint": "sha256:fixture-claude-missing-session-id-negative"
+}

@@ -1,0 +1,34 @@
+{
+  "tool_id": "claude",
+  "fixture_version": "statusline-2026-06-10",
+  "case_id": "positive-permission-statusline",
+  "format": "json",
+  "schema_version": "claude-statusline-2026-06-10",
+  "schema_confidence": "high",
+  "required_fields": [
+    "session_id",
+    "transcript_path",
+    "model.display_name",
+    "workspace.project_dir",
+    "cost.total_cost_usd",
+    "usage.input_tokens",
+    "usage.output_tokens",
+    "usage.total_tokens",
+    "context_window.current_usage",
+    "rate_limits.primary.used_percent",
+    "rate_limits.secondary.used_percent"
+  ],
+  "optional_hook_fields": [
+    "session_id",
+    "transcript_path",
+    "cwd",
+    "hook_event_name",
+    "notification_type"
+  ],
+  "negative_signals": [
+    "missing session_id",
+    "missing transcript_path",
+    "notification_type != permission_prompt"
+  ],
+  "fingerprint": "sha256:fixture-claude-permission-statusline"
+}

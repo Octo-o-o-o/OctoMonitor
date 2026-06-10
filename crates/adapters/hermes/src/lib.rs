@@ -1,7 +1,8 @@
 use chrono::Utc;
+use rusqlite::{types::ValueRef, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -49,6 +50,15 @@ pub struct HermesSession {
     pub origin_label: Option<String>,
     /// Source provider, e.g. "telegram", "local", "cron"
     pub origin_provider: Option<String>,
+    pub source_path: Option<String>,
+    pub source_format: HermesSessionSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum HermesSessionSource {
+    StateDb,
+    SessionsJson,
 }
 
 /// A scheduled cron job from ~/.hermes/cron/jobs.json
@@ -94,10 +104,18 @@ pub struct HermesSnapshot {
 #[derive(Debug, Clone, Default)]
 pub struct HermesProbeCache {
     session_lists: HashMap<String, CachedSessionsFile>,
+    state_dbs: HashMap<String, CachedStateDb>,
 }
 
 #[derive(Debug, Clone)]
 struct CachedSessionsFile {
+    size_bytes: u64,
+    modified_at: Option<SystemTime>,
+    sessions: Vec<HermesSession>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedStateDb {
     size_bytes: u64,
     modified_at: Option<SystemTime>,
     sessions: Vec<HermesSession>,
@@ -273,10 +291,295 @@ fn parse_sessions_json(
             error_message: None,
             origin_label,
             origin_provider,
+            source_path: Some(path.display().to_string()),
+            source_format: HermesSessionSource::SessionsJson,
         });
     }
 
     Some(result)
+}
+
+fn quote_ident(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+        [table],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+fn table_columns(conn: &Connection, table: &str) -> HashSet<String> {
+    let sql = format!("PRAGMA table_info({})", quote_ident(table));
+    let Ok(mut stmt) = conn.prepare(&sql) else {
+        return HashSet::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(1)) else {
+        return HashSet::new();
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
+fn select_alias(columns: &HashSet<String>, candidates: &[&str], alias: &str) -> String {
+    candidates
+        .iter()
+        .find(|candidate| columns.contains(**candidate))
+        .map(|column| format!("{} AS {}", quote_ident(column), quote_ident(alias)))
+        .unwrap_or_else(|| format!("NULL AS {}", quote_ident(alias)))
+}
+
+fn row_string(row: &rusqlite::Row<'_>, name: &str) -> Option<String> {
+    match row.get_ref(name).ok()? {
+        ValueRef::Null => None,
+        ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+            .ok()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(String::from),
+        ValueRef::Integer(value) => Some(value.to_string()),
+        ValueRef::Real(value) => Some(value.to_string()),
+        ValueRef::Blob(_) => None,
+    }
+}
+
+fn row_timestamp_string(row: &rusqlite::Row<'_>, name: &str) -> Option<String> {
+    match row.get_ref(name).ok()? {
+        ValueRef::Null => None,
+        ValueRef::Text(_) => row_string(row, name),
+        ValueRef::Integer(value) => {
+            normalize_timestamp_number(value).or_else(|| Some(value.to_string()))
+        }
+        ValueRef::Real(value) => {
+            normalize_timestamp_number(value as i64).or_else(|| Some(value.to_string()))
+        }
+        ValueRef::Blob(_) => None,
+    }
+}
+
+fn normalize_timestamp_number(value: i64) -> Option<String> {
+    let seconds = if value > 1_000_000_000_000 {
+        value / 1_000
+    } else if value > 1_000_000_000 {
+        value
+    } else {
+        return None;
+    };
+    chrono::DateTime::from_timestamp(seconds, 0).map(|dt| dt.to_rfc3339())
+}
+
+fn row_u64(row: &rusqlite::Row<'_>, name: &str) -> u64 {
+    match row.get_ref(name).ok() {
+        Some(ValueRef::Integer(value)) if value > 0 => value as u64,
+        Some(ValueRef::Real(value)) if value > 0.0 => value as u64,
+        Some(ValueRef::Text(bytes)) => std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn row_f64(row: &rusqlite::Row<'_>, name: &str) -> Option<f64> {
+    match row.get_ref(name).ok()? {
+        ValueRef::Integer(value) => Some(value as f64),
+        ValueRef::Real(value) => Some(value),
+        ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|value| value.trim().parse::<f64>().ok()),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct MessageStats {
+    count: u64,
+    last_timestamp: Option<String>,
+}
+
+fn read_message_stats(conn: &Connection) -> HashMap<String, MessageStats> {
+    if !table_exists(conn, "messages") {
+        return HashMap::new();
+    }
+    let columns = table_columns(conn, "messages");
+    if !columns.contains("session_id") {
+        return HashMap::new();
+    }
+
+    let timestamp_expr = if columns.contains("timestamp") {
+        "MAX(timestamp)"
+    } else if columns.contains("created_at") {
+        "MAX(created_at)"
+    } else {
+        "NULL"
+    };
+    let sql = format!(
+        "SELECT session_id, COUNT(*) AS message_count, {timestamp_expr} AS last_timestamp \
+         FROM messages GROUP BY session_id"
+    );
+    let Ok(mut stmt) = conn.prepare(&sql) else {
+        return HashMap::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row_string(row, "session_id").unwrap_or_default(),
+            MessageStats {
+                count: row_u64(row, "message_count"),
+                last_timestamp: row_timestamp_string(row, "last_timestamp"),
+            },
+        ))
+    }) else {
+        return HashMap::new();
+    };
+
+    rows.filter_map(Result::ok)
+        .filter(|(session_id, _)| !session_id.is_empty())
+        .collect()
+}
+
+fn parse_state_db(
+    path: &Path,
+    profile_name: &str,
+    model_from_config: Option<&str>,
+) -> Option<Vec<HermesSession>> {
+    if path_has_sensitive_component(path) {
+        return None;
+    }
+
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    if !table_exists(&conn, "sessions") {
+        return None;
+    }
+
+    let columns = table_columns(&conn, "sessions");
+    let fields = [
+        select_alias(&columns, &["id", "session_id"], "session_id"),
+        select_alias(
+            &columns,
+            &["session_key", "key", "id", "session_id"],
+            "session_key",
+        ),
+        select_alias(&columns, &["title", "display_name", "name"], "display_name"),
+        select_alias(&columns, &["source", "platform"], "platform"),
+        select_alias(&columns, &["chat_type", "type"], "chat_type"),
+        select_alias(&columns, &["model"], "model"),
+        select_alias(&columns, &["started_at", "created_at"], "started_at"),
+        select_alias(
+            &columns,
+            &["updated_at", "last_activity_at", "ended_at"],
+            "updated_at",
+        ),
+        select_alias(&columns, &["input_tokens", "prompt_tokens"], "input_tokens"),
+        select_alias(
+            &columns,
+            &["output_tokens", "completion_tokens"],
+            "output_tokens",
+        ),
+        select_alias(&columns, &["cache_read_tokens"], "cache_read_tokens"),
+        select_alias(&columns, &["cache_write_tokens"], "cache_write_tokens"),
+        select_alias(&columns, &["total_tokens"], "total_tokens"),
+        select_alias(&columns, &["estimated_cost_usd", "cost_usd"], "cost_usd"),
+        select_alias(&columns, &["error_message", "error"], "error_message"),
+    ];
+    let sql = format!("SELECT {} FROM sessions", fields.join(", "));
+    let message_stats = read_message_stats(&conn);
+    let source_path = path.display().to_string();
+
+    let Ok(mut stmt) = conn.prepare(&sql) else {
+        return None;
+    };
+    let rows = stmt
+        .query_map([], |row| {
+            let session_id = row_string(row, "session_id").unwrap_or_default();
+            let session_key = row_string(row, "session_key").unwrap_or_else(|| session_id.clone());
+            let stats = message_stats.get(&session_id);
+            let input_tokens = row_u64(row, "input_tokens");
+            let output_tokens = row_u64(row, "output_tokens");
+            let cache_read_tokens = row_u64(row, "cache_read_tokens");
+            let cache_write_tokens = row_u64(row, "cache_write_tokens");
+            let total_tokens = row_u64(row, "total_tokens");
+            Ok(HermesSession {
+                session_id,
+                session_key,
+                profile_name: profile_name.to_string(),
+                display_name: row_string(row, "display_name"),
+                platform: row_string(row, "platform"),
+                chat_type: row_string(row, "chat_type").unwrap_or_else(|| "dm".into()),
+                model: row_string(row, "model").or_else(|| model_from_config.map(String::from)),
+                started_at: row_timestamp_string(row, "started_at"),
+                updated_at: row_timestamp_string(row, "updated_at")
+                    .or_else(|| stats.and_then(|stat| stat.last_timestamp.clone())),
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                total_tokens: if total_tokens > 0 {
+                    total_tokens
+                } else {
+                    input_tokens
+                        .saturating_add(output_tokens)
+                        .saturating_add(cache_read_tokens)
+                        .saturating_add(cache_write_tokens)
+                },
+                cost_usd: row_f64(row, "cost_usd"),
+                first_question: None,
+                last_question: None,
+                message_count: stats.map(|stat| stat.count).unwrap_or(0),
+                error_message: row_string(row, "error_message"),
+                origin_label: None,
+                origin_provider: None,
+                source_path: Some(source_path.clone()),
+                source_format: HermesSessionSource::StateDb,
+            })
+        })
+        .ok()?;
+
+    Some(
+        rows.filter_map(Result::ok)
+            .filter(|session| !session.session_id.is_empty())
+            .collect(),
+    )
+}
+
+fn enrich_state_db_sessions(sessions: &mut [HermesSession], sessions_json: &[HermesSession]) {
+    let by_id: HashMap<&str, &HermesSession> = sessions_json
+        .iter()
+        .map(|session| (session.session_id.as_str(), session))
+        .collect();
+
+    for session in sessions {
+        let Some(json_session) = by_id.get(session.session_id.as_str()) else {
+            continue;
+        };
+        if session.origin_label.is_none() {
+            session.origin_label = json_session.origin_label.clone();
+        }
+        if session.origin_provider.is_none() {
+            session.origin_provider = json_session.origin_provider.clone();
+        }
+        if session.display_name.is_none() {
+            session.display_name = json_session.display_name.clone();
+        }
+        if session.model.is_none() {
+            session.model = json_session.model.clone();
+        }
+        if session.total_tokens == 0 {
+            session.input_tokens = json_session.input_tokens;
+            session.output_tokens = json_session.output_tokens;
+            session.cache_read_tokens = json_session.cache_read_tokens;
+            session.cache_write_tokens = json_session.cache_write_tokens;
+            session.total_tokens = json_session.total_tokens;
+        }
+        if session.cost_usd.is_none() {
+            session.cost_usd = json_session.cost_usd;
+        }
+    }
 }
 
 fn load_cached_sessions(
@@ -297,6 +600,34 @@ fn load_cached_sessions(
             cache.session_lists.insert(
                 cache_key,
                 CachedSessionsFile {
+                    size_bytes: signature.0,
+                    modified_at: signature.1,
+                    sessions: sessions.clone(),
+                },
+            );
+            Some(sessions)
+        }
+    }
+}
+
+fn load_cached_state_db(
+    cache: &mut HermesProbeCache,
+    state_db: &Path,
+    profile_name: &str,
+    model_from_config: Option<&str>,
+) -> Option<Vec<HermesSession>> {
+    let cache_key = state_db.display().to_string();
+    let signature = file_signature(state_db)?;
+
+    match cache.state_dbs.get(&cache_key) {
+        Some(cached) if cached.size_bytes == signature.0 && cached.modified_at == signature.1 => {
+            Some(cached.sessions.clone())
+        }
+        _ => {
+            let sessions = parse_state_db(state_db, profile_name, model_from_config)?;
+            cache.state_dbs.insert(
+                cache_key,
+                CachedStateDb {
                     size_bytes: signature.0,
                     modified_at: signature.1,
                     sessions: sessions.clone(),
@@ -442,12 +773,25 @@ fn scan_instance(
 
     let (gw_running, gw_state, gw_platforms) = check_gateway_status(home);
 
+    let state_db = home.join("state.db");
     let sessions_json = home.join("sessions").join("sessions.json");
-    let sessions = sessions_json
+    let sessions_json_sessions = sessions_json
         .exists()
         .then(|| load_cached_sessions(cache, &sessions_json, profile_name, model.as_deref()))
         .flatten()
         .unwrap_or_default();
+    let mut state_db_sessions = state_db
+        .exists()
+        .then(|| load_cached_state_db(cache, &state_db, profile_name, model.as_deref()))
+        .flatten()
+        .unwrap_or_default();
+
+    let sessions = if state_db_sessions.is_empty() {
+        sessions_json_sessions
+    } else {
+        enrich_state_db_sessions(&mut state_db_sessions, &sessions_json_sessions);
+        state_db_sessions
+    };
 
     let instance = HermesInstance {
         profile_name: profile_name.to_string(),
@@ -482,6 +826,10 @@ pub fn probe_with_cache(cache: &mut HermesProbeCache) -> HermesSnapshot {
         if sessions_json.exists() {
             live_cache_keys.insert(sessions_json.display().to_string());
         }
+        let state_db = home.join("state.db");
+        if state_db.exists() {
+            live_cache_keys.insert(state_db.display().to_string());
+        }
 
         let (instance, sessions, cron_jobs) = scan_instance(profile_name, home, cache);
         any_gateway_running |= instance.gateway_running;
@@ -492,6 +840,9 @@ pub fn probe_with_cache(cache: &mut HermesProbeCache) -> HermesSnapshot {
 
     cache
         .session_lists
+        .retain(|key, _| live_cache_keys.contains(key));
+    cache
+        .state_dbs
         .retain(|key, _| live_cache_keys.contains(key));
 
     all_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -520,6 +871,8 @@ pub fn probe() -> HermesSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -634,6 +987,182 @@ mod tests {
         let tg_session = sessions.iter().find(|s| s.session_id == "def-456").unwrap();
         assert_eq!(tg_session.origin_label.as_deref(), Some("Telegram: Yixiao"));
         assert_eq!(tg_session.origin_provider.as_deref(), Some("telegram"));
+        assert_eq!(tg_session.source_format, HermesSessionSource::SessionsJson);
+    }
+
+    #[test]
+    fn parse_state_db_extracts_metadata_without_message_content() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("state.db");
+        {
+            let conn = Connection::open(&db_path).expect("open db");
+            conn.execute_batch(
+                r#"
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  title TEXT,
+                  source TEXT,
+                  model TEXT,
+                  started_at INTEGER,
+                  updated_at INTEGER,
+                  input_tokens INTEGER,
+                  output_tokens INTEGER,
+                  total_tokens INTEGER,
+                  estimated_cost_usd REAL
+                );
+                CREATE TABLE messages (
+                  session_id TEXT,
+                  role TEXT,
+                  content TEXT,
+                  timestamp INTEGER
+                );
+                INSERT INTO sessions VALUES (
+                  'sess-1', 'SQLite session', 'local', 'gpt-5', 1770000000,
+                  1770000300000, 10, 5, 15, 0.02
+                );
+                INSERT INTO messages VALUES
+                  ('sess-1', 'user', 'secret-api-key=abcdef', 1770000010),
+                  ('sess-1', 'assistant', 'done', 1770000020);
+                "#,
+            )
+            .expect("schema");
+        }
+
+        let sessions = parse_state_db(&db_path, "default", None).expect("parse state db");
+
+        assert_eq!(sessions.len(), 1);
+        let session = &sessions[0];
+        assert_eq!(session.session_id, "sess-1");
+        assert_eq!(session.display_name.as_deref(), Some("SQLite session"));
+        assert_eq!(session.platform.as_deref(), Some("local"));
+        assert_eq!(session.model.as_deref(), Some("gpt-5"));
+        assert_eq!(session.input_tokens, 10);
+        assert_eq!(session.total_tokens, 15);
+        assert_eq!(session.cost_usd, Some(0.02));
+        assert_eq!(session.message_count, 2);
+        assert!(session.first_question.is_none());
+        assert!(session.last_question.is_none());
+        assert_eq!(session.source_format, HermesSessionSource::StateDb);
+        assert_eq!(
+            session.source_path.as_deref(),
+            Some(db_path.to_str().unwrap())
+        );
+        assert_eq!(
+            session.started_at.as_deref(),
+            Some("2026-02-02T02:40:00+00:00")
+        );
+        assert_eq!(
+            session.updated_at.as_deref(),
+            Some("2026-02-02T02:45:00+00:00")
+        );
+    }
+
+    #[test]
+    fn parse_state_db_handles_wal_read_only() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let db_path = temp_dir.path().join("state.db");
+        {
+            let conn = Connection::open(&db_path).expect("open db");
+            conn.pragma_update(None, "journal_mode", "WAL")
+                .expect("enable wal");
+            conn.execute_batch(
+                r#"
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  title TEXT,
+                  created_at TEXT,
+                  updated_at TEXT
+                );
+                INSERT INTO sessions VALUES (
+                  'sess-wal', 'WAL session',
+                  '2026-02-03T02:40:00Z',
+                  '2026-02-03T02:45:00Z'
+                );
+                "#,
+            )
+            .expect("schema");
+        }
+
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(&db_path).expect("metadata").permissions();
+            permissions.set_mode(0o444);
+            fs::set_permissions(&db_path, permissions).expect("readonly");
+        }
+
+        let sessions = parse_state_db(&db_path, "default", Some("fallback-model"))
+            .expect("parse read-only wal db");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "sess-wal");
+        assert_eq!(sessions[0].model.as_deref(), Some("fallback-model"));
+        assert_eq!(sessions[0].source_format, HermesSessionSource::StateDb);
+    }
+
+    #[test]
+    fn state_db_sessions_are_enriched_from_sessions_json_metadata() {
+        let mut state_sessions = vec![HermesSession {
+            session_id: "sess-1".into(),
+            session_key: "sess-1".into(),
+            profile_name: "default".into(),
+            display_name: None,
+            platform: None,
+            chat_type: "dm".into(),
+            model: None,
+            started_at: None,
+            updated_at: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            total_tokens: 0,
+            cost_usd: None,
+            first_question: None,
+            last_question: None,
+            message_count: 0,
+            error_message: None,
+            origin_label: None,
+            origin_provider: None,
+            source_path: Some("state.db".into()),
+            source_format: HermesSessionSource::StateDb,
+        }];
+        let json_sessions = vec![HermesSession {
+            session_id: "sess-1".into(),
+            session_key: "local:cli:user".into(),
+            profile_name: "default".into(),
+            display_name: Some("CLI User".into()),
+            platform: Some("local".into()),
+            chat_type: "dm".into(),
+            model: Some("json-model".into()),
+            started_at: None,
+            updated_at: None,
+            input_tokens: 12,
+            output_tokens: 8,
+            cache_read_tokens: 1,
+            cache_write_tokens: 2,
+            total_tokens: 23,
+            cost_usd: Some(0.03),
+            first_question: None,
+            last_question: None,
+            message_count: 0,
+            error_message: None,
+            origin_label: Some("CLI".into()),
+            origin_provider: Some("local".into()),
+            source_path: Some("sessions.json".into()),
+            source_format: HermesSessionSource::SessionsJson,
+        }];
+
+        enrich_state_db_sessions(&mut state_sessions, &json_sessions);
+
+        assert_eq!(state_sessions[0].display_name.as_deref(), Some("CLI User"));
+        assert_eq!(state_sessions[0].origin_label.as_deref(), Some("CLI"));
+        assert_eq!(state_sessions[0].origin_provider.as_deref(), Some("local"));
+        assert_eq!(state_sessions[0].total_tokens, 23);
+        assert_eq!(state_sessions[0].cost_usd, Some(0.03));
+        assert_eq!(
+            state_sessions[0].source_format,
+            HermesSessionSource::StateDb
+        );
     }
 
     #[test]

@@ -1,9 +1,10 @@
-use axum::{Json, extract::State};
+use axum::{extract::State, Json};
 use chrono::Utc;
 use octomonitor_core::{
-    DataSourceHealth, DataSourceType, Freshness, LifecycleStatusSource, MoneyValue, RunRecord,
-    RunState, SchemaConfidence, SessionLifecycle, SourceConfidence, SourceInfo, TokenUsage,
-    ToolKind, UsageCostKind, UsageDataSource, UsageSemantics,
+    AuditLevel, CapabilityDescriptor, CapabilityFailureMode, CapabilitySource, DataSourceHealth,
+    DataSourceType, Freshness, LifecycleStatusSource, MoneyValue, RunRecord, RunState,
+    SchemaConfidence, SessionLifecycle, SourceConfidence, SourceInfo, TokenUsage, ToolKind,
+    UsageCostKind, UsageDataSource, UsageSemantics,
 };
 use serde::Deserialize;
 
@@ -90,6 +91,43 @@ fn data_source_health(
     }]
 }
 
+fn safe_capability(
+    id: &str,
+    source: CapabilitySource,
+    confidence: SchemaConfidence,
+) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        id: id.into(),
+        source,
+        confidence,
+        mutates_state: false,
+        requires_user_confirmation: false,
+        requires_managed_process: false,
+        can_expose_secrets: false,
+        audit_level: AuditLevel::Metadata,
+        failure_mode: CapabilityFailureMode::Safe,
+    }
+}
+
+fn resume_capabilities(has_resume_id: bool, include_deeplink: bool) -> Vec<CapabilityDescriptor> {
+    let mut capabilities = Vec::new();
+    if has_resume_id {
+        capabilities.push(safe_capability(
+            "resume.copyCommand",
+            CapabilitySource::OfficialCli,
+            SchemaConfidence::High,
+        ));
+        if include_deeplink {
+            capabilities.push(safe_capability(
+                "open.sessionDeeplink",
+                CapabilitySource::Inferred,
+                SchemaConfidence::Medium,
+            ));
+        }
+    }
+    capabilities
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeStatuslineIngest {
@@ -158,6 +196,7 @@ pub async fn ingest_claude_statusline(
         RunState::Active
     };
     let transcript_path = input.transcript_path;
+    let has_resume_id = session_id.as_deref().is_some_and(|id| !id.is_empty());
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
@@ -226,7 +265,7 @@ pub async fn ingest_claude_statusline(
             transcript_path,
             &last_activity_at,
         )),
-        capabilities: Some(Vec::new()),
+        capabilities: Some(resume_capabilities(has_resume_id, false)),
         jump_targets: Some(Vec::new()),
         tool_specific: Some(serde_json::json!({})),
         vcs: crate::commits::discover_vcs_context(&workspace_path),
@@ -256,6 +295,7 @@ pub async fn ingest_claude_hook(
         RunState::Active
     };
     let transcript_path = input.transcript_path;
+    let has_resume_id = input.session_id.as_deref().is_some_and(|id| !id.is_empty());
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
@@ -313,7 +353,7 @@ pub async fn ingest_claude_hook(
             transcript_path,
             &last_activity_at,
         )),
-        capabilities: Some(Vec::new()),
+        capabilities: Some(resume_capabilities(has_resume_id, false)),
         jump_targets: Some(Vec::new()),
         tool_specific: Some(serde_json::json!({ "event": event })),
         vcs: crate::commits::discover_vcs_context(&workspace_path),
@@ -347,6 +387,7 @@ pub async fn ingest_codex_hook(
     } else {
         RunState::Active
     };
+    let has_resume_id = input.thread_id.as_deref().is_some_and(|id| !id.is_empty());
     let run = RunRecord {
         id: format!(
             "ingest-codex-{}",
@@ -407,7 +448,7 @@ pub async fn ingest_codex_hook(
             None,
             &last_activity_at,
         )),
-        capabilities: Some(Vec::new()),
+        capabilities: Some(resume_capabilities(has_resume_id, true)),
         jump_targets: Some(Vec::new()),
         tool_specific: Some(serde_json::json!({ "event": event })),
         vcs: crate::commits::discover_vcs_context(&workspace_path),

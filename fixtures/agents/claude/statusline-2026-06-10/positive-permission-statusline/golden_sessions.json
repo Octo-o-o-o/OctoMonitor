@@ -1,0 +1,23 @@
+[
+  {
+    "id": "claude-session-00000000-0000-4000-8000-000000000001",
+    "tool": "claude",
+    "sourceMode": "claude_statusline",
+    "state": "waitingApproval",
+    "pendingApproval": true,
+    "workspacePath": "/Users/example/workspace/octomonitor",
+    "transcriptPath": "/Users/example/.claude/projects/octomonitor/session.jsonl",
+    "resumeCommand": "claude --resume claude-session-00000000-0000-4000-8000-000000000001",
+    "tokens": {
+      "input": 1200,
+      "output": 340,
+      "total": 1540
+    },
+    "costUsd": 0.18,
+    "sourceHealth": {
+      "id": "claude:statusline",
+      "type": "hook",
+      "schemaConfidence": "high"
+    }
+  }
+]

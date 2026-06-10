@@ -167,6 +167,7 @@ pub enum UsageCostKind {
 #[ts(export)]
 pub enum UsageDataSource {
     Transcript,
+    Database,
     Api,
     Statusline,
     Computed,

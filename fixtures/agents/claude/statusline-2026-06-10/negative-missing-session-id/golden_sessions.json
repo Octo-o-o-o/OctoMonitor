@@ -1,0 +1,13 @@
+[
+  {
+    "id": null,
+    "tool": "claude",
+    "sourceMode": "claude_statusline",
+    "state": "unavailable",
+    "pendingApproval": false,
+    "workspacePath": "/Users/example/workspace/octomonitor",
+    "transcriptPath": "/Users/example/.claude/projects/octomonitor/session.jsonl",
+    "resumeCommand": null,
+    "expectedReason": "missing session_id"
+  }
+]

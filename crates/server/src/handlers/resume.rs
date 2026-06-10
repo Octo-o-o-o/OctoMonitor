@@ -44,21 +44,59 @@ fn build_resume_command(run: &RunRecord) -> ResumeCommandPayload {
     match run.tool {
         ToolKind::Codex => match run.thread_id.as_deref() {
             Some(thread_id) if !thread_id.is_empty() => ResumeCommandPayload {
-                command: Some(format!("codex resume {thread_id}")),
+                command: Some(format!("codex resume {}", shell_quote(thread_id))),
                 tool,
                 note: None,
             },
             _ => note("Codex session is missing a thread id"),
         },
-        ToolKind::Claude => note("Resume command is not yet available for Claude"),
+        ToolKind::Claude => match run.session_id.as_deref() {
+            Some(session_id) if !session_id.is_empty() => ResumeCommandPayload {
+                command: Some(format!("claude --resume {}", shell_quote(session_id))),
+                tool,
+                note: None,
+            },
+            _ => note("Claude session is missing a session id"),
+        },
         ToolKind::OpenClaw => note("Resume command is not yet available for OpenClaw"),
-        ToolKind::Hermes => note("Resume command is not yet available for Hermes"),
+        ToolKind::Hermes => match run.session_id.as_deref() {
+            Some(session_id) if !session_id.is_empty() => {
+                let profile = run.agent_name.as_deref().filter(|value| {
+                    !value.is_empty() && *value != "default" && *value != "local-probe"
+                });
+                let command = match profile {
+                    Some(profile) => format!(
+                        "hermes -p {} --resume {}",
+                        shell_quote(profile),
+                        shell_quote(session_id)
+                    ),
+                    None => format!("hermes --resume {}", shell_quote(session_id)),
+                };
+                ResumeCommandPayload {
+                    command: Some(command),
+                    tool,
+                    note: None,
+                }
+            }
+            _ => note("Hermes session is missing a session id"),
+        },
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_resume_command, ResumeCommandPayload};
+    use super::{build_resume_command, shell_quote, ResumeCommandPayload};
     use crate::test_support::{sample_run_record, ServerTestHarness};
     use axum::{
         body::Body,
@@ -105,14 +143,53 @@ mod tests {
     }
 
     #[test]
-    fn claude_returns_unavailable() {
+    fn claude_with_session_id_returns_resume_command() {
         let mut run = sample_run_record();
         run.tool = ToolKind::Claude;
-        run.thread_id = Some("anything".into());
+        run.session_id = Some("claude-session-1".into());
+        let out = build_resume_command(&run);
+        assert_eq!(
+            out,
+            ResumeCommandPayload {
+                command: Some("claude --resume claude-session-1".to_string()),
+                tool: ToolKind::Claude,
+                note: None,
+            }
+        );
+    }
+
+    #[test]
+    fn claude_without_session_id_returns_unavailable() {
+        let mut run = sample_run_record();
+        run.tool = ToolKind::Claude;
+        run.session_id = None;
         let out = build_resume_command(&run);
         assert!(out.command.is_none());
         assert_eq!(out.tool, ToolKind::Claude);
         assert!(out.note.is_some());
+    }
+
+    #[test]
+    fn hermes_with_profile_returns_resume_command() {
+        let mut run = sample_run_record();
+        run.tool = ToolKind::Hermes;
+        run.session_id = Some("hermes-session-1".into());
+        run.agent_name = Some("research".into());
+        let out = build_resume_command(&run);
+        assert_eq!(
+            out,
+            ResumeCommandPayload {
+                command: Some("hermes -p research --resume hermes-session-1".to_string()),
+                tool: ToolKind::Hermes,
+                note: None,
+            }
+        );
+    }
+
+    #[test]
+    fn shell_quote_handles_spaces_and_quotes() {
+        assert_eq!(shell_quote("abc-123"), "abc-123");
+        assert_eq!(shell_quote("a b'c"), "'a b'\\''c'");
     }
 
     #[test]

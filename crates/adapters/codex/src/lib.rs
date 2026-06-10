@@ -91,6 +91,7 @@ pub struct CodexSession {
 pub struct CodexSnapshot {
     pub probed_at: String,
     pub cli_available: bool,
+    pub app_server_available: bool,
     pub cli_version: Option<String>,
     pub config_dir: Option<String>,
     pub config_exists: bool,
@@ -631,7 +632,9 @@ pub fn probe_with_cache(cache: &mut CodexProbeCache) -> CodexSnapshot {
     let config_dir = codex_config_dir();
 
     let version_probe = run_command_probe("codex", &["--version"]);
+    let app_server_probe = run_command_probe("codex", &["app-server", "--help"]);
     let cli_available = version_probe.success;
+    let app_server_available = app_server_probe.success;
     let cli_version = version_probe
         .stdout_snippet
         .as_ref()
@@ -659,13 +662,14 @@ pub fn probe_with_cache(cache: &mut CodexProbeCache) -> CodexSnapshot {
     CodexSnapshot {
         probed_at: Utc::now().to_rfc3339(),
         cli_available,
+        app_server_available,
         cli_version,
         config_dir: Some(config_dir.display().to_string()),
         config_exists,
         history_exists: history_probe.exists,
         recent_history_hint,
         sessions,
-        command_probes: vec![version_probe],
+        command_probes: vec![version_probe, app_server_probe],
         file_probes: vec![config_probe, config_json_probe, history_probe],
     }
 }

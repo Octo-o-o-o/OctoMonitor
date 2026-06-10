@@ -1,0 +1,16 @@
+{
+  "tool_id": "claude",
+  "fixture_version": "statusline-2026-06-10",
+  "case_id": "negative-missing-session-id",
+  "tool_version": "statusline-2026-06-10",
+  "source_url": "https://docs.anthropic.com/en/docs/claude-code/statusline",
+  "source_path": "statusline stdin JSON with required session_id omitted",
+  "package_integrity": "sha256:fixture-only-claude-statusline-negative-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "monitored",
+  "local_command_used": "claude --resume <session-id>",
+  "denied_paths_observed": [
+    "~/.claude/.env",
+    "~/.claude/auth.json"
+  ]
+}

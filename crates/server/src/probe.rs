@@ -134,12 +134,113 @@ fn safe_capability(
     }
 }
 
+fn mutating_capability(
+    id: &str,
+    source: CapabilitySource,
+    confidence: SchemaConfidence,
+    failure_mode: CapabilityFailureMode,
+) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        id: id.into(),
+        source,
+        confidence,
+        mutates_state: true,
+        requires_user_confirmation: true,
+        requires_managed_process: false,
+        can_expose_secrets: true,
+        audit_level: AuditLevel::Full,
+        failure_mode,
+    }
+}
+
+fn resume_copy_capability(
+    source: CapabilitySource,
+    confidence: SchemaConfidence,
+) -> CapabilityDescriptor {
+    safe_capability("resume.copyCommand", source, confidence)
+}
+
 fn open_workspace_capability() -> CapabilityDescriptor {
     safe_capability(
         "open.workspace",
         CapabilitySource::Inferred,
         SchemaConfidence::Medium,
     )
+}
+
+fn codex_capabilities(app_server_available: bool) -> Vec<CapabilityDescriptor> {
+    let mut capabilities = vec![
+        resume_copy_capability(CapabilitySource::OfficialCli, SchemaConfidence::High),
+        open_workspace_capability(),
+        safe_capability(
+            "open.sessionDeeplink",
+            CapabilitySource::Inferred,
+            SchemaConfidence::Medium,
+        ),
+    ];
+    if app_server_available {
+        capabilities.push(safe_capability(
+            "codex.appServer",
+            CapabilitySource::OfficialApi,
+            SchemaConfidence::Medium,
+        ));
+        capabilities.push(mutating_capability(
+            "turn.interrupt",
+            CapabilitySource::OfficialApi,
+            SchemaConfidence::Medium,
+            CapabilityFailureMode::MayLeaveProcessRunning,
+        ));
+        capabilities.push(mutating_capability(
+            "approval.respond",
+            CapabilitySource::OfficialApi,
+            SchemaConfidence::Medium,
+            CapabilityFailureMode::MayDropData,
+        ));
+    }
+    capabilities
+}
+
+fn openclaw_capabilities(gateway_available: bool) -> Vec<CapabilityDescriptor> {
+    let mut capabilities = vec![open_workspace_capability()];
+    if gateway_available {
+        capabilities.push(mutating_capability(
+            "gateway.cancel",
+            CapabilitySource::Inferred,
+            SchemaConfidence::Low,
+            CapabilityFailureMode::MayLeaveProcessRunning,
+        ));
+        capabilities.push(mutating_capability(
+            "gateway.delete",
+            CapabilitySource::Inferred,
+            SchemaConfidence::Low,
+            CapabilityFailureMode::MayDropData,
+        ));
+    }
+    capabilities
+}
+
+fn hermes_data_source_health(
+    session: &hermes_adapter::HermesSession,
+    last_seen_at: &str,
+) -> Vec<DataSourceHealth> {
+    match session.source_format {
+        hermes_adapter::HermesSessionSource::StateDb => data_source_health(
+            "hermes:state-db",
+            DataSourceType::Sqlite,
+            session.source_path.clone(),
+            last_seen_at,
+            Some("hermes-state-db"),
+            SchemaConfidence::Medium,
+        ),
+        hermes_adapter::HermesSessionSource::SessionsJson => data_source_health(
+            "hermes:sessions",
+            DataSourceType::Jsonl,
+            session.source_path.clone(),
+            last_seen_at,
+            Some("hermes-session-index"),
+            SchemaConfidence::Medium,
+        ),
+    }
 }
 
 pub fn empty_bootstrap() -> BootstrapPayload {
@@ -194,6 +295,7 @@ fn failed_codex_snapshot(reason: String) -> codex_adapter::CodexSnapshot {
     codex_adapter::CodexSnapshot {
         probed_at: Utc::now().to_rfc3339(),
         cli_available: false,
+        app_server_available: false,
         cli_version: None,
         config_dir: None,
         config_exists: false,
@@ -1233,7 +1335,10 @@ fn build_run_from_claude_session(
             Some("claude-jsonl"),
             SchemaConfidence::High,
         )),
-        capabilities: Some(vec![open_workspace_capability()]),
+        capabilities: Some(vec![
+            resume_copy_capability(CapabilitySource::OfficialCli, SchemaConfidence::High),
+            open_workspace_capability(),
+        ]),
         jump_targets: Some(Vec::new()),
         tool_specific: Some(serde_json::json!({})),
         vcs: crate::commits::discover_vcs_context(&session.project_path),
@@ -1377,19 +1482,7 @@ fn build_run_from_codex_session(
             Some("codex-rollout-jsonl"),
             SchemaConfidence::High,
         )),
-        capabilities: Some(vec![
-            safe_capability(
-                "resume.copyCommand",
-                CapabilitySource::OfficialCli,
-                SchemaConfidence::High,
-            ),
-            open_workspace_capability(),
-            safe_capability(
-                "open.sessionDeeplink",
-                CapabilitySource::Inferred,
-                SchemaConfidence::Medium,
-            ),
-        ]),
+        capabilities: Some(codex_capabilities(probe.app_server_available)),
         jump_targets: Some(Vec::new()),
         tool_specific: Some(serde_json::json!({
             "progressKind": session.progress_kind,
@@ -1596,7 +1689,7 @@ fn build_run_from_openclaw_session(
             Some("openclaw-gateway"),
             SchemaConfidence::High,
         )),
-        capabilities: Some(vec![open_workspace_capability()]),
+        capabilities: Some(openclaw_capabilities(probe.gateway_status_ok)),
         jump_targets: Some(Vec::new()),
         tool_specific: Some(serde_json::json!({ "agentName": session.agent_name })),
         vcs: crate::commits::discover_vcs_context(&workspace),
@@ -1649,7 +1742,13 @@ fn build_run_from_hermes_session(
     RunRecord {
         id: format!("hermes-{}-{}", session.profile_name, session.session_id),
         tool: ToolKind::Hermes,
-        source_id: Some("hermes:sessions".into()),
+        source_id: Some(
+            match session.source_format {
+                hermes_adapter::HermesSessionSource::StateDb => "hermes:state-db",
+                hermes_adapter::HermesSessionSource::SessionsJson => "hermes:sessions",
+            }
+            .into(),
+        ),
         source_mode: hermes_source_mode_label(instance_gw).into(),
         project_name: session
             .display_name
@@ -1725,20 +1824,22 @@ fn build_run_from_hermes_session(
             } else {
                 UsageCostKind::Partial
             },
-            UsageDataSource::Transcript,
+            match session.source_format {
+                hermes_adapter::HermesSessionSource::StateDb => UsageDataSource::Database,
+                hermes_adapter::HermesSessionSource::SessionsJson => UsageDataSource::Transcript,
+            },
             true,
         )),
-        data_sources: Some(data_source_health(
-            "hermes:sessions",
-            DataSourceType::Jsonl,
-            None,
-            &probe.probed_at,
-            Some("hermes-session-index"),
-            SchemaConfidence::Medium,
-        )),
-        capabilities: Some(vec![open_workspace_capability()]),
+        data_sources: Some(hermes_data_source_health(session, &probe.probed_at)),
+        capabilities: Some(vec![
+            resume_copy_capability(CapabilitySource::OfficialCli, SchemaConfidence::Medium),
+            open_workspace_capability(),
+        ]),
         jump_targets: Some(Vec::new()),
-        tool_specific: Some(serde_json::json!({ "profileName": session.profile_name })),
+        tool_specific: Some(serde_json::json!({
+            "profileName": session.profile_name,
+            "sourceFormat": session.source_format,
+        })),
         vcs: None,
         origin_label: session.origin_label.clone(),
         origin_provider: session.origin_provider.clone(),
@@ -2463,6 +2564,40 @@ mod tests {
     }
 
     #[test]
+    fn codex_mutating_capabilities_require_app_server_probe() {
+        let without_app_server = codex_capabilities(false);
+        assert!(!without_app_server
+            .iter()
+            .any(|capability| capability.id == "turn.interrupt"));
+
+        let with_app_server = codex_capabilities(true);
+        let interrupt = with_app_server
+            .iter()
+            .find(|capability| capability.id == "turn.interrupt")
+            .expect("interrupt capability");
+        assert!(interrupt.mutates_state);
+        assert!(interrupt.requires_user_confirmation);
+        assert_eq!(interrupt.source, CapabilitySource::OfficialApi);
+    }
+
+    #[test]
+    fn openclaw_gateway_ops_are_low_confidence_best_effort() {
+        let without_gateway = openclaw_capabilities(false);
+        assert!(!without_gateway
+            .iter()
+            .any(|capability| capability.id == "gateway.cancel"));
+
+        let with_gateway = openclaw_capabilities(true);
+        let cancel = with_gateway
+            .iter()
+            .find(|capability| capability.id == "gateway.cancel")
+            .expect("cancel capability");
+        assert!(cancel.mutates_state);
+        assert!(cancel.requires_user_confirmation);
+        assert_eq!(cancel.confidence, SchemaConfidence::Low);
+    }
+
+    #[test]
     fn merge_runtime_state_rebuilds_usage_buckets_for_preserved_runs() {
         let pricing = pricing_store();
         let now = Utc::now();
@@ -2686,12 +2821,10 @@ mod tests {
         assert_eq!(payload.usage_buckets.len(), MAX_BOOTSTRAP_RUNS);
         assert!(payload.runs.iter().any(|run| run.id == "pinned-error"));
         assert_eq!(payload.recent_completions.len(), 12);
-        assert!(
-            !payload
-                .recent_completions
-                .iter()
-                .any(|item| item.id == "completion-old")
-        );
+        assert!(!payload
+            .recent_completions
+            .iter()
+            .any(|item| item.id == "completion-old"));
     }
 
     #[test]
@@ -2817,6 +2950,7 @@ mod tests {
         let probe = codex_adapter::CodexSnapshot {
             probed_at: "2026-04-01T08:10:00Z".into(),
             cli_available: true,
+            app_server_available: false,
             cli_version: None,
             config_dir: Some("/tmp/.codex".into()),
             config_exists: true,
