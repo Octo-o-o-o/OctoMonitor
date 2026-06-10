@@ -28,7 +28,7 @@ struct DesktopBootState(Mutex<Option<DesktopBootIssue>>);
 
 const SERVER_ADDR: &str = "127.0.0.1:46321";
 const SERVER_HEALTH_PATH: &str = "/api/health";
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const DESKTOP_BOOT_EVENT: &str = "octomonitor:desktop-boot-status";
 const DESKTOP_MENU_ACTION_EVENT: &str = "octomonitor:desktop-menu-action";
@@ -58,6 +58,7 @@ struct DesktopBootIssue {
 struct SpawnResult {
     child: Option<Child>,
     launch_error: Option<String>,
+    reused_existing: bool,
 }
 
 enum ChildStatus {
@@ -231,7 +232,10 @@ fn new_server_command(program: &std::ffi::OsStr) -> Command {
     cmd
 }
 
-fn spawn_with(mut command: Command, on_error: impl FnOnce(std::io::Error) -> String) -> SpawnResult {
+fn spawn_with(
+    mut command: Command,
+    on_error: impl FnOnce(std::io::Error) -> String,
+) -> SpawnResult {
     match command
         .env("OCTOMONITOR_NO_OPEN", "1")
         .stdout(Stdio::null())
@@ -241,15 +245,25 @@ fn spawn_with(mut command: Command, on_error: impl FnOnce(std::io::Error) -> Str
         Ok(child) => SpawnResult {
             child: Some(child),
             launch_error: None,
+            reused_existing: false,
         },
         Err(error) => SpawnResult {
             child: None,
             launch_error: Some(on_error(error)),
+            reused_existing: false,
         },
     }
 }
 
 fn spawn_server() -> SpawnResult {
+    if check_server_health() {
+        return SpawnResult {
+            child: None,
+            launch_error: None,
+            reused_existing: true,
+        };
+    }
+
     // Try to find the pre-built server binary first.
     if let Some(binary) = find_server_binary() {
         let display = binary.display().to_string();
@@ -284,6 +298,7 @@ fn spawn_server() -> SpawnResult {
             launch_error: Some(
                 "Bundled `octomonitor-server` binary was not found and no local server was started.".into(),
             ),
+            reused_existing: false,
         }
     }
 }
@@ -352,7 +367,41 @@ fn push_boot_issue(app: &AppHandle, issue: Option<DesktopBootIssue>) {
     dispatch_window_script(app, &boot_issue_script(&issue));
 }
 
-fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
+fn child_exit_boot_issue(detail: &str, launch_error: Option<&str>) -> DesktopBootIssue {
+    let launch_hint = launch_error.unwrap_or(
+        "Another process may already be using port 46321, or the bundled server exited before becoming healthy.",
+    );
+    DesktopBootIssue {
+        title: "Local server failed to start".into(),
+        message: format!(
+            "The bundled OctoMonitor server exited before becoming ready ({detail}). {launch_hint}"
+        ),
+    }
+}
+
+fn timeout_boot_issue(launch_error: Option<&str>, reused_existing: bool) -> DesktopBootIssue {
+    match launch_error {
+        Some(err) => DesktopBootIssue {
+            title: "Desktop server unavailable".into(),
+            message: err.to_owned(),
+        },
+        None if reused_existing => DesktopBootIssue {
+            title: "Local server became unavailable".into(),
+            message: format!(
+                "Desktop shell found an existing OctoMonitor server on startup, but http://{SERVER_ADDR}{SERVER_HEALTH_PATH} stopped responding before it could be used."
+            ),
+        },
+        None => DesktopBootIssue {
+            title: "Local server did not become ready".into(),
+            message: format!(
+                "Desktop shell could not confirm that http://{SERVER_ADDR}{SERVER_HEALTH_PATH} became ready within {} seconds. OctoMonitor may still be warming up after first launch or macOS security validation; if this banner persists, quit OctoMonitor and reopen it.",
+                STARTUP_TIMEOUT.as_secs()
+            ),
+        },
+    }
+}
+
+fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>, reused_existing: bool) {
     thread::spawn(move || {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         let mut timeout_reported = false;
@@ -376,17 +425,9 @@ fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
                     if check_server_health() {
                         break;
                     }
-                    let launch_hint = launch_error.as_deref().unwrap_or(
-                        "Another process may already be using port 46321, or the bundled server exited before becoming healthy.",
-                    );
                     push_boot_issue(
                         &app,
-                        Some(DesktopBootIssue {
-                            title: "Local server failed to start".into(),
-                            message: format!(
-                                "The bundled OctoMonitor server exited before becoming ready ({detail}). {launch_hint}"
-                            ),
-                        }),
+                        Some(child_exit_boot_issue(&detail, launch_error.as_deref())),
                     );
                     break;
                 }
@@ -403,14 +444,10 @@ fn monitor_server_readiness(app: AppHandle, launch_error: Option<String>) {
             }
 
             if !timeout_reported && Instant::now() >= deadline {
-                let (title, message) = match launch_error.as_deref() {
-                    Some(err) => ("Desktop server unavailable".into(), err.to_owned()),
-                    None => (
-                        "Local server did not become ready".into(),
-                        "Desktop shell could not confirm that http://127.0.0.1:46321/api/health became ready within 8 seconds. OctoMonitor is still warming up in the background; if this banner persists, retry or start `cargo run -p octomonitor-server` manually.".into(),
-                    ),
-                };
-                push_boot_issue(&app, Some(DesktopBootIssue { title, message }));
+                push_boot_issue(
+                    &app,
+                    Some(timeout_boot_issue(launch_error.as_deref(), reused_existing)),
+                );
                 timeout_reported = true;
 
                 if matches!(inspect_server_process(&app), ChildStatus::Missing) {
@@ -580,6 +617,37 @@ fn open_dashboard_settings(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+mod desktop_boot_tests {
+    use super::*;
+
+    #[test]
+    fn timeout_issue_mentions_configured_readiness_window() {
+        let issue = timeout_boot_issue(None, false);
+
+        assert_eq!(issue.title, "Local server did not become ready");
+        assert!(issue.message.contains("20 seconds"));
+        assert!(issue.message.contains(SERVER_HEALTH_PATH));
+    }
+
+    #[test]
+    fn reused_existing_timeout_reports_vanished_server() {
+        let issue = timeout_boot_issue(None, true);
+
+        assert_eq!(issue.title, "Local server became unavailable");
+        assert!(issue.message.contains("existing OctoMonitor server"));
+    }
+
+    #[test]
+    fn child_exit_issue_preserves_launch_error_hint() {
+        let issue = child_exit_boot_issue("exit code 1", Some("bind failed"));
+
+        assert_eq!(issue.title, "Local server failed to start");
+        assert!(issue.message.contains("exit code 1"));
+        assert!(issue.message.contains("bind failed"));
+    }
+}
+
 fn main() {
     let spawn_result = spawn_server();
     let shared_child: SharedChild = Arc::new(Mutex::new(spawn_result.child));
@@ -617,7 +685,11 @@ fn main() {
             app.manage(DesktopBootState(Mutex::new(None)));
             #[cfg(target_os = "macos")]
             island::setup_island_panel(app.handle())?;
-            monitor_server_readiness(app.handle().clone(), spawn_result.launch_error);
+            monitor_server_readiness(
+                app.handle().clone(),
+                spawn_result.launch_error,
+                spawn_result.reused_existing,
+            );
             Ok(())
         })
         .on_page_load(|window, _| {
@@ -628,8 +700,7 @@ fn main() {
             let _ = window.eval(boot_issue_script(&issue));
         })
         .on_window_event(|window, event| {
-            if window.label() == MAIN_WINDOW_LABEL
-                && matches!(event, tauri::WindowEvent::Destroyed)
+            if window.label() == MAIN_WINDOW_LABEL && matches!(event, tauri::WindowEvent::Destroyed)
             {
                 if let Some(state) = window.app_handle().try_state::<ServerState>() {
                     stop_server_shared(&state.0);
