@@ -10,9 +10,10 @@ use std::{
 };
 
 pub use octomonitor_adapter_common::{
-    capitalize, file_signature, format_cron_expr, latest_file_name, mask_value, probe_file,
-    read_jsonl_delta, resolve_env_or_home, run_command_probe, truncate_chars, AdapterDescriptor,
-    CommandProbeResult, FileProbeResult, JsonlCursor,
+    capitalize, file_signature, format_cron_expr, latest_file_name, mask_value,
+    path_has_sensitive_component, probe_file, read_jsonl_delta, resolve_env_or_home,
+    run_command_probe, truncate_chars, AdapterDescriptor, CommandProbeResult, FileProbeResult,
+    JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -497,6 +498,9 @@ fn parse_sessions_json_base(
     agent_name: &str,
     agent_display_name: &Option<String>,
 ) -> Option<Vec<OpenClawSession>> {
+    if path_has_sensitive_component(path) {
+        return None;
+    }
     let contents = fs::read_to_string(path).ok()?;
     let val: Value = serde_json::from_str(&contents).ok()?;
     let obj = val.as_object()?;

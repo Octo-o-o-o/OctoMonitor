@@ -116,12 +116,244 @@ pub struct VcsContext {
     pub confidence: SourceConfidence,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum LifecycleStatusSource {
+    Api,
+    Hook,
+    Process,
+    Passive,
+    Inferred,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SessionLifecycle {
+    pub status: RunState,
+    pub status_source: LifecycleStatusSource,
+    pub started_at: Option<String>,
+    pub last_activity_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub error: Option<String>,
+}
+
+impl Default for SessionLifecycle {
+    fn default() -> Self {
+        Self {
+            status: RunState::Completed,
+            status_source: LifecycleStatusSource::Inferred,
+            started_at: None,
+            last_activity_at: None,
+            ended_at: None,
+            error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum UsageCostKind {
+    Exact,
+    Estimated,
+    Partial,
+    NotAvailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum UsageDataSource {
+    Transcript,
+    Api,
+    Statusline,
+    Computed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UsageSemantics {
+    pub cost_kind: UsageCostKind,
+    pub source: UsageDataSource,
+    pub enters_usage_totals: bool,
+    pub note: Option<String>,
+}
+
+impl Default for UsageSemantics {
+    fn default() -> Self {
+        Self {
+            cost_kind: UsageCostKind::NotAvailable,
+            source: UsageDataSource::Unknown,
+            enters_usage_totals: false,
+            note: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum DataSourceType {
+    Jsonl,
+    Sqlite,
+    Markdown,
+    Api,
+    Hook,
+    Rpc,
+    Process,
+    Terminal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SchemaConfidence {
+    High,
+    Medium,
+    Low,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DataSourceError {
+    pub code: String,
+    pub message: String,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DataSourceHealth {
+    pub id: String,
+    pub source_type: DataSourceType,
+    pub path: Option<String>,
+    pub api_endpoint: Option<String>,
+    pub last_seen_at: Option<String>,
+    pub schema_version: Option<String>,
+    pub schema_confidence: SchemaConfidence,
+    pub errors: Vec<DataSourceError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum CapabilitySource {
+    OfficialApi,
+    OfficialCli,
+    OfficialHook,
+    ReverseEngineered,
+    Inferred,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum AuditLevel {
+    None,
+    Metadata,
+    Full,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum CapabilityFailureMode {
+    Safe,
+    MayLeaveProcessRunning,
+    MayDropData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CapabilityDescriptor {
+    pub id: String,
+    pub source: CapabilitySource,
+    pub confidence: SchemaConfidence,
+    pub mutates_state: bool,
+    pub requires_user_confirmation: bool,
+    pub requires_managed_process: bool,
+    pub can_expose_secrets: bool,
+    pub audit_level: AuditLevel,
+    pub failure_mode: CapabilityFailureMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum JumpTargetKind {
+    CopyCommand,
+    NewTerminalTab,
+    Workspace,
+    NativeApp,
+    SessionDeeplink,
+    ManagedTerminalFocus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TerminalProvider {
+    Warp,
+    ITerm2,
+    Ghostty,
+    TerminalApp,
+    VsCode,
+    Cursor,
+    Tmux,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum JumpReliability {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TerminalTarget {
+    pub provider: TerminalProvider,
+    pub window_id: Option<String>,
+    pub tab_id: Option<String>,
+    pub pane_id: Option<String>,
+    pub pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct JumpTarget {
+    pub kind: JumpTargetKind,
+    pub label: String,
+    pub command: Option<Vec<String>>,
+    pub cwd: Option<String>,
+    pub url: Option<String>,
+    pub terminal: Option<TerminalTarget>,
+    pub reliability: JumpReliability,
+    pub requires_confirmation: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct RunRecord {
     pub id: String,
     pub tool: ToolKind,
+    #[serde(default)]
+    #[ts(optional)]
+    pub source_id: Option<String>,
     pub source_mode: String,
     pub project_name: String,
     pub workspace_path: String,
@@ -154,10 +386,29 @@ pub struct RunRecord {
     pub cost: MoneyValue,
     pub quota: QuotaValue,
     pub source: SourceInfo,
+    #[serde(default)]
+    #[ts(optional)]
+    pub lifecycle: Option<SessionLifecycle>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub usage_semantics: Option<UsageSemantics>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub data_sources: Option<Vec<DataSourceHealth>>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub capabilities: Option<Vec<CapabilityDescriptor>>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub jump_targets: Option<Vec<JumpTarget>>,
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    #[ts(optional)]
+    pub tool_specific: Option<serde_json::Value>,
     pub vcs: Option<VcsContext>,
-    /// Human-readable session origin, e.g. "Telegram: Yixiao Wang", "Cron: AI Daily Brief"
+    // Human-readable session origin, e.g. "Telegram: Yixiao Wang", "Cron: AI Daily Brief"
     pub origin_label: Option<String>,
-    /// Source provider type, e.g. "telegram", "cron", "heartbeat"
+    // Source provider type, e.g. "telegram", "cron", "heartbeat"
     pub origin_provider: Option<String>,
 }
 
@@ -208,6 +459,9 @@ pub struct UsageBucket {
     pub total_tokens: u64,
     pub cost_usd: Option<f64>,
     pub confidence: SourceConfidence,
+    #[serde(default)]
+    #[ts(optional)]
+    pub usage_semantics: Option<UsageSemantics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -457,18 +711,62 @@ pub fn classify_freshness(seconds: i64) -> Freshness {
 mod tests {
     use super::*;
 
+    fn demo_lifecycle(
+        state: RunState,
+        started_at: &str,
+        last_activity_at: &str,
+    ) -> SessionLifecycle {
+        SessionLifecycle {
+            status: state,
+            status_source: LifecycleStatusSource::Passive,
+            started_at: Some(started_at.into()),
+            last_activity_at: Some(last_activity_at.into()),
+            ended_at: None,
+            error: None,
+        }
+    }
+
+    fn demo_usage(cost_kind: UsageCostKind, source: UsageDataSource) -> UsageSemantics {
+        UsageSemantics {
+            cost_kind,
+            source,
+            enters_usage_totals: true,
+            note: None,
+        }
+    }
+
+    fn demo_data_source(id: &str, path: &str, last_seen_at: &str) -> Vec<DataSourceHealth> {
+        vec![DataSourceHealth {
+            id: id.into(),
+            source_type: DataSourceType::Jsonl,
+            path: Some(path.into()),
+            api_endpoint: None,
+            last_seen_at: Some(last_seen_at.into()),
+            schema_version: Some("demo".into()),
+            schema_confidence: SchemaConfidence::High,
+            errors: Vec::new(),
+        }]
+    }
+
     fn demo_bootstrap() -> BootstrapPayload {
         use chrono::{Duration, Utc};
         let now = Utc::now();
         let started = now - Duration::minutes(37);
         let last = now - Duration::seconds(4);
         let now_s = now.to_rfc3339();
+        let claude_started = started.to_rfc3339();
+        let claude_last = last.to_rfc3339();
+        let codex_started = (now - Duration::minutes(12)).to_rfc3339();
+        let codex_last = (now - Duration::seconds(18)).to_rfc3339();
+        let openclaw_started = (now - Duration::minutes(52)).to_rfc3339();
+        let openclaw_last = (now - Duration::seconds(2)).to_rfc3339();
         BootstrapPayload {
             generated_at: now_s.clone(),
             runs: vec![
                 RunRecord {
                     id: "claude-run-1".into(),
                     tool: ToolKind::Claude,
+                    source_id: Some("claude:statusline".into()),
                     source_mode: "claude_statusline".into(),
                     project_name: "OctoMonitor".into(),
                     workspace_path: "~/workspace/octomonitor".into(),
@@ -484,8 +782,8 @@ mod tests {
                     thread_id: None,
                     session_key: None,
                     transcript_path: Some("~/.claude/transcripts/octomonitor.jsonl".into()),
-                    started_at: started.to_rfc3339(),
-                    last_activity_at: last.to_rfc3339(),
+                    started_at: claude_started.clone(),
+                    last_activity_at: claude_last.clone(),
                     elapsed_ms: (now - started).num_milliseconds(),
                     state: RunState::Active,
                     last_action: Some("Editing Axum server routes".into()),
@@ -518,6 +816,23 @@ mod tests {
                         freshness: classify_freshness((now - last).num_seconds()),
                         last_updated_at: now_s.clone(),
                     },
+                    lifecycle: Some(demo_lifecycle(
+                        RunState::Active,
+                        &claude_started,
+                        &claude_last,
+                    )),
+                    usage_semantics: Some(demo_usage(
+                        UsageCostKind::Exact,
+                        UsageDataSource::Statusline,
+                    )),
+                    data_sources: Some(demo_data_source(
+                        "claude:statusline",
+                        "~/.claude/transcripts/octomonitor.jsonl",
+                        &now_s,
+                    )),
+                    capabilities: Some(Vec::new()),
+                    jump_targets: Some(Vec::new()),
+                    tool_specific: Some(serde_json::json!({})),
                     vcs: Some(VcsContext {
                         repo_id: "repo-octomonitor".into(),
                         repo_name: "OctoMonitor".into(),
@@ -534,6 +849,7 @@ mod tests {
                 RunRecord {
                     id: "codex-run-1".into(),
                     tool: ToolKind::Codex,
+                    source_id: Some("codex:app-server".into()),
                     source_mode: "codex_app_server".into(),
                     project_name: "Readless".into(),
                     workspace_path: "~/workspace/readless".into(),
@@ -549,8 +865,8 @@ mod tests {
                     thread_id: Some("thread_123".into()),
                     session_key: None,
                     transcript_path: Some("~/.codex/history.jsonl".into()),
-                    started_at: (now - Duration::minutes(12)).to_rfc3339(),
-                    last_activity_at: (now - Duration::seconds(18)).to_rfc3339(),
+                    started_at: codex_started.clone(),
+                    last_activity_at: codex_last.clone(),
                     elapsed_ms: Duration::minutes(12).num_milliseconds(),
                     state: RunState::WaitingApproval,
                     last_action: Some("Waiting on Bash approval".into()),
@@ -583,6 +899,33 @@ mod tests {
                         freshness: classify_freshness(18),
                         last_updated_at: now_s.clone(),
                     },
+                    lifecycle: Some(demo_lifecycle(
+                        RunState::WaitingApproval,
+                        &codex_started,
+                        &codex_last,
+                    )),
+                    usage_semantics: Some(demo_usage(
+                        UsageCostKind::Estimated,
+                        UsageDataSource::Api,
+                    )),
+                    data_sources: Some(demo_data_source(
+                        "codex:app-server",
+                        "~/.codex/history.jsonl",
+                        &now_s,
+                    )),
+                    capabilities: Some(vec![CapabilityDescriptor {
+                        id: "resume.copyCommand".into(),
+                        source: CapabilitySource::OfficialCli,
+                        confidence: SchemaConfidence::High,
+                        mutates_state: false,
+                        requires_user_confirmation: false,
+                        requires_managed_process: false,
+                        can_expose_secrets: false,
+                        audit_level: AuditLevel::Metadata,
+                        failure_mode: CapabilityFailureMode::Safe,
+                    }]),
+                    jump_targets: Some(Vec::new()),
+                    tool_specific: Some(serde_json::json!({})),
                     vcs: Some(VcsContext {
                         repo_id: "repo-readless".into(),
                         repo_name: "Readless".into(),
@@ -599,6 +942,7 @@ mod tests {
                 RunRecord {
                     id: "openclaw-run-1".into(),
                     tool: ToolKind::OpenClaw,
+                    source_id: Some("openclaw:gateway".into()),
                     source_mode: "openclaw_gateway".into(),
                     project_name: "Alice".into(),
                     workspace_path: "~/.openclaw/workspace".into(),
@@ -616,8 +960,8 @@ mod tests {
                     transcript_path: Some(
                         "~/.openclaw/agents/dev/sessions/session-dev-42.jsonl".into(),
                     ),
-                    started_at: (now - Duration::minutes(52)).to_rfc3339(),
-                    last_activity_at: (now - Duration::seconds(2)).to_rfc3339(),
+                    started_at: openclaw_started.clone(),
+                    last_activity_at: openclaw_last.clone(),
                     elapsed_ms: Duration::minutes(52).num_milliseconds(),
                     state: RunState::Active,
                     last_action: Some("Gateway stream healthy".into()),
@@ -650,6 +994,23 @@ mod tests {
                         freshness: classify_freshness(2),
                         last_updated_at: now_s.clone(),
                     },
+                    lifecycle: Some(demo_lifecycle(
+                        RunState::Active,
+                        &openclaw_started,
+                        &openclaw_last,
+                    )),
+                    usage_semantics: Some(demo_usage(
+                        UsageCostKind::Estimated,
+                        UsageDataSource::Api,
+                    )),
+                    data_sources: Some(demo_data_source(
+                        "openclaw:gateway",
+                        "~/.openclaw/agents/dev/sessions/session-dev-42.jsonl",
+                        &now_s,
+                    )),
+                    capabilities: Some(Vec::new()),
+                    jump_targets: Some(Vec::new()),
+                    tool_specific: Some(serde_json::json!({})),
                     vcs: Some(VcsContext {
                         repo_id: "repo-openclaw-workspace".into(),
                         repo_name: "workspace".into(),
@@ -699,6 +1060,10 @@ mod tests {
                     total_tokens: 219_600,
                     cost_usd: Some(12.42),
                     confidence: SourceConfidence::Live,
+                    usage_semantics: Some(demo_usage(
+                        UsageCostKind::Exact,
+                        UsageDataSource::Statusline,
+                    )),
                 },
                 UsageBucket {
                     scope: serde_json::json!({"runId":"codex-run-1","tool":"codex"}),
@@ -712,6 +1077,10 @@ mod tests {
                     total_tokens: 57_500,
                     cost_usd: None,
                     confidence: SourceConfidence::Estimated,
+                    usage_semantics: Some(demo_usage(
+                        UsageCostKind::Estimated,
+                        UsageDataSource::Api,
+                    )),
                 },
                 UsageBucket {
                     scope: serde_json::json!({"runId":"openclaw-run-1","tool":"openClaw"}),
@@ -725,6 +1094,10 @@ mod tests {
                     total_tokens: 120_800,
                     cost_usd: Some(4.83),
                     confidence: SourceConfidence::Official,
+                    usage_semantics: Some(demo_usage(
+                        UsageCostKind::Estimated,
+                        UsageDataSource::Api,
+                    )),
                 },
             ],
             commits: vec![

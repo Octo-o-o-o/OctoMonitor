@@ -7,9 +7,9 @@ use std::{
 };
 
 pub use octomonitor_adapter_common::{
-    latest_file_name, mask_value, probe_file, read_jsonl_delta, resolve_env_or_home,
-    run_command_probe, truncate_chars, AdapterDescriptor, CommandProbeResult, FileProbeResult,
-    JsonlCursor,
+    latest_file_name, mask_value, path_has_sensitive_component, probe_file, read_jsonl_delta,
+    resolve_env_or_home, run_command_probe, truncate_chars, AdapterDescriptor, CommandProbeResult,
+    FileProbeResult, JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -173,6 +173,9 @@ fn scan_sessions(
         for file_entry in files.flatten() {
             let path = file_entry.path();
             if path.extension().is_none_or(|ext| ext != "jsonl") {
+                continue;
+            }
+            if path_has_sensitive_component(&path) {
                 continue;
             }
             let cache_key = path.display().to_string();

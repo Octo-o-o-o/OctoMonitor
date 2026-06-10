@@ -1,7 +1,9 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use chrono::Utc;
 use octomonitor_core::{
-    Freshness, MoneyValue, RunRecord, RunState, SourceConfidence, SourceInfo, TokenUsage, ToolKind,
+    DataSourceHealth, DataSourceType, Freshness, LifecycleStatusSource, MoneyValue, RunRecord,
+    RunState, SchemaConfidence, SessionLifecycle, SourceConfidence, SourceInfo, TokenUsage,
+    ToolKind, UsageCostKind, UsageDataSource, UsageSemantics,
 };
 use serde::Deserialize;
 
@@ -43,6 +45,49 @@ fn live_source() -> SourceInfo {
         freshness: Freshness::Hot,
         last_updated_at: Utc::now().to_rfc3339(),
     }
+}
+
+fn live_lifecycle(
+    state: RunState,
+    started_at: &str,
+    last_activity_at: &str,
+    source: LifecycleStatusSource,
+) -> SessionLifecycle {
+    SessionLifecycle {
+        status: state,
+        status_source: source,
+        started_at: Some(started_at.to_string()),
+        last_activity_at: Some(last_activity_at.to_string()),
+        ended_at: None,
+        error: None,
+    }
+}
+
+fn usage_semantics(cost_kind: UsageCostKind, source: UsageDataSource) -> UsageSemantics {
+    UsageSemantics {
+        cost_kind,
+        source,
+        enters_usage_totals: true,
+        note: None,
+    }
+}
+
+fn data_source_health(
+    id: &str,
+    source_type: DataSourceType,
+    path: Option<String>,
+    last_seen_at: &str,
+) -> Vec<DataSourceHealth> {
+    vec![DataSourceHealth {
+        id: id.into(),
+        source_type,
+        path,
+        api_endpoint: None,
+        last_seen_at: Some(last_seen_at.to_string()),
+        schema_version: None,
+        schema_confidence: SchemaConfidence::High,
+        errors: Vec::new(),
+    }]
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,12 +150,21 @@ pub async fn ingest_claude_statusline(
         .flatten()
         .collect(),
     );
+    let started_at = Utc::now().to_rfc3339();
+    let last_activity_at = started_at.clone();
+    let run_state = if input.pending_approval.unwrap_or(false) {
+        RunState::WaitingApproval
+    } else {
+        RunState::Active
+    };
+    let transcript_path = input.transcript_path;
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
             session_id.as_deref().unwrap_or("unknown")
         ),
         tool: ToolKind::Claude,
+        source_id: Some("claude:statusline".into()),
         source_mode: "claude_statusline".into(),
         project_name: input
             .project_name
@@ -126,15 +180,11 @@ pub async fn ingest_claude_statusline(
         session_id,
         thread_id: None,
         session_key: None,
-        transcript_path: input.transcript_path,
-        started_at: Utc::now().to_rfc3339(),
-        last_activity_at: Utc::now().to_rfc3339(),
+        transcript_path: transcript_path.clone(),
+        started_at: started_at.clone(),
+        last_activity_at: last_activity_at.clone(),
         elapsed_ms: 0,
-        state: if input.pending_approval.unwrap_or(false) {
-            RunState::WaitingApproval
-        } else {
-            RunState::Active
-        },
+        state: run_state.clone(),
         last_action: input.last_action,
         last_tail: Some("live statusline ingest".into()),
         pending_approval: input.pending_approval.unwrap_or(false),
@@ -156,6 +206,29 @@ pub async fn ingest_claude_statusline(
         },
         quota,
         source: live_source(),
+        lifecycle: Some(live_lifecycle(
+            run_state,
+            &started_at,
+            &last_activity_at,
+            LifecycleStatusSource::Hook,
+        )),
+        usage_semantics: Some(usage_semantics(
+            if input.total_cost_usd.is_some() {
+                UsageCostKind::Exact
+            } else {
+                UsageCostKind::Partial
+            },
+            UsageDataSource::Statusline,
+        )),
+        data_sources: Some(data_source_health(
+            "claude:statusline",
+            DataSourceType::Hook,
+            transcript_path,
+            &last_activity_at,
+        )),
+        capabilities: Some(Vec::new()),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({})),
         vcs: crate::commits::discover_vcs_context(&workspace_path),
         workspace_path,
         origin_label: None,
@@ -173,12 +246,23 @@ pub async fn ingest_claude_hook(
     let event = input.event.unwrap_or_else(|| "notification".into());
     let pending = event.contains("permission");
     let workspace_path = input.cwd.unwrap_or_else(|| "~/.claude".into());
+    let started_at = Utc::now().to_rfc3339();
+    let last_activity_at = started_at.clone();
+    let run_state = if pending {
+        RunState::WaitingApproval
+    } else if event.contains("idle") {
+        RunState::Idle
+    } else {
+        RunState::Active
+    };
+    let transcript_path = input.transcript_path;
     let run = RunRecord {
         id: format!(
             "ingest-claude-{}",
             input.session_id.as_deref().unwrap_or("hook")
         ),
         tool: ToolKind::Claude,
+        source_id: Some("claude:hook".into()),
         source_mode: "claude_hook".into(),
         project_name: last_path_component(&workspace_path)
             .unwrap_or("Claude Session")
@@ -194,17 +278,11 @@ pub async fn ingest_claude_hook(
         session_id: input.session_id,
         thread_id: None,
         session_key: None,
-        transcript_path: input.transcript_path,
-        started_at: Utc::now().to_rfc3339(),
-        last_activity_at: Utc::now().to_rfc3339(),
+        transcript_path: transcript_path.clone(),
+        started_at: started_at.clone(),
+        last_activity_at: last_activity_at.clone(),
         elapsed_ms: 0,
-        state: if pending {
-            RunState::WaitingApproval
-        } else if event.contains("idle") {
-            RunState::Idle
-        } else {
-            RunState::Active
-        },
+        state: run_state.clone(),
         last_action: Some(format!("hook event: {event}")),
         last_tail: Some("live hook ingest".into()),
         pending_approval: pending,
@@ -219,6 +297,25 @@ pub async fn ingest_claude_hook(
         },
         quota: default_quota(),
         source: live_source(),
+        lifecycle: Some(live_lifecycle(
+            run_state,
+            &started_at,
+            &last_activity_at,
+            LifecycleStatusSource::Hook,
+        )),
+        usage_semantics: Some(usage_semantics(
+            UsageCostKind::NotAvailable,
+            UsageDataSource::Unknown,
+        )),
+        data_sources: Some(data_source_health(
+            "claude:hook",
+            DataSourceType::Hook,
+            transcript_path,
+            &last_activity_at,
+        )),
+        capabilities: Some(Vec::new()),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({ "event": event })),
         vcs: crate::commits::discover_vcs_context(&workspace_path),
         workspace_path,
         origin_label: None,
@@ -241,12 +338,22 @@ pub async fn ingest_codex_hook(
         .as_deref()
         .map(crate::probe::resolve_worktree_cwd)
         .unwrap_or_else(|| "~/.codex".into());
+    let started_at = Utc::now().to_rfc3339();
+    let last_activity_at = started_at.clone();
+    let run_state = if pending {
+        RunState::WaitingApproval
+    } else if event.contains("stop") {
+        RunState::Completed
+    } else {
+        RunState::Active
+    };
     let run = RunRecord {
         id: format!(
             "ingest-codex-{}",
             input.thread_id.as_deref().unwrap_or("thread")
         ),
         tool: ToolKind::Codex,
+        source_id: Some("codex:hook".into()),
         source_mode: "codex_hook".into(),
         project_name: last_path_component(&workspace_path)
             .unwrap_or("Codex Thread")
@@ -263,16 +370,10 @@ pub async fn ingest_codex_hook(
         thread_id: input.thread_id,
         session_key: None,
         transcript_path: None,
-        started_at: Utc::now().to_rfc3339(),
-        last_activity_at: Utc::now().to_rfc3339(),
+        started_at: started_at.clone(),
+        last_activity_at: last_activity_at.clone(),
         elapsed_ms: 0,
-        state: if pending {
-            RunState::WaitingApproval
-        } else if event.contains("stop") {
-            RunState::Completed
-        } else {
-            RunState::Active
-        },
+        state: run_state.clone(),
         last_action: Some(format!("codex hook: {event}")),
         last_tail: Some("live hook ingest".into()),
         pending_approval: pending,
@@ -290,6 +391,25 @@ pub async fn ingest_codex_hook(
         },
         quota: default_quota(),
         source: live_source(),
+        lifecycle: Some(live_lifecycle(
+            run_state,
+            &started_at,
+            &last_activity_at,
+            LifecycleStatusSource::Hook,
+        )),
+        usage_semantics: Some(usage_semantics(
+            UsageCostKind::Partial,
+            UsageDataSource::Transcript,
+        )),
+        data_sources: Some(data_source_health(
+            "codex:hook",
+            DataSourceType::Hook,
+            None,
+            &last_activity_at,
+        )),
+        capabilities: Some(Vec::new()),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({ "event": event })),
         vcs: crate::commits::discover_vcs_context(&workspace_path),
         workspace_path,
         origin_label: None,
@@ -390,6 +510,18 @@ mod tests {
                 freshness: Freshness::Hot,
                 last_updated_at: now,
             },
+            source_id: Some("test:ingest".into()),
+            lifecycle: Some(SessionLifecycle::default()),
+            usage_semantics: Some(UsageSemantics {
+                cost_kind: UsageCostKind::Estimated,
+                source: UsageDataSource::Computed,
+                enters_usage_totals: true,
+                note: None,
+            }),
+            data_sources: Some(Vec::new()),
+            capabilities: Some(Vec::new()),
+            jump_targets: Some(Vec::new()),
+            tool_specific: Some(serde_json::json!({})),
             vcs: None,
             origin_label: None,
             origin_provider: None,
@@ -517,8 +649,10 @@ mod tests {
         // a deterministic run id ("ingest-claude-unknown") so the next call
         // upserts rather than littering the store with duplicates.
         let state = test_state();
-        let _ = ingest_claude_statusline(State(state.clone()), Json(empty_claude_statusline())).await;
-        let _ = ingest_claude_statusline(State(state.clone()), Json(empty_claude_statusline())).await;
+        let _ =
+            ingest_claude_statusline(State(state.clone()), Json(empty_claude_statusline())).await;
+        let _ =
+            ingest_claude_statusline(State(state.clone()), Json(empty_claude_statusline())).await;
 
         let payload = state.bootstrap.read().await;
         let fallback_runs: Vec<_> = payload

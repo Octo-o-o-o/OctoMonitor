@@ -1,24 +1,25 @@
 use std::net::SocketAddr;
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Json, Request, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{
-        header::{COOKIE, SET_COOKIE},
         HeaderMap, StatusCode,
+        header::{COOKIE, SET_COOKIE},
     },
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use octomonitor_companion::{
     claim_pairing, pairing_is_expired, pairing_matches, session_is_expired, touch_viewer_session,
 };
 use octomonitor_core::{
-    AppConfig, AttentionItem, BootstrapPayload, CommitRecord, CompletionRecord, IdentityState,
-    RemoteAccessMode, RemoteAccessState, RemoteDevice, RemotePairingCode, RunRecord, VcsContext,
+    AppConfig, AttentionItem, BootstrapPayload, CommitRecord, CompletionRecord, DataSourceHealth,
+    IdentityState, RemoteAccessMode, RemoteAccessState, RemoteDevice, RemotePairingCode, RunRecord,
+    SessionLifecycle, VcsContext,
 };
 use serde::Deserialize;
 use tokio::sync::{broadcast::error::RecvError, oneshot};
@@ -197,6 +198,7 @@ fn redact_run(run: &RunRecord) -> RunRecord {
     RunRecord {
         id: run.id.clone(),
         tool: run.tool.clone(),
+        source_id: run.source_id.clone(),
         source_mode: run.source_mode.clone(),
         project_name: run.project_name.clone(),
         workspace_path: String::new(),
@@ -227,9 +229,42 @@ fn redact_run(run: &RunRecord) -> RunRecord {
         cost: run.cost.clone(),
         quota: run.quota.clone(),
         source: run.source.clone(),
+        lifecycle: run.lifecycle.as_ref().map(redact_lifecycle),
+        usage_semantics: run.usage_semantics.clone(),
+        data_sources: run
+            .data_sources
+            .as_ref()
+            .map(|sources| sources.iter().map(redact_data_source).collect()),
+        capabilities: Some(Vec::new()),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({})),
         vcs: run.vcs.as_ref().map(redact_vcs_context),
         origin_label: None,
         origin_provider: run.origin_provider.clone(),
+    }
+}
+
+fn redact_lifecycle(lifecycle: &SessionLifecycle) -> SessionLifecycle {
+    SessionLifecycle {
+        status: lifecycle.status.clone(),
+        status_source: lifecycle.status_source.clone(),
+        started_at: lifecycle.started_at.clone(),
+        last_activity_at: lifecycle.last_activity_at.clone(),
+        ended_at: lifecycle.ended_at.clone(),
+        error: None,
+    }
+}
+
+fn redact_data_source(source: &DataSourceHealth) -> DataSourceHealth {
+    DataSourceHealth {
+        id: source.id.clone(),
+        source_type: source.source_type.clone(),
+        path: None,
+        api_endpoint: None,
+        last_seen_at: source.last_seen_at.clone(),
+        schema_version: source.schema_version.clone(),
+        schema_confidence: source.schema_confidence.clone(),
+        errors: Vec::new(),
     }
 }
 
@@ -511,7 +546,11 @@ fn build_viewer_cookie(secret: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use octomonitor_companion::{request_pairing, ViewerSession};
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode},
+    };
+    use octomonitor_companion::{ViewerSession, request_pairing};
     use octomonitor_core::{
         AppConfig, AttentionItem, CommitAttributionLink, CommitAttributionMethod, CommitRecord,
         CommitSourceStat, CompletionRecord, Freshness, IdentityState, MoneyValue, QuotaValue,
@@ -521,6 +560,7 @@ mod tests {
     use super::*;
     use crate::pricing::PricingStore;
     use crate::probe::empty_bootstrap;
+    use tower::util::ServiceExt;
 
     fn test_state(pricing: &PricingStore) -> AppState {
         AppState::new(empty_bootstrap(), pricing.clone())
@@ -546,6 +586,23 @@ mod tests {
         assert!(run.last_question.is_none());
         assert!(run.error_message.is_none());
         assert!(run.origin_label.is_none());
+        assert!(run.capabilities.as_ref().is_some_and(Vec::is_empty));
+        assert!(run.jump_targets.as_ref().is_some_and(Vec::is_empty));
+        assert_eq!(run.tool_specific, Some(serde_json::json!({})));
+        assert!(
+            run.lifecycle
+                .as_ref()
+                .is_some_and(|lifecycle| lifecycle.error.is_none())
+        );
+        assert!(
+            run.data_sources
+                .as_ref()
+                .is_some_and(|sources| sources.iter().all(|source| {
+                    source.path.is_none()
+                        && source.api_endpoint.is_none()
+                        && source.errors.is_empty()
+                }))
+        );
 
         let vcs = run.vcs.as_ref().expect("redacted vcs");
         assert!(vcs.repo_name.is_empty());
@@ -578,6 +635,35 @@ mod tests {
 
         assert_eq!(redacted.config.listen_host, "remote-viewer");
         assert!(redacted.config.local_ip.is_none());
+    }
+
+    #[tokio::test]
+    async fn remote_router_does_not_expose_local_mutation_or_run_operation_routes() {
+        let pricing = PricingStore::new();
+        let state = test_state(&pricing);
+        state.bootstrap.write().await.config.companion_enabled = true;
+        let app = build_remote_router(state);
+
+        for (method, uri) in [
+            (Method::PATCH, "/api/config"),
+            (Method::POST, "/api/ingest/codex/hook"),
+            (Method::GET, "/api/runs/run-1/events"),
+            (Method::GET, "/api/runs/run-1/resume-command"),
+            (Method::POST, "/api/runs/run-1/turn/interrupt"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {uri}");
+        }
     }
 
     fn sample_bootstrap() -> BootstrapPayload {
@@ -641,6 +727,37 @@ mod tests {
                 freshness: Freshness::Hot,
                 last_updated_at: "2026-04-09T08:05:00Z".into(),
             },
+            source_id: Some("claude:hook".into()),
+            lifecycle: Some(SessionLifecycle::default()),
+            usage_semantics: Some(octomonitor_core::UsageSemantics {
+                cost_kind: octomonitor_core::UsageCostKind::Estimated,
+                source: octomonitor_core::UsageDataSource::Transcript,
+                enters_usage_totals: true,
+                note: None,
+            }),
+            data_sources: Some(vec![DataSourceHealth {
+                id: "claude:hook".into(),
+                source_type: octomonitor_core::DataSourceType::Hook,
+                path: Some("/Users/demo/.claude/transcript.jsonl".into()),
+                api_endpoint: None,
+                last_seen_at: Some("2026-04-09T08:05:00Z".into()),
+                schema_version: None,
+                schema_confidence: octomonitor_core::SchemaConfidence::High,
+                errors: Vec::new(),
+            }]),
+            capabilities: Some(vec![octomonitor_core::CapabilityDescriptor {
+                id: "turn.interrupt".into(),
+                source: octomonitor_core::CapabilitySource::Inferred,
+                confidence: octomonitor_core::SchemaConfidence::Low,
+                mutates_state: true,
+                requires_user_confirmation: true,
+                requires_managed_process: true,
+                can_expose_secrets: true,
+                audit_level: octomonitor_core::AuditLevel::Full,
+                failure_mode: octomonitor_core::CapabilityFailureMode::MayLeaveProcessRunning,
+            }]),
+            jump_targets: Some(Vec::new()),
+            tool_specific: Some(serde_json::json!({ "raw": "local-only" })),
             vcs: Some(VcsContext {
                 repo_id: "repo-1".into(),
                 repo_name: "OctoMonitor".into(),

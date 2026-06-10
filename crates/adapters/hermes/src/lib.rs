@@ -8,9 +8,9 @@ use std::{
 };
 
 pub use octomonitor_adapter_common::{
-    capitalize, file_signature, format_cron_expr, mask_value, probe_file, read_jsonl_delta,
-    resolve_env_or_home, run_command_probe, AdapterDescriptor, CommandProbeResult, FileProbeResult,
-    JsonlCursor,
+    capitalize, file_signature, format_cron_expr, mask_value, path_has_sensitive_component,
+    probe_file, read_jsonl_delta, resolve_env_or_home, run_command_probe, AdapterDescriptor,
+    CommandProbeResult, FileProbeResult, JsonlCursor,
 };
 
 pub fn descriptor() -> AdapterDescriptor {
@@ -213,6 +213,9 @@ fn parse_sessions_json(
     profile_name: &str,
     model_from_config: Option<&str>,
 ) -> Option<Vec<HermesSession>> {
+    if path_has_sensitive_component(path) {
+        return None;
+    }
     let contents = fs::read_to_string(path).ok()?;
     let val: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let obj = val.as_object()?;

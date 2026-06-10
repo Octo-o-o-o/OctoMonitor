@@ -955,9 +955,11 @@ mod tests {
 
         let vcs = discover_vcs_context(repo_root.to_str().unwrap()).expect("main vcs");
         let commits = scan_recent_commits(&vcs, None);
-        assert!(commits
-            .iter()
-            .any(|commit| commit.summary == "feature worktree commit"));
+        assert!(
+            commits
+                .iter()
+                .any(|commit| commit.summary == "feature worktree commit")
+        );
     }
 
     #[test]
@@ -1072,6 +1074,18 @@ mod tests {
                 freshness: octomonitor_core::Freshness::Warm,
                 last_updated_at: "2026-04-01T10:20:00Z".into(),
             },
+            source_id: Some("test:commit".into()),
+            lifecycle: Some(octomonitor_core::SessionLifecycle::default()),
+            usage_semantics: Some(octomonitor_core::UsageSemantics {
+                cost_kind: octomonitor_core::UsageCostKind::Estimated,
+                source: octomonitor_core::UsageDataSource::Computed,
+                enters_usage_totals: true,
+                note: None,
+            }),
+            data_sources: Some(Vec::new()),
+            capabilities: Some(Vec::new()),
+            jump_targets: Some(Vec::new()),
+            tool_specific: Some(serde_json::json!({})),
             vcs,
             origin_label: None,
             origin_provider: None,

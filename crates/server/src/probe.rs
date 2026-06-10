@@ -6,9 +6,12 @@ use chrono::Utc;
 use octomonitor_claude_adapter as claude_adapter;
 use octomonitor_codex_adapter as codex_adapter;
 use octomonitor_core::{
-    AdapterHealth, AppConfig, AttentionItem, BootstrapPayload, CommitHistoryPayload, Freshness,
-    GatewayStatus, HistoryRange, IdentityState, MoneyValue, PendingCron, QuotaValue, RunRecord,
-    RunState, SourceConfidence, SourceInfo, TokenUsage, ToolKind, UsageBucket, UsageHistoryPayload,
+    AdapterHealth, AppConfig, AttentionItem, AuditLevel, BootstrapPayload, CapabilityDescriptor,
+    CapabilityFailureMode, CapabilitySource, CommitHistoryPayload, DataSourceHealth,
+    DataSourceType, Freshness, GatewayStatus, HistoryRange, IdentityState, LifecycleStatusSource,
+    MoneyValue, PendingCron, QuotaValue, RunRecord, RunState, SchemaConfidence, SessionLifecycle,
+    SourceConfidence, SourceInfo, TokenUsage, ToolKind, UsageBucket, UsageCostKind,
+    UsageDataSource, UsageHistoryPayload, UsageSemantics,
 };
 use octomonitor_hermes_adapter as hermes_adapter;
 use octomonitor_openclaw_adapter as openclaw_adapter;
@@ -61,6 +64,82 @@ fn default_app_config() -> AppConfig {
         companion_enabled: false,
         local_ip: None,
     }
+}
+
+fn lifecycle(
+    status: RunState,
+    status_source: LifecycleStatusSource,
+    started_at: &str,
+    last_activity_at: &str,
+    error: Option<String>,
+) -> SessionLifecycle {
+    SessionLifecycle {
+        status,
+        status_source,
+        started_at: Some(started_at.to_string()),
+        last_activity_at: Some(last_activity_at.to_string()),
+        ended_at: None,
+        error,
+    }
+}
+
+fn usage_semantics(
+    cost_kind: UsageCostKind,
+    source: UsageDataSource,
+    enters_usage_totals: bool,
+) -> UsageSemantics {
+    UsageSemantics {
+        cost_kind,
+        source,
+        enters_usage_totals,
+        note: None,
+    }
+}
+
+fn data_source_health(
+    id: &str,
+    source_type: DataSourceType,
+    path: Option<String>,
+    last_seen_at: &str,
+    schema_version: Option<&str>,
+    schema_confidence: SchemaConfidence,
+) -> Vec<DataSourceHealth> {
+    vec![DataSourceHealth {
+        id: id.into(),
+        source_type,
+        path,
+        api_endpoint: None,
+        last_seen_at: Some(last_seen_at.to_string()),
+        schema_version: schema_version.map(String::from),
+        schema_confidence,
+        errors: Vec::new(),
+    }]
+}
+
+fn safe_capability(
+    id: &str,
+    source: CapabilitySource,
+    confidence: SchemaConfidence,
+) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        id: id.into(),
+        source,
+        confidence,
+        mutates_state: false,
+        requires_user_confirmation: false,
+        requires_managed_process: false,
+        can_expose_secrets: false,
+        audit_level: AuditLevel::Metadata,
+        failure_mode: CapabilityFailureMode::Safe,
+    }
+}
+
+fn open_workspace_capability() -> CapabilityDescriptor {
+    safe_capability(
+        "open.workspace",
+        CapabilitySource::Inferred,
+        SchemaConfidence::Medium,
+    )
 }
 
 pub fn empty_bootstrap() -> BootstrapPayload {
@@ -436,9 +515,7 @@ fn same_underlying_run(a: &RunRecord, b: &RunRecord) -> bool {
     if a.tool != b.tool {
         return false;
     }
-    let both_match = |left: &Option<String>, right: &Option<String>| {
-        matches!((left, right), (Some(l), Some(r)) if l == r)
-    };
+    let both_match = |left: &Option<String>, right: &Option<String>| matches!((left, right), (Some(l), Some(r)) if l == r);
     both_match(&a.session_id, &b.session_id)
         || both_match(&a.thread_id, &b.thread_id)
         || both_match(&a.session_key, &b.session_key)
@@ -1062,10 +1139,12 @@ fn build_run_from_claude_session(
 ) -> RunRecord {
     let five_h = probe.quota.as_ref().and_then(|q| q.five_hour_used_pct);
     let seven_d = probe.quota.as_ref().and_then(|q| q.seven_day_used_pct);
+    let state = classify_claude_session_state(session);
 
     RunRecord {
         id: format!("claude-session-{}", session.session_id),
         tool: ToolKind::Claude,
+        source_id: Some("claude:transcript".into()),
         source_mode: "claude_transcript".into(),
         project_name: session.project_name.clone(),
         workspace_path: session.project_path.clone(),
@@ -1088,7 +1167,7 @@ fn build_run_from_claude_session(
         } else {
             elapsed_from_timestamps(&session.started_at, &session.last_activity_at)
         },
-        state: classify_claude_session_state(session),
+        state: state.clone(),
         last_action: session
             .last_question
             .clone()
@@ -1130,6 +1209,33 @@ fn build_run_from_claude_session(
             freshness: Freshness::Hot,
             last_updated_at: probe.probed_at.clone(),
         },
+        lifecycle: Some(lifecycle(
+            state,
+            LifecycleStatusSource::Passive,
+            &session.started_at,
+            &session.last_activity_at,
+            None,
+        )),
+        usage_semantics: Some(usage_semantics(
+            if session.cost_usd.is_some() {
+                UsageCostKind::Exact
+            } else {
+                UsageCostKind::Estimated
+            },
+            UsageDataSource::Transcript,
+            true,
+        )),
+        data_sources: Some(data_source_health(
+            "claude:transcript",
+            DataSourceType::Jsonl,
+            Some(session.transcript_path.clone()),
+            &probe.probed_at,
+            Some("claude-jsonl"),
+            SchemaConfidence::High,
+        )),
+        capabilities: Some(vec![open_workspace_capability()]),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({})),
         vcs: crate::commits::discover_vcs_context(&session.project_path),
         origin_label: None,
         origin_provider: None,
@@ -1188,10 +1294,12 @@ fn build_run_from_codex_session(
                 .filter(|value| !codex_adapter::looks_noisy_title(value))
                 .map(String::from)
         });
+    let state = classify_codex_session_state(session);
 
     RunRecord {
         id: format!("codex-session-{}", session.session_id),
         tool: ToolKind::Codex,
+        source_id: Some("codex:session-scan".into()),
         source_mode: "codex_session_scan".into(),
         project_name: session.thread_name.clone().unwrap_or(project_name),
         workspace_path: workspace_path.clone(),
@@ -1214,7 +1322,7 @@ fn build_run_from_codex_session(
         } else {
             elapsed_from_timestamps(&session.started_at, &session.last_activity_at)
         },
-        state: classify_codex_session_state(session),
+        state: state.clone(),
         last_action: Some(display_title.clone()),
         last_tail: codex_last_tail(session),
         pending_approval: session.has_pending_approval,
@@ -1249,6 +1357,44 @@ fn build_run_from_codex_session(
             freshness: Freshness::Hot,
             last_updated_at: probe.probed_at.clone(),
         },
+        lifecycle: Some(lifecycle(
+            state,
+            LifecycleStatusSource::Passive,
+            &session.started_at,
+            &session.last_activity_at,
+            None,
+        )),
+        usage_semantics: Some(usage_semantics(
+            UsageCostKind::Estimated,
+            UsageDataSource::Transcript,
+            true,
+        )),
+        data_sources: Some(data_source_health(
+            "codex:rollout-jsonl",
+            DataSourceType::Jsonl,
+            Some(session.transcript_path.clone()),
+            &probe.probed_at,
+            Some("codex-rollout-jsonl"),
+            SchemaConfidence::High,
+        )),
+        capabilities: Some(vec![
+            safe_capability(
+                "resume.copyCommand",
+                CapabilitySource::OfficialCli,
+                SchemaConfidence::High,
+            ),
+            open_workspace_capability(),
+            safe_capability(
+                "open.sessionDeeplink",
+                CapabilitySource::Inferred,
+                SchemaConfidence::Medium,
+            ),
+        ]),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({
+            "progressKind": session.progress_kind,
+            "turnOpen": session.turn_open,
+        })),
         vcs: session
             .cwd
             .as_deref()
@@ -1261,12 +1407,7 @@ fn build_run_from_codex_session(
 fn classify_codex_session_state(session: &codex_adapter::CodexSession) -> RunState {
     let age_minutes = chrono::DateTime::parse_from_rfc3339(&session.last_activity_at)
         .ok()
-        .map(|last| {
-            Utc::now()
-                .signed_duration_since(last)
-                .num_minutes()
-                .max(0)
-        });
+        .map(|last| Utc::now().signed_duration_since(last).num_minutes().max(0));
 
     // 1. pending approval wins while fresh enough to matter.
     if session.has_pending_approval && age_minutes.is_none_or(|m| m < 30) {
@@ -1368,6 +1509,7 @@ fn build_run_from_openclaw_session(
     RunRecord {
         id: format!("openclaw-{}-{}", session.agent_name, session.session_id),
         tool: ToolKind::OpenClaw,
+        source_id: Some("openclaw:gateway".into()),
         source_mode: openclaw_source_mode_label(probe.gateway_status_ok).into(),
         project_name: session
             .label
@@ -1387,8 +1529,8 @@ fn build_run_from_openclaw_session(
         thread_id: None,
         session_key: Some(session.session_key.clone()),
         transcript_path: session.transcript_path.clone(),
-        started_at,
-        last_activity_at,
+        started_at: started_at.clone(),
+        last_activity_at: last_activity_at.clone(),
         elapsed_ms: elapsed,
         state: state.clone(),
         last_action: session
@@ -1430,6 +1572,33 @@ fn build_run_from_openclaw_session(
             freshness: Freshness::Hot,
             last_updated_at: probe.probed_at.clone(),
         },
+        lifecycle: Some(lifecycle(
+            state,
+            LifecycleStatusSource::Api,
+            &started_at,
+            &last_activity_at,
+            session.error_message.clone(),
+        )),
+        usage_semantics: Some(usage_semantics(
+            if session.cost_usd.is_some() {
+                UsageCostKind::Estimated
+            } else {
+                UsageCostKind::Partial
+            },
+            UsageDataSource::Api,
+            true,
+        )),
+        data_sources: Some(data_source_health(
+            "openclaw:gateway",
+            DataSourceType::Api,
+            session.transcript_path.clone(),
+            &probe.probed_at,
+            Some("openclaw-gateway"),
+            SchemaConfidence::High,
+        )),
+        capabilities: Some(vec![open_workspace_capability()]),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({ "agentName": session.agent_name })),
         vcs: crate::commits::discover_vcs_context(&workspace),
         origin_label: session.origin_label.clone(),
         origin_provider: session.origin_provider.clone(),
@@ -1480,6 +1649,7 @@ fn build_run_from_hermes_session(
     RunRecord {
         id: format!("hermes-{}-{}", session.profile_name, session.session_id),
         tool: ToolKind::Hermes,
+        source_id: Some("hermes:sessions".into()),
         source_mode: hermes_source_mode_label(instance_gw).into(),
         project_name: session
             .display_name
@@ -1499,8 +1669,8 @@ fn build_run_from_hermes_session(
         thread_id: None,
         session_key: Some(session.session_key.clone()),
         transcript_path: None,
-        started_at,
-        last_activity_at,
+        started_at: started_at.clone(),
+        last_activity_at: last_activity_at.clone(),
         elapsed_ms: elapsed,
         state: state.clone(),
         last_action: session
@@ -1542,6 +1712,33 @@ fn build_run_from_hermes_session(
             freshness: Freshness::Hot,
             last_updated_at: probe.probed_at.clone(),
         },
+        lifecycle: Some(lifecycle(
+            state,
+            LifecycleStatusSource::Passive,
+            &started_at,
+            &last_activity_at,
+            session.error_message.clone(),
+        )),
+        usage_semantics: Some(usage_semantics(
+            if session.cost_usd.is_some() {
+                UsageCostKind::Estimated
+            } else {
+                UsageCostKind::Partial
+            },
+            UsageDataSource::Transcript,
+            true,
+        )),
+        data_sources: Some(data_source_health(
+            "hermes:sessions",
+            DataSourceType::Jsonl,
+            None,
+            &probe.probed_at,
+            Some("hermes-session-index"),
+            SchemaConfidence::Medium,
+        )),
+        capabilities: Some(vec![open_workspace_capability()]),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({ "profileName": session.profile_name })),
         vcs: None,
         origin_label: session.origin_label.clone(),
         origin_provider: session.origin_provider.clone(),
@@ -1590,9 +1787,14 @@ struct ProbeRunParams {
 
 fn build_probe_placeholder_run(params: ProbeRunParams) -> RunRecord {
     let now = Utc::now();
+    let source_id = format!("{}:probe", tool_key(&params.tool));
+    let started_at = now.to_rfc3339();
+    let last_activity_at = params.probed_at.clone();
+    let state = params.state;
     RunRecord {
         id: params.id.into(),
         tool: params.tool,
+        source_id: Some(source_id.clone()),
         source_mode: params.source_mode,
         project_name: params.project_name.into(),
         workspace_path: params.workspace_path,
@@ -1608,10 +1810,10 @@ fn build_probe_placeholder_run(params: ProbeRunParams) -> RunRecord {
         thread_id: None,
         session_key: None,
         transcript_path: None,
-        started_at: now.to_rfc3339(),
-        last_activity_at: params.probed_at.clone(),
+        started_at: started_at.clone(),
+        last_activity_at: last_activity_at.clone(),
         elapsed_ms: 0,
-        state: params.state,
+        state: state.clone(),
         last_action: Some(params.last_action.into()),
         last_tail: params.last_tail,
         pending_approval: false,
@@ -1628,8 +1830,31 @@ fn build_probe_placeholder_run(params: ProbeRunParams) -> RunRecord {
         source: SourceInfo {
             confidence: params.source_confidence,
             freshness: Freshness::Hot,
-            last_updated_at: params.probed_at,
+            last_updated_at: params.probed_at.clone(),
         },
+        lifecycle: Some(lifecycle(
+            state,
+            LifecycleStatusSource::Inferred,
+            &started_at,
+            &last_activity_at,
+            None,
+        )),
+        usage_semantics: Some(usage_semantics(
+            UsageCostKind::NotAvailable,
+            UsageDataSource::Unknown,
+            false,
+        )),
+        data_sources: Some(data_source_health(
+            &source_id,
+            DataSourceType::Process,
+            None,
+            &params.probed_at,
+            None,
+            SchemaConfidence::Medium,
+        )),
+        capabilities: Some(Vec::new()),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({})),
         vcs: None,
         origin_label: None,
         origin_provider: None,
@@ -1842,6 +2067,11 @@ fn dedupe_runs(runs: &mut Vec<RunRecord>) {
 
 fn build_usage_buckets(runs: &[RunRecord], pricing: &PricingStore) -> Vec<UsageBucket> {
     runs.iter()
+        .filter(|run| {
+            run.usage_semantics
+                .as_ref()
+                .is_none_or(|usage| usage.enters_usage_totals)
+        })
         .map(|run| {
             let cost = pricing.estimate_run_cost(run);
             UsageBucket {
@@ -1864,6 +2094,7 @@ fn build_usage_buckets(runs: &[RunRecord], pricing: &PricingStore) -> Vec<UsageB
                 } else {
                     SourceConfidence::Estimated
                 },
+                usage_semantics: run.usage_semantics.clone(),
             }
         })
         .collect()
@@ -2128,6 +2359,17 @@ mod tests {
                 freshness: Freshness::Hot,
                 last_updated_at: last_activity_at.into(),
             },
+            source_id: Some("test:probe".into()),
+            lifecycle: Some(SessionLifecycle::default()),
+            usage_semantics: Some(usage_semantics(
+                UsageCostKind::Estimated,
+                UsageDataSource::Computed,
+                true,
+            )),
+            data_sources: Some(Vec::new()),
+            capabilities: Some(Vec::new()),
+            jump_targets: Some(Vec::new()),
+            tool_specific: Some(serde_json::json!({})),
             vcs: None,
             origin_label: None,
             origin_provider: None,
@@ -2163,6 +2405,61 @@ mod tests {
             adapter_health: Vec::new(),
             pending_crons: Vec::new(),
         }
+    }
+
+    #[test]
+    fn build_usage_buckets_skips_runs_that_do_not_enter_usage_totals() {
+        let mut excluded = run(
+            "excluded",
+            ToolKind::Codex,
+            RunState::Completed,
+            "2026-04-01T10:00:00Z",
+            "2026-04-01T10:20:00Z",
+        );
+        let usage = excluded
+            .usage_semantics
+            .as_mut()
+            .expect("test run has usage semantics");
+        usage.enters_usage_totals = false;
+        usage.cost_kind = UsageCostKind::NotAvailable;
+
+        let included = run(
+            "included",
+            ToolKind::Claude,
+            RunState::Completed,
+            "2026-04-01T10:00:00Z",
+            "2026-04-01T10:20:00Z",
+        );
+
+        let buckets = build_usage_buckets(&[excluded, included], &pricing_store());
+
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].scope["runId"], "included");
+        assert!(
+            buckets[0]
+                .usage_semantics
+                .as_ref()
+                .expect("included bucket preserves usage semantics")
+                .enters_usage_totals
+        );
+    }
+
+    #[test]
+    fn build_usage_buckets_keeps_legacy_runs_without_usage_semantics() {
+        let mut legacy = run(
+            "legacy",
+            ToolKind::Claude,
+            RunState::Completed,
+            "2026-04-01T10:00:00Z",
+            "2026-04-01T10:20:00Z",
+        );
+        legacy.usage_semantics = None;
+
+        let buckets = build_usage_buckets(&[legacy], &pricing_store());
+
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].scope["runId"], "legacy");
+        assert!(buckets[0].usage_semantics.is_none());
     }
 
     #[test]
@@ -2389,10 +2686,12 @@ mod tests {
         assert_eq!(payload.usage_buckets.len(), MAX_BOOTSTRAP_RUNS);
         assert!(payload.runs.iter().any(|run| run.id == "pinned-error"));
         assert_eq!(payload.recent_completions.len(), 12);
-        assert!(!payload
-            .recent_completions
-            .iter()
-            .any(|item| item.id == "completion-old"));
+        assert!(
+            !payload
+                .recent_completions
+                .iter()
+                .any(|item| item.id == "completion-old")
+        );
     }
 
     #[test]
@@ -2746,8 +3045,7 @@ mod tests {
     }
 
     fn codex_session_at_age(age_minutes: i64) -> codex_adapter::CodexSession {
-        let last =
-            Utc::now() - chrono::Duration::minutes(age_minutes);
+        let last = Utc::now() - chrono::Duration::minutes(age_minutes);
         codex_adapter::CodexSession {
             session_id: "sid".into(),
             thread_name: None,
@@ -2840,10 +3138,7 @@ mod tests {
     fn codex_last_tail_returns_reason_verbatim_when_short() {
         let mut s = codex_session_at_age(0);
         s.progress_reason = Some("Running tool: shell".into());
-        assert_eq!(
-            codex_last_tail(&s).as_deref(),
-            Some("Running tool: shell")
-        );
+        assert_eq!(codex_last_tail(&s).as_deref(), Some("Running tool: shell"));
     }
 
     #[test]
