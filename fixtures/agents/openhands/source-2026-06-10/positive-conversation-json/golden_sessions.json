@@ -1,0 +1,15 @@
+[
+  {
+    "id": "openhands-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "claude-sonnet-4",
+    "usage": {
+      "inputTokens": 500,
+      "outputTokens": 150,
+      "totalTokens": 650,
+      "costUsd": 0.01,
+      "costKind": "exact"
+    },
+    "supportLevel": "fixture-gated-monitored"
+  }
+]

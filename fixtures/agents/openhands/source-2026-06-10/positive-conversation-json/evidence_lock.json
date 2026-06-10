@@ -1,0 +1,16 @@
+{
+  "tool_id": "openhands",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-conversation-json",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://docs.openhands.dev/openhands/usage/cli/resume",
+  "source_path": "~/.openhands/conversations/*/conversation.json",
+  "package_integrity": "sha256:fixture-only-openhands-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "monitored",
+  "local_command_used": "openhands --conversation-id <session-id>",
+  "denied_paths_observed": [
+    "~/.openhands/.env",
+    "~/.openhands/credentials"
+  ]
+}

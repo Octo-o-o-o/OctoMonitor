@@ -9,6 +9,7 @@ members = [
   "crates/adapters/codex",
   "crates/adapters/openclaw",
   "crates/adapters/hermes",
+  "crates/adapters/p0",
   "apps/desktop/src-tauri"
 ]
 resolver = "2"

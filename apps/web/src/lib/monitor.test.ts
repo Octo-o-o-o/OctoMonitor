@@ -1,5 +1,5 @@
 import type { RunRecord } from './types'
-import type { FilterRules } from './preferences'
+import { defaultFilterRules } from './preferences'
 import { buildMonitorStateStats, buildVisiblePanels, buildVisibleRunIds, buildVisibleRunsBySource } from './monitor'
 
 function createRun(overrides: Partial<RunRecord> = {}): RunRecord {
@@ -60,13 +60,6 @@ function createRun(overrides: Partial<RunRecord> = {}): RunRecord {
     originProvider: null,
     ...overrides,
   }
-}
-
-const defaultFilterRules: FilterRules = {
-  claude: { mode: 'off', patterns: [] },
-  codex: { mode: 'off', patterns: [] },
-  openClaw: { mode: 'off', patterns: [] },
-  hermes: { mode: 'off', patterns: [] },
 }
 
 describe('monitor visibility selectors', () => {

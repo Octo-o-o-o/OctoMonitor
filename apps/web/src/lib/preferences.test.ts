@@ -4,6 +4,7 @@ import {
   migratePanelConfig,
   saveFrontendSettings,
 } from './preferences'
+import { allTools } from './constants'
 import { STORAGE_KEYS } from './storageKeys'
 
 describe('frontend preferences', () => {
@@ -37,7 +38,10 @@ describe('frontend preferences', () => {
     expect(settings.notificationsEnabled).toBe(false)
     expect(settings.desktopDisplayMode).toBe('both')
     expect(settings.islandPosition).toBe('auto')
-    expect(settings.panelConfig.map((entry) => entry.tool)).toEqual(['codex', 'claude', 'openClaw', 'hermes'])
+    expect(settings.panelConfig.map((entry) => entry.tool)).toEqual([
+      'codex',
+      ...allTools.filter((tool) => tool !== 'codex'),
+    ])
     expect(settings.filterRules.codex.patterns).toEqual(['octo'])
     expect(settings.filterRules.claude.mode).toBe('off')
   })
@@ -49,7 +53,11 @@ describe('frontend preferences', () => {
       { tool: 'claude', enabled: true },
     ])
 
-    expect(result.map((entry) => entry.tool)).toEqual(['codex', 'claude', 'openClaw', 'hermes'])
+    expect(result.map((entry) => entry.tool)).toEqual([
+      'codex',
+      'claude',
+      ...allTools.filter((tool) => tool !== 'codex' && tool !== 'claude'),
+    ])
     expect(result.find((entry) => entry.tool === 'codex')?.enabled).toBe(false)
   })
 

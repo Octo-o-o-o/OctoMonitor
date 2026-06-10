@@ -1,0 +1,17 @@
+{
+  "conversation_id": "openhands-session-1",
+  "workspace": "/Users/demo/workspace/octomonitor",
+  "title": "OpenHands fixture",
+  "updated_at": "2026-06-10T01:40:00Z",
+  "model": "claude-sonnet-4",
+  "statistics": {
+    "input_tokens": 500,
+    "output_tokens": 150,
+    "total_tokens": 650,
+    "cost_usd": 0.01
+  },
+  "messages": [
+    { "role": "user" },
+    { "role": "assistant" }
+  ]
+}

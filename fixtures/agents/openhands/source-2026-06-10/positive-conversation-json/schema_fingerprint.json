@@ -1,0 +1,17 @@
+{
+  "tool_id": "openhands",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-conversation-json",
+  "format": "json",
+  "schema_version": "conversation-json-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "conversation_id",
+    "workspace",
+    "updated_at"
+  ],
+  "sample_files": [
+    "conversation.json"
+  ],
+  "fingerprint": "sha256:fixture-openhands-conversation-json-v1"
+}

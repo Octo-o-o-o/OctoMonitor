@@ -1,0 +1,20 @@
+{
+  "tool_id": "gemini",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-chat-jsonl",
+  "format": "jsonl",
+  "schema_version": "chat-recording-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "type",
+    "session_id",
+    "cwd",
+    "usage.input_tokens",
+    "$set",
+    "$rewindTo"
+  ],
+  "sample_files": [
+    "chat.jsonl"
+  ],
+  "fingerprint": "sha256:fixture-gemini-chat-recording-v1"
+}

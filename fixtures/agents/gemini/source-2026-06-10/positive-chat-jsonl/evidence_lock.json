@@ -1,0 +1,16 @@
+{
+  "tool_id": "gemini",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-chat-jsonl",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingService.ts",
+  "source_path": "~/.gemini/tmp/<slug>/chats/session-*.jsonl",
+  "package_integrity": "sha256:fixture-only-gemini-source-2026-06-10",
+  "evidence_level": "source-plus-fixture",
+  "target_support_level": "monitored",
+  "local_command_used": "gemini --resume <session-id>",
+  "denied_paths_observed": [
+    "~/.gemini/oauth_creds.json",
+    "~/.gemini/.env"
+  ]
+}

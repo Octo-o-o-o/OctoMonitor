@@ -1,0 +1,14 @@
+{
+  "tool_id": "copilot",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-credential-state",
+  "format": "json",
+  "schema_version": "credential-file-denied",
+  "schema_confidence": "unsupported",
+  "required_fields": [],
+  "negative_signals": [
+    "credential path",
+    ".env path"
+  ],
+  "fingerprint": "sha256:fixture-copilot-credential-denied"
+}

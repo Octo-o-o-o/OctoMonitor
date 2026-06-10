@@ -9,6 +9,17 @@ pub enum ToolKind {
     Codex,
     OpenClaw,
     Hermes,
+    CodeBuddy,
+    Gemini,
+    Pi,
+    OpenCode,
+    Copilot,
+    OpenHands,
+    ContinueCn,
+    Qwen,
+    Kimi,
+    Goose,
+    Cursor,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

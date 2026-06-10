@@ -92,12 +92,9 @@ export function buildVisibleRunsBySource(
   filterRules: FilterRules,
   monitorPeriod: MonitorPeriod,
 ): Record<ToolKind, RunRecord[]> {
-  const sessionsBySource: Record<ToolKind, RunRecord[]> = {
-    claude: [],
-    codex: [],
-    openClaw: [],
-    hermes: [],
-  }
+  const sessionsBySource = Object.fromEntries(
+    allTools.map((tool) => [tool, [] as RunRecord[]]),
+  ) as Record<ToolKind, RunRecord[]>
 
   for (const run of runs) {
     if (!sessionsBySource[run.tool]) continue

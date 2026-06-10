@@ -1,3 +1,4 @@
+import { allTools } from './constants'
 import type { RunRecord, ToolKind } from './types'
 
 export type IslandPriority = 'waiting' | 'active' | 'freshDone' | 'done'
@@ -23,12 +24,7 @@ const priorityRank: Record<IslandPriority, number> = {
   done: 3,
 }
 
-const toolRank: Record<ToolKind, number> = {
-  codex: 0,
-  claude: 1,
-  openClaw: 2,
-  hermes: 3,
-}
+const toolRank = Object.fromEntries(allTools.map((tool, idx) => [tool, idx])) as Record<ToolKind, number>
 
 function isWaiting(run: RunRecord): boolean {
   return run.state === 'waitingApproval' || run.pendingApproval

@@ -1,0 +1,16 @@
+{
+  "tool_id": "copilot",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-chronicle-state",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle",
+  "source_path": "~/.copilot/session-state/",
+  "package_integrity": "sha256:fixture-only-copilot-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "monitored",
+  "local_command_used": "copilot session resume <session-id>",
+  "denied_paths_observed": [
+    "~/.copilot/.env",
+    "~/.copilot/credentials"
+  ]
+}

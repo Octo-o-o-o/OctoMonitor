@@ -80,6 +80,32 @@ fn build_resume_command(run: &RunRecord) -> ResumeCommandPayload {
             }
             _ => note("Hermes session is missing a session id"),
         },
+        ToolKind::CodeBuddy => resume_with_session(run, tool, "codebuddy --resume"),
+        ToolKind::Gemini => resume_with_session(run, tool, "gemini --resume"),
+        ToolKind::Pi => resume_with_session(run, tool, "pi --session"),
+        ToolKind::OpenCode => resume_with_session(run, tool, "opencode session"),
+        ToolKind::Copilot => resume_with_session(run, tool, "copilot session resume"),
+        ToolKind::OpenHands => resume_with_session(run, tool, "openhands --conversation-id"),
+        ToolKind::ContinueCn => resume_with_session(run, tool, "cn --resume"),
+        ToolKind::Qwen => resume_with_session(run, tool, "qwen --resume"),
+        ToolKind::Kimi => resume_with_session(run, tool, "kimi --session"),
+        ToolKind::Goose => resume_with_session(run, tool, "goose session resume"),
+        ToolKind::Cursor => resume_with_session(run, tool, "agent --resume"),
+    }
+}
+
+fn resume_with_session(run: &RunRecord, tool: ToolKind, prefix: &str) -> ResumeCommandPayload {
+    match run.session_id.as_deref() {
+        Some(session_id) if !session_id.is_empty() => ResumeCommandPayload {
+            command: Some(format!("{prefix} {}", shell_quote(session_id))),
+            tool,
+            note: None,
+        },
+        _ => ResumeCommandPayload {
+            command: None,
+            tool,
+            note: Some("Session is missing a resume id".into()),
+        },
     }
 }
 

@@ -1,0 +1,12 @@
+{
+  "sessionId": "copilot-session-1",
+  "workspace": "/Users/demo/workspace/octomonitor",
+  "title": "Copilot Chronicle fixture",
+  "model": "gpt-5-copilot",
+  "updatedAt": "2026-06-10T01:35:00Z",
+  "usage": {
+    "inputTokens": 600,
+    "outputTokens": 180,
+    "totalTokens": 780
+  }
+}

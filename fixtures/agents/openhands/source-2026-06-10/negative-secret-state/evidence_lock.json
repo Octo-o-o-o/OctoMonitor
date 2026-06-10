@@ -1,0 +1,16 @@
+{
+  "tool_id": "openhands",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-secret-state",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://docs.openhands.dev/openhands/usage/cli/command-reference",
+  "source_path": "~/.openhands/credentials",
+  "package_integrity": "sha256:fixture-only-openhands-negative-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "monitored",
+  "local_command_used": "openhands --conversation-id <session-id>",
+  "denied_paths_observed": [
+    "~/.openhands/.env",
+    "~/.openhands/credentials"
+  ]
+}

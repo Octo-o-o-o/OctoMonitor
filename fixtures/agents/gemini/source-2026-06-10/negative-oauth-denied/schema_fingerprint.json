@@ -1,0 +1,15 @@
+{
+  "tool_id": "gemini",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-oauth-denied",
+  "format": "json",
+  "schema_version": "credential-file-denied",
+  "schema_confidence": "unsupported",
+  "required_fields": [],
+  "negative_signals": [
+    "oauth path",
+    ".env path",
+    "credential-looking component"
+  ],
+  "fingerprint": "sha256:fixture-gemini-oauth-denied"
+}

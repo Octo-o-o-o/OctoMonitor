@@ -72,7 +72,18 @@ fn load_run_entries(run: &RunRecord) -> Vec<InspectEntry> {
         ToolKind::Claude => parse_claude_entries(reader),
         ToolKind::Codex => parse_codex_entries(reader),
         ToolKind::OpenClaw => parse_openclaw_entries(reader),
-        ToolKind::Hermes => Vec::new(), // Hermes uses SQLite, no JSONL transcripts
+        ToolKind::Hermes
+        | ToolKind::OpenCode
+        | ToolKind::Goose
+        | ToolKind::Cursor
+        | ToolKind::Copilot
+        | ToolKind::OpenHands
+        | ToolKind::ContinueCn
+        | ToolKind::Gemini
+        | ToolKind::Pi
+        | ToolKind::CodeBuddy
+        | ToolKind::Qwen
+        | ToolKind::Kimi => Vec::new(), // These sources are metadata-only until explicit transcript viewing lands.
     }
 }
 
@@ -177,7 +188,8 @@ fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
                 let Some(payload) = val.get("payload") else {
                     continue;
                 };
-                if json_str(payload, "type") == "message" && json_str(payload, "role") == "assistant"
+                if json_str(payload, "type") == "message"
+                    && json_str(payload, "role") == "assistant"
                 {
                     if let Some(text) = payload
                         .get("content")
@@ -201,10 +213,7 @@ fn parse_codex_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {
 
 /// Read `value[key]` as a string, defaulting to `""` when missing or non-string.
 fn json_str<'a>(value: &'a serde_json::Value, key: &str) -> &'a str {
-    value
-        .get(key)
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
+    value.get(key).and_then(|v| v.as_str()).unwrap_or_default()
 }
 
 fn parse_claude_entries<R: BufRead>(reader: R) -> Vec<InspectEntry> {

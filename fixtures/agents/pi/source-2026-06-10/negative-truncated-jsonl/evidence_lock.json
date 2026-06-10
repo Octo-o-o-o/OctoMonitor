@@ -1,0 +1,16 @@
+{
+  "tool_id": "pi",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-truncated-jsonl",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://pi.dev/docs/latest/session-format",
+  "source_path": "~/.pi/agent/sessions truncated JSONL",
+  "package_integrity": "sha256:fixture-only-pi-negative-2026-06-10",
+  "evidence_level": "source-plus-fixture",
+  "target_support_level": "monitored",
+  "local_command_used": "pi --session <session-id>",
+  "denied_paths_observed": [
+    "~/.pi/agent/.env",
+    "~/.pi/agent/credentials"
+  ]
+}

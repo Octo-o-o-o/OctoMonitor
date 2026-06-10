@@ -2581,6 +2581,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "octomonitor-p0-adapters"
+version = "0.1.6"
+dependencies = [
+ "chrono",
+ "octomonitor-adapter-common",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "octomonitor-server"
 version = "0.1.6"
 dependencies = [
@@ -2598,6 +2610,7 @@ dependencies = [
  "octomonitor-hermes-adapter",
  "octomonitor-installer",
  "octomonitor-openclaw-adapter",
+ "octomonitor-p0-adapters",
  "open",
  "reqwest 0.12.28",
  "rust-embed",

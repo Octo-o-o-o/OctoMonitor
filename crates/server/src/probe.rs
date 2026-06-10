@@ -15,6 +15,7 @@ use octomonitor_core::{
 };
 use octomonitor_hermes_adapter as hermes_adapter;
 use octomonitor_openclaw_adapter as openclaw_adapter;
+use octomonitor_p0_adapters as p0_adapter;
 
 use crate::commits::{build_commit_records, hydrate_run_vcs};
 use crate::perf;
@@ -353,6 +354,10 @@ fn failed_hermes_snapshot(reason: String) -> hermes_adapter::HermesSnapshot {
         }],
         file_probes: Vec::new(),
     }
+}
+
+fn failed_p0_snapshot(reason: String) -> p0_adapter::P0Snapshot {
+    p0_adapter::P0Snapshot::empty_with_error(reason)
 }
 
 const PROBE_CACHE_BUSY: &str = "probe cache busy after previous timeout";
@@ -711,13 +716,14 @@ async fn scan_adapters_isolated(
     codex_adapter::CodexSnapshot,
     openclaw_adapter::OpenClawSnapshot,
     hermes_adapter::HermesSnapshot,
+    p0_adapter::P0Snapshot,
 ) {
     let started_at = Instant::now();
     let claude_cache = state.claude_probe_cache.clone();
     let codex_cache = state.codex_probe_cache.clone();
     let openclaw_cache = state.openclaw_probe_cache.clone();
     let hermes_cache = state.hermes_probe_cache.clone();
-    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = tokio::join!(
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe, p0_probe) = tokio::join!(
         run_probe_task(
             "claude",
             move || match claude_cache.try_lock() {
@@ -750,17 +756,30 @@ async fn scan_adapters_isolated(
             },
             failed_hermes_snapshot
         ),
+        run_probe_task("p0", p0_adapter::probe, failed_p0_snapshot),
     );
+    let p0_sessions: usize = p0_probe
+        .reports
+        .iter()
+        .map(|report| report.sessions.len())
+        .sum();
     perf::log_elapsed_with_details("scan_adapters", started_at, || {
         format!(
-            "claude_sessions={} codex_sessions={} openclaw_sessions={} hermes_sessions={}",
+            "claude_sessions={} codex_sessions={} openclaw_sessions={} hermes_sessions={} p0_sessions={}",
             claude_probe.sessions.len(),
             codex_probe.sessions.len(),
             openclaw_probe.sessions.len(),
-            hermes_probe.sessions.len()
+            hermes_probe.sessions.len(),
+            p0_sessions
         )
     });
-    (claude_probe, codex_probe, openclaw_probe, hermes_probe)
+    (
+        claude_probe,
+        codex_probe,
+        openclaw_probe,
+        hermes_probe,
+        p0_probe,
+    )
 }
 
 #[cfg(test)]
@@ -769,6 +788,7 @@ fn scan_adapters_blocking() -> (
     codex_adapter::CodexSnapshot,
     openclaw_adapter::OpenClawSnapshot,
     hermes_adapter::HermesSnapshot,
+    p0_adapter::P0Snapshot,
 ) {
     fn join_or_retry<T, F>(
         name: &'static str,
@@ -785,28 +805,43 @@ fn scan_adapters_blocking() -> (
     }
 
     let started_at = Instant::now();
-    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = std::thread::scope(|s| {
-        let h1 = s.spawn(claude_adapter::probe);
-        let h2 = s.spawn(codex_adapter::probe);
-        let h3 = s.spawn(openclaw_adapter::probe);
-        let h4 = s.spawn(hermes_adapter::probe);
-        (
-            join_or_retry("claude", h1, claude_adapter::probe),
-            join_or_retry("codex", h2, codex_adapter::probe),
-            join_or_retry("openclaw", h3, openclaw_adapter::probe),
-            join_or_retry("hermes", h4, hermes_adapter::probe),
-        )
-    });
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe, p0_probe) =
+        std::thread::scope(|s| {
+            let h1 = s.spawn(claude_adapter::probe);
+            let h2 = s.spawn(codex_adapter::probe);
+            let h3 = s.spawn(openclaw_adapter::probe);
+            let h4 = s.spawn(hermes_adapter::probe);
+            let h5 = s.spawn(p0_adapter::probe);
+            (
+                join_or_retry("claude", h1, claude_adapter::probe),
+                join_or_retry("codex", h2, codex_adapter::probe),
+                join_or_retry("openclaw", h3, openclaw_adapter::probe),
+                join_or_retry("hermes", h4, hermes_adapter::probe),
+                join_or_retry("p0", h5, p0_adapter::probe),
+            )
+        });
+    let p0_sessions: usize = p0_probe
+        .reports
+        .iter()
+        .map(|report| report.sessions.len())
+        .sum();
     perf::log_elapsed_with_details("scan_adapters", started_at, || {
         format!(
-            "claude_sessions={} codex_sessions={} openclaw_sessions={} hermes_sessions={}",
+            "claude_sessions={} codex_sessions={} openclaw_sessions={} hermes_sessions={} p0_sessions={}",
             claude_probe.sessions.len(),
             codex_probe.sessions.len(),
             openclaw_probe.sessions.len(),
-            hermes_probe.sessions.len()
+            hermes_probe.sessions.len(),
+            p0_sessions
         )
     });
-    (claude_probe, codex_probe, openclaw_probe, hermes_probe)
+    (
+        claude_probe,
+        codex_probe,
+        openclaw_probe,
+        hermes_probe,
+        p0_probe,
+    )
 }
 
 fn make_identity(
@@ -986,6 +1021,7 @@ fn collect_probe_scan_from_snapshots(
     codex_probe: codex_adapter::CodexSnapshot,
     openclaw_probe: openclaw_adapter::OpenClawSnapshot,
     hermes_probe: hermes_adapter::HermesSnapshot,
+    p0_probe: p0_adapter::P0Snapshot,
 ) -> ProbeScanResult {
     let started_at = Instant::now();
     let now = Utc::now().to_rfc3339();
@@ -1038,6 +1074,20 @@ fn collect_probe_scan_from_snapshots(
         |s| build_run_from_hermes_session(s, &hermes_probe),
         || build_probe_run_from_hermes(&hermes_probe),
     );
+    for report in &p0_probe.reports {
+        if report.sessions.is_empty() {
+            if include_placeholder_runs {
+                runs.push(build_probe_run_from_p0_report(report));
+            }
+        } else {
+            runs.extend(
+                report
+                    .sessions
+                    .iter()
+                    .map(|session| build_run_from_p0_session(session, report)),
+            );
+        }
+    }
 
     dedupe_runs(&mut runs);
 
@@ -1054,7 +1104,7 @@ fn collect_probe_scan_from_snapshots(
     let openclaw_auth = gateway_auth_mode_label(openclaw_probe.gateway_status_ok);
     let hermes_auth = gateway_auth_mode_label(hermes_probe.gateway_running);
 
-    let identities = vec![
+    let mut identities = vec![
         make_identity(
             ToolKind::Claude,
             claude_auth,
@@ -1088,6 +1138,20 @@ fn collect_probe_scan_from_snapshots(
             SourceConfidence::Live,
         ),
     ];
+    identities.extend(p0_probe.reports.iter().map(|report| {
+        make_identity(
+            p0_tool_kind(report.tool),
+            if report.cli_available {
+                "configured"
+            } else {
+                "unavailable"
+            },
+            p0_tool_provider(report.tool),
+            report.cli_available,
+            report.root_exists || !report.sessions.is_empty(),
+            p0_source_confidence(report.tool),
+        )
+    }));
 
     let openclaw_mode = if openclaw_probe.gateway_status_ok {
         "gateway+status+probe"
@@ -1110,7 +1174,7 @@ fn collect_probe_scan_from_snapshots(
         map_openclaw_gateway_status(&openclaw_probe);
     let (hermes_gateway_status, hermes_gateway_detail) = map_hermes_gateway_status(&hermes_probe);
 
-    let adapter_health = vec![
+    let mut adapter_health = vec![
         make_adapter_health(
             ToolKind::Claude,
             "hook+statusline+probe",
@@ -1148,6 +1212,17 @@ fn collect_probe_scan_from_snapshots(
             hermes_error,
         ),
     ];
+    adapter_health.extend(p0_probe.reports.iter().map(|report| {
+        make_adapter_health(
+            p0_tool_kind(report.tool),
+            p0_report_mode(report),
+            report.cli_available || report.root_exists || !report.sessions.is_empty(),
+            None,
+            None,
+            &now,
+            first_probe_error(&report.command_probes),
+        )
+    }));
 
     let mut pending_crons: Vec<PendingCron> = openclaw_probe
         .cron_jobs
@@ -1199,13 +1274,15 @@ fn collect_probe_scan_from_snapshots(
 
 #[cfg(test)]
 fn collect_probe_scan(include_placeholder_runs: bool) -> ProbeScanResult {
-    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) = scan_adapters_blocking();
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe, p0_probe) =
+        scan_adapters_blocking();
     collect_probe_scan_from_snapshots(
         include_placeholder_runs,
         claude_probe,
         codex_probe,
         openclaw_probe,
         hermes_probe,
+        p0_probe,
     )
 }
 
@@ -1213,7 +1290,7 @@ async fn collect_probe_scan_isolated(
     state: &AppState,
     include_placeholder_runs: bool,
 ) -> ProbeScanResult {
-    let (claude_probe, codex_probe, openclaw_probe, hermes_probe) =
+    let (claude_probe, codex_probe, openclaw_probe, hermes_probe, p0_probe) =
         scan_adapters_isolated(state).await;
     collect_probe_scan_from_snapshots(
         include_placeholder_runs,
@@ -1221,6 +1298,7 @@ async fn collect_probe_scan_isolated(
         codex_probe,
         openclaw_probe,
         hermes_probe,
+        p0_probe,
     )
 }
 
@@ -1846,6 +1924,351 @@ fn build_run_from_hermes_session(
     }
 }
 
+fn p0_tool_kind(tool: p0_adapter::P0Tool) -> ToolKind {
+    match tool {
+        p0_adapter::P0Tool::CodeBuddy => ToolKind::CodeBuddy,
+        p0_adapter::P0Tool::Gemini => ToolKind::Gemini,
+        p0_adapter::P0Tool::Pi => ToolKind::Pi,
+        p0_adapter::P0Tool::OpenCode => ToolKind::OpenCode,
+        p0_adapter::P0Tool::Copilot => ToolKind::Copilot,
+        p0_adapter::P0Tool::OpenHands => ToolKind::OpenHands,
+        p0_adapter::P0Tool::ContinueCn => ToolKind::ContinueCn,
+        p0_adapter::P0Tool::Qwen => ToolKind::Qwen,
+        p0_adapter::P0Tool::Kimi => ToolKind::Kimi,
+        p0_adapter::P0Tool::Goose => ToolKind::Goose,
+        p0_adapter::P0Tool::Cursor => ToolKind::Cursor,
+    }
+}
+
+fn p0_tool_provider(tool: p0_adapter::P0Tool) -> &'static str {
+    match tool {
+        p0_adapter::P0Tool::CodeBuddy => "codebuddy",
+        p0_adapter::P0Tool::Gemini => "google",
+        p0_adapter::P0Tool::Pi => "pi",
+        p0_adapter::P0Tool::OpenCode => "opencode",
+        p0_adapter::P0Tool::Copilot => "github-copilot",
+        p0_adapter::P0Tool::OpenHands => "openhands",
+        p0_adapter::P0Tool::ContinueCn => "continue",
+        p0_adapter::P0Tool::Qwen => "qwen",
+        p0_adapter::P0Tool::Kimi => "moonshot",
+        p0_adapter::P0Tool::Goose => "goose",
+        p0_adapter::P0Tool::Cursor => "cursor",
+    }
+}
+
+fn p0_source_confidence(tool: p0_adapter::P0Tool) -> SourceConfidence {
+    match tool {
+        p0_adapter::P0Tool::Cursor => SourceConfidence::Heuristic,
+        p0_adapter::P0Tool::OpenCode | p0_adapter::P0Tool::Goose => SourceConfidence::Official,
+        _ => SourceConfidence::Live,
+    }
+}
+
+fn p0_report_mode(report: &p0_adapter::P0ToolReport) -> &'static str {
+    match report.tool {
+        p0_adapter::P0Tool::CodeBuddy => "passive-jsonl+worker-liveness",
+        p0_adapter::P0Tool::Gemini => "passive-jsonl+hooks-ready",
+        p0_adapter::P0Tool::Pi => "passive-jsonl-tree",
+        p0_adapter::P0Tool::OpenCode => "sqlite+cli-fallback",
+        p0_adapter::P0Tool::Copilot => "chronicle-session-state",
+        p0_adapter::P0Tool::OpenHands => "conversation-json",
+        p0_adapter::P0Tool::ContinueCn => "monitored-lite-session-json",
+        p0_adapter::P0Tool::Qwen => "path-gated-jsonl+sidecar-ready",
+        p0_adapter::P0Tool::Kimi => "session-index+wire",
+        p0_adapter::P0Tool::Goose => "sessions-db",
+        p0_adapter::P0Tool::Cursor => "experimental-store-db-metadata",
+    }
+}
+
+fn p0_data_source_type(source_type: p0_adapter::P0SourceType) -> DataSourceType {
+    match source_type {
+        p0_adapter::P0SourceType::Json | p0_adapter::P0SourceType::Jsonl => DataSourceType::Jsonl,
+        p0_adapter::P0SourceType::Sqlite => DataSourceType::Sqlite,
+    }
+}
+
+fn p0_schema_confidence(confidence: p0_adapter::P0SchemaConfidence) -> SchemaConfidence {
+    match confidence {
+        p0_adapter::P0SchemaConfidence::High => SchemaConfidence::High,
+        p0_adapter::P0SchemaConfidence::Medium => SchemaConfidence::Medium,
+        p0_adapter::P0SchemaConfidence::Low => SchemaConfidence::Low,
+        p0_adapter::P0SchemaConfidence::Unsupported => SchemaConfidence::Unsupported,
+    }
+}
+
+fn p0_usage_cost_kind(cost_kind: p0_adapter::P0CostKind) -> UsageCostKind {
+    match cost_kind {
+        p0_adapter::P0CostKind::Exact => UsageCostKind::Exact,
+        p0_adapter::P0CostKind::Partial => UsageCostKind::Partial,
+        p0_adapter::P0CostKind::NotAvailable => UsageCostKind::NotAvailable,
+    }
+}
+
+fn p0_usage_data_source(source_type: p0_adapter::P0SourceType) -> UsageDataSource {
+    match source_type {
+        p0_adapter::P0SourceType::Sqlite => UsageDataSource::Database,
+        p0_adapter::P0SourceType::Json | p0_adapter::P0SourceType::Jsonl => {
+            UsageDataSource::Transcript
+        }
+    }
+}
+
+fn build_run_from_p0_session(
+    session: &p0_adapter::P0Session,
+    report: &p0_adapter::P0ToolReport,
+) -> RunRecord {
+    let tool = p0_tool_kind(session.tool);
+    let source_confidence = p0_source_confidence(session.tool);
+    let schema_confidence = p0_schema_confidence(session.schema_confidence);
+    let cost_kind = p0_usage_cost_kind(session.cost_kind);
+    let state = classify_p0_session_state(session);
+    let mut capabilities = vec![open_workspace_capability()];
+    if session.resume_command.is_some() {
+        capabilities.push(resume_copy_capability(
+            CapabilitySource::OfficialCli,
+            schema_confidence.clone(),
+        ));
+    }
+    let mut tool_specific = serde_json::json!({
+        "supportLevel": session.support_level,
+        "root": report.root,
+        "cliAvailable": report.cli_available,
+        "resumeCommand": session.resume_command,
+    });
+    if let (Some(target), Some(extra)) = (
+        tool_specific.as_object_mut(),
+        session.tool_specific.as_object(),
+    ) {
+        for (key, value) in extra {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+
+    RunRecord {
+        id: format!("{}-session-{}", tool_key(&tool), session.session_id),
+        tool,
+        source_id: Some(session.source_id.clone()),
+        source_mode: session.source_mode.clone(),
+        project_name: session.project_name.clone(),
+        workspace_path: session.workspace_path.clone(),
+        workspace_short: shorten_path(&session.workspace_path),
+        model: session.model.clone(),
+        provider: session.provider.clone(),
+        agent_name: Some(session.support_level.clone()),
+        agent_display_name: None,
+        account_alias: Some("local-probe".into()),
+        auth_mode: cli_auth_mode(report.cli_available),
+        auth_verified: report.cli_available,
+        session_id: Some(session.session_id.clone()),
+        thread_id: None,
+        session_key: None,
+        transcript_path: matches!(
+            session.source_type,
+            p0_adapter::P0SourceType::Jsonl | p0_adapter::P0SourceType::Json
+        )
+        .then(|| session.source_path.clone())
+        .flatten(),
+        started_at: session.started_at.clone(),
+        last_activity_at: session.last_activity_at.clone(),
+        elapsed_ms: elapsed_from_timestamps(&session.started_at, &session.last_activity_at),
+        state: state.clone(),
+        last_action: session
+            .last_question
+            .clone()
+            .or_else(|| session.first_question.clone()),
+        last_tail: None,
+        pending_approval: session.pending_approval,
+        first_question: session.first_question.clone(),
+        last_question: session.last_question.clone(),
+        error_message: None,
+        message_count: session.message_count,
+        tokens: TokenUsage {
+            input: session.input_tokens,
+            output: session.output_tokens,
+            cache_read: session.cache_read_tokens,
+            cache_write: session.cache_write_tokens,
+            total: session.total_tokens,
+            context: 0,
+        },
+        cost: MoneyValue {
+            usd: session.cost_usd,
+            confidence: match session.cost_kind {
+                p0_adapter::P0CostKind::Exact => SourceConfidence::Live,
+                p0_adapter::P0CostKind::Partial => SourceConfidence::Derived,
+                p0_adapter::P0CostKind::NotAvailable => SourceConfidence::Estimated,
+            },
+        },
+        quota: QuotaValue {
+            five_hour_used_pct: None,
+            seven_day_used_pct: None,
+            reset_at: vec![],
+            confidence: SourceConfidence::Derived,
+        },
+        source: SourceInfo {
+            confidence: source_confidence,
+            freshness: freshness_for_last_activity(&session.last_activity_at),
+            last_updated_at: report.probed_at.clone(),
+        },
+        lifecycle: Some(lifecycle(
+            state,
+            LifecycleStatusSource::Passive,
+            &session.started_at,
+            &session.last_activity_at,
+            None,
+        )),
+        usage_semantics: Some(usage_semantics(
+            cost_kind,
+            p0_usage_data_source(session.source_type),
+            session.enters_usage_totals,
+        )),
+        data_sources: Some(data_source_health(
+            &session.source_id,
+            p0_data_source_type(session.source_type),
+            session.source_path.clone(),
+            &report.probed_at,
+            session.schema_version.as_deref(),
+            schema_confidence,
+        )),
+        capabilities: Some(capabilities),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(tool_specific),
+        vcs: crate::commits::discover_vcs_context(&session.workspace_path),
+        origin_label: None,
+        origin_provider: None,
+    }
+}
+
+fn classify_p0_session_state(session: &p0_adapter::P0Session) -> RunState {
+    if session.pending_approval {
+        return RunState::WaitingApproval;
+    }
+    if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&session.last_activity_at) {
+        let age = Utc::now().signed_duration_since(last);
+        if age.num_seconds() < 60 {
+            RunState::Active
+        } else if age.num_minutes() < 5 {
+            RunState::Idle
+        } else {
+            RunState::Completed
+        }
+    } else {
+        RunState::Stale
+    }
+}
+
+fn freshness_for_last_activity(last_activity_at: &str) -> Freshness {
+    if let Ok(last) = chrono::DateTime::parse_from_rfc3339(last_activity_at) {
+        let age = Utc::now().signed_duration_since(last);
+        if age.num_minutes() < 5 {
+            Freshness::Hot
+        } else if age.num_hours() < 6 {
+            Freshness::Warm
+        } else if age.num_days() < 7 {
+            Freshness::Stale
+        } else {
+            Freshness::Cold
+        }
+    } else {
+        Freshness::Stale
+    }
+}
+
+fn build_probe_run_from_p0_report(report: &p0_adapter::P0ToolReport) -> RunRecord {
+    let tool = p0_tool_kind(report.tool);
+    let root = report
+        .root
+        .clone()
+        .unwrap_or_else(|| format!("~/.{}", p0_tool_provider(report.tool)));
+    let now = Utc::now().to_rfc3339();
+    let state = if report.cli_available || report.root_exists {
+        RunState::Idle
+    } else {
+        RunState::Stale
+    };
+    let source_id = format!("{}:probe", tool_key(&tool));
+    RunRecord {
+        id: format!("{}-probe-run", tool_key(&tool)),
+        tool,
+        source_id: Some(source_id.clone()),
+        source_mode: p0_report_mode(report).into(),
+        project_name: report.tool.label().into(),
+        workspace_path: root.clone(),
+        workspace_short: shorten_path(&root),
+        model: None,
+        provider: Some(p0_tool_provider(report.tool).into()),
+        agent_name: None,
+        agent_display_name: None,
+        account_alias: Some("local-probe".into()),
+        auth_mode: Some(cli_auth_mode_label(report.cli_available).into()),
+        auth_verified: report.cli_available,
+        session_id: None,
+        thread_id: None,
+        session_key: None,
+        transcript_path: None,
+        started_at: now,
+        last_activity_at: report.probed_at.clone(),
+        elapsed_ms: 0,
+        state: state.clone(),
+        last_action: Some("Read-only passive source probe".into()),
+        last_tail: report.cli_version.clone(),
+        pending_approval: false,
+        first_question: None,
+        last_question: None,
+        error_message: first_probe_error(&report.command_probes),
+        message_count: 0,
+        tokens: TokenUsage::default(),
+        cost: MoneyValue {
+            usd: None,
+            confidence: SourceConfidence::Derived,
+        },
+        quota: QuotaValue {
+            five_hour_used_pct: None,
+            seven_day_used_pct: None,
+            reset_at: vec![],
+            confidence: SourceConfidence::Derived,
+        },
+        source: SourceInfo {
+            confidence: p0_source_confidence(report.tool),
+            freshness: Freshness::Warm,
+            last_updated_at: report.probed_at.clone(),
+        },
+        lifecycle: Some(lifecycle(
+            state,
+            LifecycleStatusSource::Passive,
+            &report.probed_at,
+            &report.probed_at,
+            first_probe_error(&report.command_probes),
+        )),
+        usage_semantics: Some(usage_semantics(
+            UsageCostKind::NotAvailable,
+            UsageDataSource::Unknown,
+            false,
+        )),
+        data_sources: Some(data_source_health(
+            &source_id,
+            DataSourceType::Process,
+            report.root.clone(),
+            &report.probed_at,
+            Some(p0_report_mode(report)),
+            SchemaConfidence::Medium,
+        )),
+        capabilities: Some(vec![open_workspace_capability()]),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({
+            "supportLevel": match report.tool {
+                p0_adapter::P0Tool::Cursor => "experimental",
+                p0_adapter::P0Tool::ContinueCn => "monitored-lite",
+                _ => "fixture-gated-monitored",
+            },
+            "root": report.root,
+            "cliAvailable": report.cli_available,
+        })),
+        vcs: None,
+        origin_label: None,
+        origin_provider: None,
+    }
+}
+
 fn classify_hermes_session_state(session: &hermes_adapter::HermesSession) -> RunState {
     let updated_at = session
         .updated_at
@@ -2143,7 +2566,7 @@ fn normalized_total_tokens(
         // Codex cached input is a subset of input_tokens; ccusage falls back
         // to input + output when total_tokens is missing.
         ToolKind::Codex => input.saturating_add(output),
-        ToolKind::Claude | ToolKind::OpenClaw | ToolKind::Hermes => input
+        _ => input
             .saturating_add(output)
             .saturating_add(cache_read)
             .saturating_add(cache_write),
@@ -2345,6 +2768,17 @@ pub fn tool_key(tool: &ToolKind) -> &'static str {
         ToolKind::Codex => "codex",
         ToolKind::OpenClaw => "openClaw",
         ToolKind::Hermes => "hermes",
+        ToolKind::CodeBuddy => "codeBuddy",
+        ToolKind::Gemini => "gemini",
+        ToolKind::Pi => "pi",
+        ToolKind::OpenCode => "openCode",
+        ToolKind::Copilot => "copilot",
+        ToolKind::OpenHands => "openHands",
+        ToolKind::ContinueCn => "continueCn",
+        ToolKind::Qwen => "qwen",
+        ToolKind::Kimi => "kimi",
+        ToolKind::Goose => "goose",
+        ToolKind::Cursor => "cursor",
     }
 }
 

@@ -29,15 +29,25 @@ fn watch_dirs() -> Vec<PathBuf> {
 /// Pure helper: given a home directory, return every adapter session
 /// directory we should subscribe to. Per-adapter env overrides
 /// (CLAUDE_CONFIG_DIR / CODEX_HOME / OPENCLAW_STATE_DIR / OPENCLAW_HOME /
-/// HERMES_HOME) still apply because they are checked through `env_path_or`,
+/// HERMES_HOME and P0 adapter homes) still apply because they are checked through `env_path_or`,
 /// but the supplied `home` becomes the fallback. Filesystem reads under the
 /// Hermes `profiles/` tree are also relative to whatever `home` is given.
 pub(crate) fn watch_dirs_for_home(home: &std::path::Path) -> Vec<PathBuf> {
     let claude_base = env_path_or(home, &["CLAUDE_CONFIG_DIR"], ".claude");
     let codex_base = env_path_or(home, &["CODEX_HOME"], ".codex");
-    let openclaw_base =
-        env_path_or(home, &["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"], ".openclaw");
+    let openclaw_base = env_path_or(home, &["OPENCLAW_STATE_DIR", "OPENCLAW_HOME"], ".openclaw");
     let hermes_base = env_path_or(home, &["HERMES_HOME"], ".hermes");
+    let codebuddy_base = env_path_or(home, &["CODEBUDDY_CONFIG_DIR"], ".codebuddy");
+    let gemini_base = env_path_or(home, &["GEMINI_HOME"], ".gemini");
+    let pi_base = env_path_or(home, &["PI_CODING_AGENT_HOME"], ".pi/agent");
+    let opencode_base = env_path_or(home, &["OPENCODE_CONFIG_DIR"], ".local/share/opencode");
+    let copilot_base = env_path_or(home, &["COPILOT_HOME"], ".copilot");
+    let openhands_base = env_path_or(home, &["OPENHANDS_HOME"], ".openhands");
+    let continue_base = env_path_or(home, &["CONTINUE_GLOBAL_DIR"], ".continue");
+    let qwen_base = env_path_or(home, &["QWEN_CONFIG_DIR"], ".qwen");
+    let kimi_base = env_path_or(home, &["KIMI_CODE_HOME"], ".kimi-code");
+    let goose_base = env_path_or(home, &["GOOSE_DATA_DIR"], ".local/share/goose");
+    let cursor_base = env_path_or(home, &["CURSOR_AGENT_HOME"], ".cursor");
 
     let mut dirs = vec![
         claude_base.join("projects"),
@@ -45,6 +55,18 @@ pub(crate) fn watch_dirs_for_home(home: &std::path::Path) -> Vec<PathBuf> {
         openclaw_base.join("agents"),
         // Default Hermes sessions
         hermes_base.join("sessions"),
+        codebuddy_base.join("projects"),
+        codebuddy_base.join("sessions"),
+        gemini_base.join("tmp"),
+        pi_base.join("sessions"),
+        opencode_base,
+        copilot_base.join("session-state"),
+        openhands_base.join("conversations"),
+        continue_base.join("sessions"),
+        qwen_base.join("projects"),
+        kimi_base.join("sessions"),
+        goose_base.join("sessions"),
+        cursor_base.join("chats"),
     ];
 
     let hermes_profiles = hermes_base.join("profiles");
@@ -146,6 +168,18 @@ mod tests {
             home.join(".codex/sessions"),
             home.join(".openclaw/agents"),
             home.join(".hermes/sessions"),
+            home.join(".codebuddy/projects"),
+            home.join(".codebuddy/sessions"),
+            home.join(".gemini/tmp"),
+            home.join(".pi/agent/sessions"),
+            home.join(".local/share/opencode"),
+            home.join(".copilot/session-state"),
+            home.join(".openhands/conversations"),
+            home.join(".continue/sessions"),
+            home.join(".qwen/projects"),
+            home.join(".kimi-code/sessions"),
+            home.join(".local/share/goose/sessions"),
+            home.join(".cursor/chats"),
         ];
         for path in expected {
             assert!(

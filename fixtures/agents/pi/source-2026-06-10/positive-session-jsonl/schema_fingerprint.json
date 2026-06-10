@@ -1,0 +1,20 @@
+{
+  "tool_id": "pi",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-session-jsonl",
+  "format": "jsonl",
+  "schema_version": "session-jsonl-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "type=session",
+    "id",
+    "cwd",
+    "usage.input",
+    "usage.output",
+    "parentId"
+  ],
+  "sample_files": [
+    "session.jsonl"
+  ],
+  "fingerprint": "sha256:fixture-pi-session-jsonl-v1"
+}

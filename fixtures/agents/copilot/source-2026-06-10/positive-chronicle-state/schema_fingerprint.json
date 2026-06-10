@@ -1,0 +1,17 @@
+{
+  "tool_id": "copilot",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-chronicle-state",
+  "format": "json",
+  "schema_version": "chronicle-state-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "sessionId",
+    "workspace",
+    "updatedAt"
+  ],
+  "sample_files": [
+    "session.json"
+  ],
+  "fingerprint": "sha256:fixture-copilot-chronicle-state-v1"
+}

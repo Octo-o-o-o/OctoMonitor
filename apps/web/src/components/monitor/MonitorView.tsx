@@ -11,8 +11,8 @@ import { MonitorFilterBar } from './MonitorFilterBar'
 import { MonitorSkeleton } from './Skeleton'
 import type { AdapterHealth, PendingCron, RunRecord, ToolKind } from '../../lib/types'
 
-import { sourceLabelsUpper as sourceLabels } from '../../lib/constants'
-const sourceAccents: Record<ToolKind, string> = {
+import { allTools, sourceLabelsUpper as sourceLabels } from '../../lib/constants'
+const sourceAccents: Partial<Record<ToolKind, string>> = {
   claude: 'accent-claude',
   codex: 'accent-codex',
   openClaw: 'accent-openclaw',
@@ -437,7 +437,7 @@ function SourceColumn({
   const gatewayStatusLabel = sourceIndicator.labelKey ? t(sourceIndicator.labelKey) : undefined
 
   return (
-    <div className={`source-column ${sourceAccents[tool]}`}>
+    <div className={`source-column ${sourceAccents[tool] ?? 'accent-generic'}`}>
       <div className="source-header">
         <div className="source-top-row">
           <div className="source-name-row">
@@ -523,7 +523,7 @@ function MobileSourceTabs({
       {visibleTools.map((tool) => (
         <button
           key={tool}
-          className={`mobile-source-tab ${sourceAccents[tool]} ${selected === tool ? 'active' : ''}`}
+          className={`mobile-source-tab ${sourceAccents[tool] ?? 'accent-generic'} ${selected === tool ? 'active' : ''}`}
           onClick={() => onSelect(tool)}
         >
           {sourceLabels[tool]} ({counts[tool]})
@@ -554,16 +554,15 @@ export function MonitorView() {
 
   const sessionsBySource = useMemo(() => {
     if (!data) {
-      return { claude: [], codex: [], openClaw: [], hermes: [] } satisfies Record<ToolKind, RunRecord[]>
+      return Object.fromEntries(
+        allTools.map((tool) => [tool, [] as RunRecord[]]),
+      ) as unknown as Record<ToolKind, RunRecord[]>
     }
     const base = buildVisibleRunsBySource(data.runs, filterRules, monitorPeriod)
     if (quickFilter === 'all' && searchQuery.trim() === '') return base
-    return {
-      claude: applyMonitorFilters(base.claude, quickFilter, searchQuery),
-      codex: applyMonitorFilters(base.codex, quickFilter, searchQuery),
-      openClaw: applyMonitorFilters(base.openClaw, quickFilter, searchQuery),
-      hermes: applyMonitorFilters(base.hermes, quickFilter, searchQuery),
-    }
+    return Object.fromEntries(
+      allTools.map((tool) => [tool, applyMonitorFilters(base[tool], quickFilter, searchQuery)]),
+    ) as unknown as Record<ToolKind, RunRecord[]>
   }, [data, monitorPeriod, filterRules, quickFilter, searchQuery])
 
   const hasVisibleRuns = visiblePanels.some((tool) => sessionsBySource[tool].length > 0)
@@ -589,12 +588,9 @@ export function MonitorView() {
     )
   }
 
-  const sourceCounts: Record<ToolKind, number> = {
-    claude: sessionsBySource.claude.length,
-    codex: sessionsBySource.codex.length,
-    openClaw: sessionsBySource.openClaw.length,
-    hermes: sessionsBySource.hermes.length,
-  }
+  const sourceCounts = Object.fromEntries(
+    allTools.map((tool) => [tool, sessionsBySource[tool].length]),
+  ) as unknown as Record<ToolKind, number>
 
   const effectiveMobileSource = visiblePanels.includes(mobileSource)
     ? mobileSource

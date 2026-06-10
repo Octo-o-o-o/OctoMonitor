@@ -32,7 +32,7 @@ type IslandExpansionDetail = {
   immediate?: boolean
 }
 
-const toolClass: Record<ToolKind, string> = {
+const toolClass: Partial<Record<ToolKind, string>> = {
   claude: 'island-tool-claude',
   codex: 'island-tool-codex',
   openClaw: 'island-tool-openclaw',
@@ -292,7 +292,7 @@ export function IslandSurface({
               onClick={() => void handleItemClick(item)}
               tabIndex={expanded ? 0 : -1}
             >
-              <span className={`island-agent-dot ${toolClass[item.run.tool]}`} />
+              <span className={`island-agent-dot ${toolClass[item.run.tool] ?? 'island-tool-generic'}`} />
               <span className="island-item-main">
                 <span className="island-item-title">{itemTitle(item.run)}</span>
                 <span className="island-item-subtitle">{itemSubtitle(item.run)}</span>

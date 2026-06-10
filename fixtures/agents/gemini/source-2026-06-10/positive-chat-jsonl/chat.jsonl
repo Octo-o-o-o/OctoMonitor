@@ -1,0 +1,6 @@
+{"type":"$set","session_id":"gemini-session-1","cwd":"/Users/demo/workspace/octomonitor","model":"gemini-2.5-pro","title":"Gemini fixture"}
+{"type":"user","session_id":"gemini-session-1","timestamp":"2026-06-10T01:05:00Z","content":"Draft source health."}
+{"type":"assistant","session_id":"gemini-session-1","timestamp":"2026-06-10T01:05:08Z","usage":{"input_tokens":300,"output_tokens":90,"total_tokens":390},"content":"superseded"}
+{"type":"$rewindTo","session_id":"gemini-session-1","index":1}
+{"type":"user","session_id":"gemini-session-1","timestamp":"2026-06-10T01:06:00Z","content":"Draft source health again."}
+{"type":"assistant","session_id":"gemini-session-1","timestamp":"2026-06-10T01:06:12Z","usage":{"input_tokens":1000,"output_tokens":260,"cache_read_tokens":40,"total_tokens":1300},"content":"Source health drafted."}

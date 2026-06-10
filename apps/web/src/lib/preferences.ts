@@ -51,18 +51,12 @@ const allDesktopDisplayModes: DesktopDisplayMode[] = ['dashboard', 'island', 'bo
 const allIslandPositions: IslandPosition[] = ['auto', 'topCenter']
 
 export const defaultPanelConfig: PanelEntry[] = [
-  { tool: 'claude', enabled: true },
-  { tool: 'codex', enabled: true },
-  { tool: 'openClaw', enabled: true },
-  { tool: 'hermes', enabled: true },
+  ...allTools.map((tool) => ({ tool, enabled: true })),
 ]
 
-export const defaultFilterRules: FilterRules = {
-  claude: { mode: 'off', patterns: [] },
-  codex: { mode: 'off', patterns: [] },
-  openClaw: { mode: 'off', patterns: [] },
-  hermes: { mode: 'off', patterns: [] },
-}
+export const defaultFilterRules: FilterRules = Object.fromEntries(
+  allTools.map((tool) => [tool, { mode: 'off', patterns: [] }]),
+) as unknown as FilterRules
 
 export const defaultSettings: FrontendSettings = {
   monitorPeriod: '1h',

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "copilot-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "gpt-5-copilot",
+    "usage": {
+      "inputTokens": 600,
+      "outputTokens": 180,
+      "totalTokens": 780,
+      "costKind": "partial"
+    },
+    "supportLevel": "fixture-gated-monitored"
+  }
+]

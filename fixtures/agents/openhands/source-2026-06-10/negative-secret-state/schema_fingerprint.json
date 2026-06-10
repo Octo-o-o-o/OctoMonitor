@@ -1,0 +1,15 @@
+{
+  "tool_id": "openhands",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-secret-state",
+  "format": "json",
+  "schema_version": "secret-state-denied",
+  "schema_confidence": "unsupported",
+  "required_fields": [],
+  "negative_signals": [
+    "credential path",
+    "debug export",
+    ".env path"
+  ],
+  "fingerprint": "sha256:fixture-openhands-secret-state-denied"
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "id": "pi-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "gpt-5",
+    "usage": {
+      "inputTokens": 1100,
+      "outputTokens": 310,
+      "cacheReadTokens": 40,
+      "cacheWriteTokens": 10,
+      "totalTokens": 1460,
+      "costUsd": 0.03,
+      "costKind": "exact"
+    },
+    "supportLevel": "fixture-gated-monitored"
+  }
+]

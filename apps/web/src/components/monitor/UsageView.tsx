@@ -24,6 +24,17 @@ const sourceTagLabels: Record<ToolKind, string> = {
   codex: 'Project',
   openClaw: 'Agent',
   hermes: 'Profile',
+  codeBuddy: 'Project',
+  gemini: 'Project',
+  pi: 'Project',
+  openCode: 'Project',
+  copilot: 'Project',
+  openHands: 'Project',
+  continueCn: 'Project',
+  qwen: 'Project',
+  kimi: 'Project',
+  goose: 'Project',
+  cursor: 'Project',
 }
 const historyPresets = ['7d', '30d', '90d', '180d'] as const
 
@@ -32,6 +43,17 @@ const barColors: Record<ToolKind, string> = {
   codex: 'var(--accent)',
   openClaw: 'var(--openclaw-accent)',
   hermes: 'var(--hermes-accent)',
+  codeBuddy: 'var(--tag-emerald-text)',
+  gemini: 'var(--tag-blue-text)',
+  pi: 'var(--tag-amber-text)',
+  openCode: 'var(--tag-cyan-text)',
+  copilot: 'var(--tag-lime-text)',
+  openHands: 'var(--tag-rose-text)',
+  continueCn: 'var(--tag-violet-text)',
+  qwen: 'var(--tag-fuchsia-text)',
+  kimi: 'var(--tag-orange-text)',
+  goose: 'var(--tag-teal-text)',
+  cursor: 'var(--tag-blue-text)',
 }
 
 interface GroupedUsage {
@@ -106,12 +128,9 @@ export function UsageView() {
   )
 
   const grouped = useMemo((): GroupedUsage[] => {
-    const map: Record<ToolKind, GroupedUsage> = {
-      claude: { tool: 'claude', totalTokens: 0, totalCost: 0, items: [] },
-      codex: { tool: 'codex', totalTokens: 0, totalCost: 0, items: [] },
-      openClaw: { tool: 'openClaw', totalTokens: 0, totalCost: 0, items: [] },
-      hermes: { tool: 'hermes', totalTokens: 0, totalCost: 0, items: [] },
-    }
+    const map = Object.fromEntries(
+      allTools.map((tool) => [tool, { tool, totalTokens: 0, totalCost: 0, items: [] }]),
+    ) as unknown as Record<ToolKind, GroupedUsage>
 
     const tagMap: Record<string, Record<string, { tokens: number; cost: number }>> = {}
     for (const { run, usage } of runUsageSlices) {

@@ -1,6 +1,22 @@
 import type { ToolKind } from './types'
 
-export const allTools: ToolKind[] = ['claude', 'codex', 'openClaw', 'hermes']
+export const allTools: ToolKind[] = [
+  'claude',
+  'codex',
+  'openClaw',
+  'hermes',
+  'codeBuddy',
+  'gemini',
+  'pi',
+  'openCode',
+  'copilot',
+  'openHands',
+  'continueCn',
+  'qwen',
+  'kimi',
+  'goose',
+  'cursor',
+]
 
 /** Title-case labels for each tool/source, suitable for prose or mixed-case UI. */
 export const sourceLabels: Record<ToolKind, string> = {
@@ -8,6 +24,17 @@ export const sourceLabels: Record<ToolKind, string> = {
   codex: 'Codex',
   openClaw: 'OpenClaw',
   hermes: 'Hermes',
+  codeBuddy: 'CodeBuddy',
+  gemini: 'Gemini CLI',
+  pi: 'Pi Agent',
+  openCode: 'opencode',
+  copilot: 'GitHub Copilot',
+  openHands: 'OpenHands',
+  continueCn: 'Continue cn',
+  qwen: 'Qwen Code',
+  kimi: 'Kimi Code',
+  goose: 'Goose',
+  cursor: 'Cursor Agent',
 }
 
 /** Upper-case labels for section headers and stat tables. */
@@ -16,4 +43,15 @@ export const sourceLabelsUpper: Record<ToolKind, string> = {
   codex: 'CODEX',
   openClaw: 'OPENCLAW',
   hermes: 'HERMES',
+  codeBuddy: 'CODEBUDDY',
+  gemini: 'GEMINI CLI',
+  pi: 'PI AGENT',
+  openCode: 'OPENCODE',
+  copilot: 'GITHUB COPILOT',
+  openHands: 'OPENHANDS',
+  continueCn: 'CONTINUE CN',
+  qwen: 'QWEN CODE',
+  kimi: 'KIMI CODE',
+  goose: 'GOOSE',
+  cursor: 'CURSOR AGENT',
 }
