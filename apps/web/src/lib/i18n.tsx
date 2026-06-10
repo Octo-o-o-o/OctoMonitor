@@ -315,6 +315,8 @@ const en = {
   'drawer.openWorkspace.ok': 'Workspace open requested',
   'drawer.openWorkspace.error': 'Could not open workspace',
   'drawer.operationUnavailable': 'Operation unavailable',
+  'drawer.jumpLinks': 'Jump links',
+  'drawer.jump.copy': 'Copy jump target',
   'drawer.resumeCommand.label': 'Resume (advisory)',
   'drawer.resumeCommand.unavailable': 'Resume command unavailable',
 
@@ -735,6 +737,8 @@ const zh: Record<I18nKey, string> = {
   'drawer.openWorkspace.ok': '已请求打开工作区',
   'drawer.openWorkspace.error': '无法打开工作区',
   'drawer.operationUnavailable': '操作不可用',
+  'drawer.jumpLinks': '跳转链接',
+  'drawer.jump.copy': '复制跳转目标',
   'drawer.resumeCommand.label': '建议命令（仅复制）',
   'drawer.resumeCommand.unavailable': '暂无可用的恢复命令',
 

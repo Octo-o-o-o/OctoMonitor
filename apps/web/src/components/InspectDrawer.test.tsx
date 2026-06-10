@@ -361,4 +361,59 @@ describe('InspectDrawer', () => {
       })
     })
   })
+
+  it('renders jump links as copy-only targets', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response('null', { status: 503, headers: { 'content-type': 'application/json' } }),
+    )
+
+    const run = runFixture({
+      id: 'jump-run',
+      tool: 'codex',
+      jumpTargets: [
+        {
+          kind: 'copyCommand',
+          label: 'Copy resume command',
+          command: ['codex', 'resume', 'thread with spaces'],
+          cwd: '/Users/me/Repo Name',
+          url: null,
+          terminal: null,
+          reliability: 'high',
+          requiresConfirmation: false,
+        },
+        {
+          kind: 'sessionDeeplink',
+          label: 'Open in Codex',
+          command: null,
+          cwd: '/Users/me/Repo Name',
+          url: 'codex://threads/thread%20with%20spaces',
+          terminal: null,
+          reliability: 'medium',
+          requiresConfirmation: false,
+        },
+      ],
+    })
+
+    act(() => {
+      useMonitorStore.setState({
+        data: bootstrapWithRuns([run]),
+        selectedRunId: 'jump-run',
+      })
+    })
+
+    render(
+      <I18nProvider>
+        <ThemeProvider>
+          <InspectDrawer />
+        </ThemeProvider>
+      </I18nProvider>,
+    )
+
+    await act(async () => { await flushPromises() })
+
+    expect(screen.getByText('Jump links')).toBeInTheDocument()
+    expect(screen.getByText('Copy resume command')).toBeInTheDocument()
+    expect(screen.getByText("codex resume 'thread with spaces'")).toBeInTheDocument()
+    expect(screen.getByText('codex://threads/thread%20with%20spaces')).toBeInTheDocument()
+  })
 })

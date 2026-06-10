@@ -685,6 +685,7 @@ fn provider_for_tool(tool: ToolKind) -> Option<&'static str> {
 }
 
 async fn upsert_runtime_run(state: &AppState, mut run: RunRecord, wake_reason: &'static str) {
+    crate::jumps::hydrate_jump_targets(&mut run);
     let mut payload = state.bootstrap.write().await;
     if let Some(existing) = payload.runs.iter_mut().find(|item| item.id == run.id) {
         run.started_at = existing.started_at.clone();

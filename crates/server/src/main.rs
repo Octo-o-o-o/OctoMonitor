@@ -2,6 +2,7 @@ mod commits;
 mod config;
 mod handlers;
 mod hooks;
+mod jumps;
 mod network;
 mod operations;
 mod perf;

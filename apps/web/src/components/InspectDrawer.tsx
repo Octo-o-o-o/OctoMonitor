@@ -9,6 +9,7 @@ import { getRuntimeMode } from '../lib/runtimeMode'
 import { isTauriEnvironment } from '../lib/runtimeEnvironment'
 import { buildCodexDeepLink, getRunOpenAffordance } from '../lib/runTarget'
 import { openExternalUrl } from '../lib/openExternal'
+import type { JumpTarget } from '../lib/types'
 import { CopyButton } from './common/CopyButton'
 import { useToastStore } from '../store/toastStore'
 
@@ -44,6 +45,40 @@ type OperationApplyPayload = {
   ok: boolean
   blockedReason?: string | null
   message?: string
+}
+
+function shellQuoteArg(value: string): string {
+  if (/^[A-Za-z0-9_./:-]+$/.test(value)) return value
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function formatJumpTargetValue(target: JumpTarget): string {
+  if (target.command && target.command.length > 0) {
+    return target.command.map(shellQuoteArg).join(' ')
+  }
+  return target.url ?? target.cwd ?? ''
+}
+
+function jumpKindLabel(kind: JumpTarget['kind']): string {
+  switch (kind) {
+    case 'copyCommand': return 'Copy'
+    case 'newTerminalTab': return 'New terminal'
+    case 'workspace': return 'Workspace'
+    case 'nativeApp': return 'App'
+    case 'sessionDeeplink': return 'Deep link'
+    case 'managedTerminalFocus': return 'Managed focus'
+    default: return kind
+  }
+}
+
+function jumpMeta(target: JumpTarget): string {
+  const parts = [
+    jumpKindLabel(target.kind),
+    target.terminal?.provider,
+    target.reliability,
+    target.requiresConfirmation ? 'confirm' : null,
+  ].filter(Boolean)
+  return parts.join(' · ')
 }
 
 type CodexEventKind =
@@ -142,6 +177,7 @@ export function InspectDrawer() {
     selectedRun && canUseDesktopOpen && openAffordance === 'openCodex',
   )
   const openWorkspaceOperation = operations.find((operation) => operation.id === 'open.workspace')
+  const jumpTargets = selectedRun?.jumpTargets ?? []
   const usageBucketIndex = useMemo(
     () => buildUsageBucketIndex(usageBuckets ?? []),
     [usageBuckets],
@@ -482,6 +518,32 @@ export function InspectDrawer() {
                       ? t('drawer.openWorkspace.hint')
                       : openWorkspaceOperation.blockedReason ?? t('drawer.operationUnavailable')}
                   </span>
+                </div>
+              )}
+              {jumpTargets.length > 0 && (
+                <div className="inspect-jump-list">
+                  <span className="inspect-section-label">{t('drawer.jumpLinks')}</span>
+                  {jumpTargets.map((target, index) => {
+                    const copyValue = formatJumpTargetValue(target)
+                    return (
+                      <div
+                        key={`${target.kind}-${target.label}-${index}`}
+                        className="inspect-jump-row"
+                      >
+                        <CopyButton
+                          text={copyValue}
+                          ariaLabel={t('drawer.jump.copy')}
+                          disabled={!copyValue}
+                          className="inspect-jump-copy"
+                        />
+                        <div className="inspect-jump-main">
+                          <span className="inspect-jump-label">{target.label}</span>
+                          <span className="inspect-jump-meta">{jumpMeta(target)}</span>
+                          {copyValue && <code className="inspect-jump-value">{copyValue}</code>}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
               <div className="inspect-copy-row">

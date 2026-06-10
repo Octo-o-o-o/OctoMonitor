@@ -2887,6 +2887,7 @@ pub fn rebuild_derived(payload: &mut BootstrapPayload, pricing: &PricingStore) {
     apply_history_window(payload);
     for run in &mut payload.runs {
         normalize_run_token_totals(run);
+        crate::jumps::hydrate_jump_targets(run);
     }
     hydrate_run_vcs(&mut payload.runs);
     payload.usage_buckets = build_usage_buckets(&payload.runs, pricing);

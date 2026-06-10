@@ -5394,6 +5394,49 @@ input, textarea, select { font: inherit; }
   cursor: not-allowed;
   opacity: 0.55;
 }
+.inspect-jump-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.inspect-jump-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-surface) 88%, transparent);
+}
+.inspect-jump-copy {
+  margin-top: 1px;
+}
+.inspect-jump-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.inspect-jump-label {
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.inspect-jump-meta {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+.inspect-jump-value {
+  display: block;
+  max-width: 100%;
+  color: var(--text);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
 .inspect-open-codex-hint {
   color: var(--muted);
   font-size: var(--font-size-xs);
