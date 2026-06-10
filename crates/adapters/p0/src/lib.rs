@@ -36,6 +36,16 @@ pub enum P0Tool {
     Kimi,
     Goose,
     Cursor,
+    Cline,
+    Kiro,
+    WorkBuddy,
+    AmazonQ,
+    Aider,
+    Amp,
+    Windsurf,
+    Codebuff,
+    Roo,
+    Kilo,
 }
 
 impl P0Tool {
@@ -52,6 +62,16 @@ impl P0Tool {
             Self::Kimi => "kimi",
             Self::Goose => "goose",
             Self::Cursor => "cursor",
+            Self::Cline => "cline",
+            Self::Kiro => "kiro",
+            Self::WorkBuddy => "workBuddy",
+            Self::AmazonQ => "amazonQ",
+            Self::Aider => "aider",
+            Self::Amp => "amp",
+            Self::Windsurf => "windsurf",
+            Self::Codebuff => "codebuff",
+            Self::Roo => "roo",
+            Self::Kilo => "kilo",
         }
     }
 
@@ -68,6 +88,16 @@ impl P0Tool {
             Self::Kimi => "Kimi Code",
             Self::Goose => "Goose",
             Self::Cursor => "Cursor Agent",
+            Self::Cline => "Cline",
+            Self::Kiro => "Kiro",
+            Self::WorkBuddy => "WorkBuddy",
+            Self::AmazonQ => "Amazon Q",
+            Self::Aider => "Aider",
+            Self::Amp => "Amp",
+            Self::Windsurf => "Windsurf",
+            Self::Codebuff => "Codebuff",
+            Self::Roo => "Roo Code",
+            Self::Kilo => "Kilo Code",
         }
     }
 
@@ -84,6 +114,16 @@ impl P0Tool {
             Self::Kimi => "kimi",
             Self::Goose => "goose",
             Self::Cursor => "agent",
+            Self::Cline => "cline",
+            Self::Kiro => "kiro-cli",
+            Self::WorkBuddy => "workbuddy",
+            Self::AmazonQ => "q",
+            Self::Aider => "aider",
+            Self::Amp => "amp",
+            Self::Windsurf => "windsurf",
+            Self::Codebuff => "codebuff",
+            Self::Roo => "roo",
+            Self::Kilo => "kilo",
         }
     }
 
@@ -100,6 +140,16 @@ impl P0Tool {
             Self::Kimi => "moonshot",
             Self::Goose => "goose",
             Self::Cursor => "cursor",
+            Self::Cline => "cline",
+            Self::Kiro => "kiro",
+            Self::WorkBuddy => "workbuddy",
+            Self::AmazonQ => "amazon-q",
+            Self::Aider => "aider",
+            Self::Amp => "amp",
+            Self::Windsurf => "windsurf",
+            Self::Codebuff => "codebuff",
+            Self::Roo => "roo",
+            Self::Kilo => "kilo",
         }
     }
 
@@ -118,6 +168,16 @@ impl P0Tool {
             Self::Kimi => resolve_env_or_home(&["KIMI_CODE_HOME"], ".kimi-code"),
             Self::Goose => resolve_env_or_home(&["GOOSE_DATA_DIR"], ".local/share/goose"),
             Self::Cursor => resolve_env_or_home(&["CURSOR_AGENT_HOME"], ".cursor"),
+            Self::Cline => resolve_env_or_home(&["CLINE_HOME", "CLINE_DATA_DIR"], ".cline"),
+            Self::Kiro => resolve_env_or_home(&["KIRO_HOME"], ".kiro"),
+            Self::WorkBuddy => resolve_env_or_home(&["WORKBUDDY_CONFIG_DIR"], ".workbuddy"),
+            Self::AmazonQ => resolve_env_or_home(&["AMAZON_Q_HOME"], ".aws/amazonq"),
+            Self::Aider => resolve_env_or_home(&["AIDER_HOME"], ".aider"),
+            Self::Amp => resolve_env_or_home(&["AMP_HOME"], ".amp"),
+            Self::Windsurf => resolve_env_or_home(&["WINDSURF_HOME"], ".windsurf"),
+            Self::Codebuff => resolve_env_or_home(&["CODEBUFF_HOME"], ".codebuff"),
+            Self::Roo => resolve_env_or_home(&["ROO_CODE_HOME"], ".roo"),
+            Self::Kilo => resolve_env_or_home(&["KILO_CODE_HOME"], ".kilo"),
         }
     }
 }
@@ -243,6 +303,16 @@ pub fn all_p0_tools() -> Vec<P0Tool> {
         P0Tool::Kimi,
         P0Tool::Goose,
         P0Tool::Cursor,
+        P0Tool::Cline,
+        P0Tool::Kiro,
+        P0Tool::WorkBuddy,
+        P0Tool::AmazonQ,
+        P0Tool::Aider,
+        P0Tool::Amp,
+        P0Tool::Windsurf,
+        P0Tool::Codebuff,
+        P0Tool::Roo,
+        P0Tool::Kilo,
     ]
 }
 
@@ -292,7 +362,22 @@ fn probe_tool(tool: P0Tool, probed_at: &str) -> P0ToolReport {
             file_probes.push(probe_file(&db_path));
             scan_goose(&db_path)
         }
-        P0Tool::Cursor => scan_cursor(&root),
+        P0Tool::Cursor if cursor_private_store_opted_in() => scan_cursor(&root),
+        P0Tool::Cursor => Vec::new(),
+        P0Tool::Cline => {
+            let db_path = root.join("sessions.db");
+            file_probes.push(probe_file(&db_path));
+            scan_cline(&db_path)
+        }
+        P0Tool::Kiro => scan_kiro(&root),
+        P0Tool::WorkBuddy
+        | P0Tool::AmazonQ
+        | P0Tool::Aider
+        | P0Tool::Amp
+        | P0Tool::Windsurf
+        | P0Tool::Codebuff
+        | P0Tool::Roo
+        | P0Tool::Kilo => Vec::new(),
     };
 
     P0ToolReport {
@@ -1197,11 +1282,14 @@ fn parse_simple_session_db(
         acc.touch(row_string(row, "started_at"));
         acc.touch(row_string(row, "updated_at"));
         acc.cost_kind = P0CostKind::NotAvailable;
-        acc.resume_command = Some(match tool {
-            P0Tool::Goose => format!("goose session resume {}", shell_quote(&session_id)),
-            P0Tool::Copilot => format!("copilot session resume {}", shell_quote(&session_id)),
-            _ => session_id.clone(),
-        });
+        acc.resume_command = match tool {
+            P0Tool::Goose => Some(format!("goose session resume {}", shell_quote(&session_id))),
+            P0Tool::Copilot => Some(format!(
+                "copilot session resume {}",
+                shell_quote(&session_id)
+            )),
+            _ => None,
+        };
         Ok(acc.finish())
     }) else {
         return Vec::new();
@@ -1218,6 +1306,85 @@ fn scan_cursor(root: &Path) -> Vec<P0Session> {
     }
     sessions.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
     sessions
+}
+
+fn cursor_private_store_opted_in() -> bool {
+    std::env::var("OCTOMONITOR_CURSOR_PRIVATE_STORE")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
+fn scan_cline(db_path: &Path) -> Vec<P0Session> {
+    parse_simple_session_db(
+        db_path,
+        P0Tool::Cline,
+        "cline_metadata_sqlite",
+        "cline:metadata-db",
+        "metadata-only-v1",
+        P0SchemaConfidence::Medium,
+        "fixture-gated-metadata",
+    )
+}
+
+fn scan_kiro(root: &Path) -> Vec<P0Session> {
+    let candidates = [
+        root.join("custom-storage.jsonl"),
+        root.join("storage").join("custom-storage.jsonl"),
+    ];
+    let mut sessions = Vec::new();
+    for path in candidates {
+        sessions.extend(parse_kiro_custom_storage_jsonl(&path));
+    }
+    sessions.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    sessions
+}
+
+fn parse_kiro_custom_storage_jsonl(path: &Path) -> Vec<P0Session> {
+    let Some(lines) = read_jsonl_values(path) else {
+        return Vec::new();
+    };
+    let mut by_id: HashMap<String, SessionAcc> = HashMap::new();
+    for value in lines {
+        let Some(session_id) = string_field(&value, &["sessionId", "session_id", "id"]) else {
+            continue;
+        };
+        let acc = by_id.entry(session_id.clone()).or_insert_with(|| {
+            let mut acc = SessionAcc::new(
+                P0Tool::Kiro,
+                session_id.clone(),
+                "kiro_custom_storage",
+                "kiro:custom-storage",
+                P0SourceType::Jsonl,
+                "custom-storage-v1",
+                P0SchemaConfidence::Medium,
+                "fixture-gated-cli",
+            );
+            acc.source_path = Some(path.display().to_string());
+            acc.resume_command = Some(format!(
+                "kiro-cli chat --resume-id {}",
+                shell_quote(&session_id)
+            ));
+            acc
+        });
+        if let Some(workspace) = string_field(&value, &["workspace", "cwd", "workspacePath"]) {
+            acc.workspace_path = Some(workspace);
+        }
+        acc.touch(string_field(
+            &value,
+            &["timestamp", "updated_at", "updatedAt"],
+        ));
+        acc.message_count = acc.message_count.saturating_add(1);
+        if string_field(&value, &["role"]).as_deref() == Some("user") {
+            if let Some(text) = extract_text(&value) {
+                if acc.first_question.is_none() {
+                    acc.first_question = Some(truncate_chars(&text, 120));
+                }
+                acc.last_question = Some(truncate_chars(&text, 120));
+            }
+        }
+        acc.apply_usage(value.get("usage"));
+    }
+    by_id.into_values().filter_map(SessionAcc::finish).collect()
 }
 
 fn parse_cursor_store_db(path: &Path) -> Vec<P0Session> {
@@ -1735,6 +1902,50 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "goose-session-1");
         assert_eq!(sessions[0].cost_kind, P0CostKind::NotAvailable);
+    }
+
+    #[test]
+    fn cline_sqlite_fixture_parses_metadata_without_resume() {
+        let temp = tempdir().expect("temp dir");
+        let db = temp.path().join("sessions.db");
+        {
+            let conn = Connection::open(&db).expect("db");
+            conn.execute_batch(
+                r#"
+                CREATE TABLE sessions (
+                  id TEXT PRIMARY KEY,
+                  workspace TEXT NOT NULL,
+                  title TEXT,
+                  updated_at TEXT NOT NULL
+                );
+                INSERT INTO sessions VALUES (
+                  'cline-session-1',
+                  '/Users/demo/workspace/octomonitor',
+                  'Metadata fixture',
+                  '2026-06-10T01:05:00Z'
+                );
+                "#,
+            )
+            .expect("schema");
+        }
+        let sessions = scan_cline(&db);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "cline-session-1");
+        assert_eq!(sessions[0].support_level, "fixture-gated-metadata");
+        assert_eq!(sessions[0].resume_command, None);
+    }
+
+    #[test]
+    fn kiro_fixture_parses_custom_storage_resume_id() {
+        let path =
+            fixture("kiro/source-2026-06-10/positive-custom-storage-json/custom-storage.jsonl");
+        let sessions = parse_kiro_custom_storage_jsonl(&path);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "kiro-session-1");
+        assert_eq!(
+            sessions[0].resume_command.as_deref(),
+            Some("kiro-cli chat --resume-id kiro-session-1")
+        );
     }
 
     #[test]

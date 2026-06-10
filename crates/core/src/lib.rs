@@ -20,6 +20,16 @@ pub enum ToolKind {
     Kimi,
     Goose,
     Cursor,
+    Cline,
+    Kiro,
+    WorkBuddy,
+    AmazonQ,
+    Aider,
+    Amp,
+    Windsurf,
+    Codebuff,
+    Roo,
+    Kilo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

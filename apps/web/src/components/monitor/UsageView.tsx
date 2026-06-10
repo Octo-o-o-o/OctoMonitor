@@ -19,7 +19,7 @@ function accentClass(tool: ToolKind): string {
   if (tool === 'openClaw') return 'openclaw'
   return tool
 }
-const sourceTagLabels: Record<ToolKind, string> = {
+const sourceTagLabels: Partial<Record<ToolKind, string>> = {
   claude: 'Project',
   codex: 'Project',
   openClaw: 'Agent',
@@ -38,7 +38,7 @@ const sourceTagLabels: Record<ToolKind, string> = {
 }
 const historyPresets = ['7d', '30d', '90d', '180d'] as const
 
-const barColors: Record<ToolKind, string> = {
+const barColors: Partial<Record<ToolKind, string>> = {
   claude: 'var(--warn)',
   codex: 'var(--accent)',
   openClaw: 'var(--openclaw-accent)',
@@ -276,7 +276,7 @@ export function UsageView() {
               <div key={group.tool} className={`usage-source-card accent-${accentClass(group.tool)}`}>
                 <div className="usage-source-header">
                   <span className="usage-source-name">{sourceLabels[group.tool]}</span>
-                  <span className="usage-source-tag-type">{sourceTagLabels[group.tool]}</span>
+                  <span className="usage-source-tag-type">{sourceTagLabels[group.tool] ?? 'Project'}</span>
                 </div>
                 <div className="usage-source-totals">
                   {formatTokens(group.totalTokens)} tokens &nbsp; {formatCost(group.totalCost)}
@@ -298,7 +298,7 @@ export function UsageView() {
                           className="usage-item-fill"
                           style={{
                             width: `${(item.tokens / maxTokens) * 100}%`,
-                            background: barColors[group.tool],
+                            background: barColors[group.tool] ?? 'var(--muted)',
                           }}
                         />
                       </div>

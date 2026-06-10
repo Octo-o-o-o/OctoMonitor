@@ -16,6 +16,16 @@ export const allTools: ToolKind[] = [
   'kimi',
   'goose',
   'cursor',
+  'cline',
+  'kiro',
+  'workBuddy',
+  'amazonQ',
+  'aider',
+  'amp',
+  'windsurf',
+  'codebuff',
+  'roo',
+  'kilo',
 ]
 
 /** Title-case labels for each tool/source, suitable for prose or mixed-case UI. */
@@ -35,6 +45,16 @@ export const sourceLabels: Record<ToolKind, string> = {
   kimi: 'Kimi Code',
   goose: 'Goose',
   cursor: 'Cursor Agent',
+  cline: 'Cline',
+  kiro: 'Kiro',
+  workBuddy: 'WorkBuddy',
+  amazonQ: 'Amazon Q',
+  aider: 'Aider',
+  amp: 'Amp',
+  windsurf: 'Windsurf',
+  codebuff: 'Codebuff',
+  roo: 'Roo Code',
+  kilo: 'Kilo Code',
 }
 
 /** Upper-case labels for section headers and stat tables. */
@@ -54,4 +74,14 @@ export const sourceLabelsUpper: Record<ToolKind, string> = {
   kimi: 'KIMI CODE',
   goose: 'GOOSE',
   cursor: 'CURSOR AGENT',
+  cline: 'CLINE',
+  kiro: 'KIRO',
+  workBuddy: 'WORKBUDDY',
+  amazonQ: 'AMAZON Q',
+  aider: 'AIDER',
+  amp: 'AMP',
+  windsurf: 'WINDSURF',
+  codebuff: 'CODEBUFF',
+  roo: 'ROO CODE',
+  kilo: 'KILO CODE',
 }

@@ -48,6 +48,8 @@ pub(crate) fn watch_dirs_for_home(home: &std::path::Path) -> Vec<PathBuf> {
     let kimi_base = env_path_or(home, &["KIMI_CODE_HOME"], ".kimi-code");
     let goose_base = env_path_or(home, &["GOOSE_DATA_DIR"], ".local/share/goose");
     let cursor_base = env_path_or(home, &["CURSOR_AGENT_HOME"], ".cursor");
+    let cline_base = env_path_or(home, &["CLINE_HOME", "CLINE_DATA_DIR"], ".cline");
+    let kiro_base = env_path_or(home, &["KIRO_HOME"], ".kiro");
 
     let mut dirs = vec![
         claude_base.join("projects"),
@@ -67,6 +69,8 @@ pub(crate) fn watch_dirs_for_home(home: &std::path::Path) -> Vec<PathBuf> {
         kimi_base.join("sessions"),
         goose_base.join("sessions"),
         cursor_base.join("chats"),
+        cline_base,
+        kiro_base,
     ];
 
     let hermes_profiles = hermes_base.join("profiles");
@@ -180,6 +184,8 @@ mod tests {
             home.join(".kimi-code/sessions"),
             home.join(".local/share/goose/sessions"),
             home.join(".cursor/chats"),
+            home.join(".cline"),
+            home.join(".kiro"),
         ];
         for path in expected {
             assert!(

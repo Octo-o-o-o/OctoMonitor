@@ -91,6 +91,16 @@ fn build_resume_command(run: &RunRecord) -> ResumeCommandPayload {
         ToolKind::Kimi => resume_with_session(run, tool, "kimi --session"),
         ToolKind::Goose => resume_with_session(run, tool, "goose session resume"),
         ToolKind::Cursor => resume_with_session(run, tool, "agent --resume"),
+        ToolKind::Kiro => resume_with_session(run, tool, "kiro-cli chat --resume-id"),
+        ToolKind::Cline
+        | ToolKind::WorkBuddy
+        | ToolKind::AmazonQ
+        | ToolKind::Aider
+        | ToolKind::Amp
+        | ToolKind::Windsurf
+        | ToolKind::Codebuff
+        | ToolKind::Roo
+        | ToolKind::Kilo => note("Resume command is not available for this integration"),
     }
 }
 

@@ -83,7 +83,17 @@ fn load_run_entries(run: &RunRecord) -> Vec<InspectEntry> {
         | ToolKind::Pi
         | ToolKind::CodeBuddy
         | ToolKind::Qwen
-        | ToolKind::Kimi => Vec::new(), // These sources are metadata-only until explicit transcript viewing lands.
+        | ToolKind::Kimi
+        | ToolKind::Cline
+        | ToolKind::Kiro
+        | ToolKind::WorkBuddy
+        | ToolKind::AmazonQ
+        | ToolKind::Aider
+        | ToolKind::Amp
+        | ToolKind::Windsurf
+        | ToolKind::Codebuff
+        | ToolKind::Roo
+        | ToolKind::Kilo => Vec::new(), // These sources are metadata-only until explicit transcript viewing lands.
     }
 }
 

@@ -1937,6 +1937,16 @@ fn p0_tool_kind(tool: p0_adapter::P0Tool) -> ToolKind {
         p0_adapter::P0Tool::Kimi => ToolKind::Kimi,
         p0_adapter::P0Tool::Goose => ToolKind::Goose,
         p0_adapter::P0Tool::Cursor => ToolKind::Cursor,
+        p0_adapter::P0Tool::Cline => ToolKind::Cline,
+        p0_adapter::P0Tool::Kiro => ToolKind::Kiro,
+        p0_adapter::P0Tool::WorkBuddy => ToolKind::WorkBuddy,
+        p0_adapter::P0Tool::AmazonQ => ToolKind::AmazonQ,
+        p0_adapter::P0Tool::Aider => ToolKind::Aider,
+        p0_adapter::P0Tool::Amp => ToolKind::Amp,
+        p0_adapter::P0Tool::Windsurf => ToolKind::Windsurf,
+        p0_adapter::P0Tool::Codebuff => ToolKind::Codebuff,
+        p0_adapter::P0Tool::Roo => ToolKind::Roo,
+        p0_adapter::P0Tool::Kilo => ToolKind::Kilo,
     }
 }
 
@@ -1953,12 +1963,30 @@ fn p0_tool_provider(tool: p0_adapter::P0Tool) -> &'static str {
         p0_adapter::P0Tool::Kimi => "moonshot",
         p0_adapter::P0Tool::Goose => "goose",
         p0_adapter::P0Tool::Cursor => "cursor",
+        p0_adapter::P0Tool::Cline => "cline",
+        p0_adapter::P0Tool::Kiro => "kiro",
+        p0_adapter::P0Tool::WorkBuddy => "workbuddy",
+        p0_adapter::P0Tool::AmazonQ => "amazon-q",
+        p0_adapter::P0Tool::Aider => "aider",
+        p0_adapter::P0Tool::Amp => "amp",
+        p0_adapter::P0Tool::Windsurf => "windsurf",
+        p0_adapter::P0Tool::Codebuff => "codebuff",
+        p0_adapter::P0Tool::Roo => "roo",
+        p0_adapter::P0Tool::Kilo => "kilo",
     }
 }
 
 fn p0_source_confidence(tool: p0_adapter::P0Tool) -> SourceConfidence {
     match tool {
         p0_adapter::P0Tool::Cursor => SourceConfidence::Heuristic,
+        p0_adapter::P0Tool::WorkBuddy
+        | p0_adapter::P0Tool::AmazonQ
+        | p0_adapter::P0Tool::Aider
+        | p0_adapter::P0Tool::Amp
+        | p0_adapter::P0Tool::Windsurf
+        | p0_adapter::P0Tool::Codebuff
+        | p0_adapter::P0Tool::Roo
+        | p0_adapter::P0Tool::Kilo => SourceConfidence::Estimated,
         p0_adapter::P0Tool::OpenCode | p0_adapter::P0Tool::Goose => SourceConfidence::Official,
         _ => SourceConfidence::Live,
     }
@@ -1977,6 +2005,16 @@ fn p0_report_mode(report: &p0_adapter::P0ToolReport) -> &'static str {
         p0_adapter::P0Tool::Kimi => "session-index+wire",
         p0_adapter::P0Tool::Goose => "sessions-db",
         p0_adapter::P0Tool::Cursor => "experimental-store-db-metadata",
+        p0_adapter::P0Tool::Cline => "metadata-only-sqlite",
+        p0_adapter::P0Tool::Kiro => "custom-storage-jsonl",
+        p0_adapter::P0Tool::WorkBuddy => "detection-only",
+        p0_adapter::P0Tool::AmazonQ => "legacy-detection-migration-note",
+        p0_adapter::P0Tool::Aider => "workspace-helper-detection",
+        p0_adapter::P0Tool::Amp
+        | p0_adapter::P0Tool::Windsurf
+        | p0_adapter::P0Tool::Codebuff
+        | p0_adapter::P0Tool::Roo
+        | p0_adapter::P0Tool::Kilo => "watchlist-only",
     }
 }
 
@@ -2258,6 +2296,16 @@ fn build_probe_run_from_p0_report(report: &p0_adapter::P0ToolReport) -> RunRecor
             "supportLevel": match report.tool {
                 p0_adapter::P0Tool::Cursor => "experimental",
                 p0_adapter::P0Tool::ContinueCn => "monitored-lite",
+                p0_adapter::P0Tool::Cline => "fixture-gated-metadata",
+                p0_adapter::P0Tool::Kiro => "fixture-gated-cli",
+                p0_adapter::P0Tool::WorkBuddy
+                | p0_adapter::P0Tool::AmazonQ
+                | p0_adapter::P0Tool::Aider => "detection-only",
+                p0_adapter::P0Tool::Amp
+                | p0_adapter::P0Tool::Windsurf
+                | p0_adapter::P0Tool::Codebuff
+                | p0_adapter::P0Tool::Roo
+                | p0_adapter::P0Tool::Kilo => "watchlist-only",
                 _ => "fixture-gated-monitored",
             },
             "root": report.root,
@@ -2779,6 +2827,16 @@ pub fn tool_key(tool: &ToolKind) -> &'static str {
         ToolKind::Kimi => "kimi",
         ToolKind::Goose => "goose",
         ToolKind::Cursor => "cursor",
+        ToolKind::Cline => "cline",
+        ToolKind::Kiro => "kiro",
+        ToolKind::WorkBuddy => "workBuddy",
+        ToolKind::AmazonQ => "amazonQ",
+        ToolKind::Aider => "aider",
+        ToolKind::Amp => "amp",
+        ToolKind::Windsurf => "windsurf",
+        ToolKind::Codebuff => "codebuff",
+        ToolKind::Roo => "roo",
+        ToolKind::Kilo => "kilo",
     }
 }
 
