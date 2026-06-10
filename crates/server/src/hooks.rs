@@ -3,11 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use octomonitor_core::ToolKind;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::{config::config_path, platform::home_relative_path};
@@ -295,9 +295,7 @@ fn spec_for_tool(tool: ToolKind) -> Option<HookToolSpec> {
 }
 
 fn target_path(spec: HookToolSpec) -> Option<PathBuf> {
-    if spec.schema.is_none() {
-        return None;
-    }
+    spec.schema?;
     if let Some(env_key) = spec.env_dir {
         if let Some(raw) = env::var_os(env_key) {
             return Some(PathBuf::from(raw).join(spec.file_name));
@@ -445,10 +443,10 @@ fn matcher_matches(group: &Value, matcher: &str) -> bool {
     group.get("matcher").and_then(Value::as_str).unwrap_or("") == matcher
 }
 
-fn ensure_event_group<'a>(
-    groups: &'a mut Vec<Value>,
+fn ensure_event_group(
+    groups: &mut Vec<Value>,
     event: HookEvent,
-) -> Result<&'a mut Map<String, Value>> {
+) -> Result<&mut Map<String, Value>> {
     let existing_index = groups
         .iter()
         .position(|group| matcher_matches(group, event.matcher));
@@ -985,11 +983,9 @@ mod tests {
         let notification_hooks = written["hooks"]["Notification"][0]["hooks"]
             .as_array()
             .expect("notification hooks");
-        assert!(
-            notification_hooks
-                .iter()
-                .any(|hook| hook["command"] == "echo user-hook")
-        );
+        assert!(notification_hooks
+            .iter()
+            .any(|hook| hook["command"] == "echo user-hook"));
         assert!(has_managed_hook(&written));
     }
 
@@ -1028,13 +1024,11 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(settings).expect("read settings"))
                 .expect("json");
         assert!(!has_managed_hook(&written));
-        assert!(
-            written["hooks"]["Notification"][0]["hooks"]
-                .as_array()
-                .expect("hooks")
-                .iter()
-                .any(|hook| hook["name"] == "user-hook")
-        );
+        assert!(written["hooks"]["Notification"][0]["hooks"]
+            .as_array()
+            .expect("hooks")
+            .iter()
+            .any(|hook| hook["name"] == "user-hook"));
     }
 
     #[test]

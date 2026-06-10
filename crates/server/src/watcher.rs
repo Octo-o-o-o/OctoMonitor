@@ -34,6 +34,7 @@ fn watch_dirs(disabled_sources: &[ToolKind]) -> Vec<PathBuf> {
 /// HERMES_HOME and P0 adapter homes) still apply because they are checked through `env_path_or`,
 /// but the supplied `home` becomes the fallback. Filesystem reads under the
 /// Hermes `profiles/` tree are also relative to whatever `home` is given.
+#[cfg(test)]
 pub(crate) fn watch_dirs_for_home(home: &std::path::Path) -> Vec<PathBuf> {
     watch_dirs_for_home_with_disabled(home, &[])
 }

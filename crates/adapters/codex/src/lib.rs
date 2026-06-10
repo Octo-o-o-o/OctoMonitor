@@ -415,15 +415,13 @@ fn apply_event_msg(
             }
             if let Some(rate_limits) = payload.get("rate_limits") {
                 if let Some(primary) = rate_limits.get("primary") {
-                    state.five_hour_used_pct =
-                        primary.get("used_percent").and_then(|v| v.as_f64());
+                    state.five_hour_used_pct = primary.get("used_percent").and_then(|v| v.as_f64());
                     state.five_hour_resets_at = primary.get("resets_at").and_then(|v| v.as_i64());
                 }
                 if let Some(secondary) = rate_limits.get("secondary") {
                     state.seven_day_used_pct =
                         secondary.get("used_percent").and_then(|v| v.as_f64());
-                    state.seven_day_resets_at =
-                        secondary.get("resets_at").and_then(|v| v.as_i64());
+                    state.seven_day_resets_at = secondary.get("resets_at").and_then(|v| v.as_i64());
                 }
                 state.plan_type = str_field(rate_limits, "plan_type");
             }
@@ -466,8 +464,7 @@ fn apply_event_msg(
                 .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("aborted");
-            state.progress_reason =
-                Some(truncate_chars(&format!("Turn aborted: {reason}"), 80));
+            state.progress_reason = Some(truncate_chars(&format!("Turn aborted: {reason}"), 80));
         }
         _ => {}
     }
@@ -478,7 +475,10 @@ fn apply_response_item(state: &mut CodexSessionState, payload: &serde_json::Valu
     let call_id = payload.get("call_id").and_then(|v| v.as_str());
     match item_type {
         "function_call" | "custom_tool_call" => {
-            let args = payload.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+            let args = payload
+                .get("arguments")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if args.contains("require_escalated") {
                 if let Some(id) = call_id {
                     state.pending_escalated_calls.insert(id.to_string());
@@ -486,8 +486,7 @@ fn apply_response_item(state: &mut CodexSessionState, payload: &serde_json::Valu
             }
             if let Some(name) = payload.get("name").and_then(|v| v.as_str()) {
                 push_recent_tool(state, name);
-                state.progress_reason =
-                    Some(truncate_chars(&format!("Running tool: {name}"), 80));
+                state.progress_reason = Some(truncate_chars(&format!("Running tool: {name}"), 80));
                 state.last_completed_ok = false;
             }
         }
@@ -554,7 +553,11 @@ fn build_codex_session(
         .or_else(|| first_question.clone());
     let pending_ms = state
         .pending_user_ts
-        .map(|user_dt| (chrono::Utc::now().fixed_offset() - user_dt).num_milliseconds().max(0))
+        .map(|user_dt| {
+            (chrono::Utc::now().fixed_offset() - user_dt)
+                .num_milliseconds()
+                .max(0)
+        })
         .unwrap_or(0);
     let active_elapsed_ms = state.completed_active_elapsed_ms + pending_ms;
     Some(CodexSession {
@@ -852,7 +855,10 @@ mod tests {
                 r#"{"type":"response_item","timestamp":"2026-04-24T00:00:03Z","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}","call_id":"c1"}}"#,
             ],
         );
-        assert_eq!(infer_codex_progress_kind(&state), CodexProgressKind::Running);
+        assert_eq!(
+            infer_codex_progress_kind(&state),
+            CodexProgressKind::Running
+        );
         assert!(codex_turn_open(&state));
         assert_eq!(
             state.progress_reason.as_deref(),
@@ -917,7 +923,10 @@ mod tests {
                 r#"{"type":"event_msg","timestamp":"2026-04-24T00:00:03Z","payload":{"type":"turn_aborted","reason":"interrupted"}}"#,
             ],
         );
-        assert_eq!(infer_codex_progress_kind(&state), CodexProgressKind::Aborted);
+        assert_eq!(
+            infer_codex_progress_kind(&state),
+            CodexProgressKind::Aborted
+        );
         assert!(!codex_turn_open(&state));
         assert_eq!(
             state.progress_reason.as_deref(),
@@ -936,7 +945,10 @@ mod tests {
             ],
         );
         assert!(codex_turn_open(&state));
-        assert_eq!(infer_codex_progress_kind(&state), CodexProgressKind::Running);
+        assert_eq!(
+            infer_codex_progress_kind(&state),
+            CodexProgressKind::Running
+        );
     }
 
     #[test]

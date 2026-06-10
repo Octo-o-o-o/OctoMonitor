@@ -60,6 +60,7 @@ impl SourceGate {
         }
     }
 
+    #[cfg(test)]
     fn all_enabled() -> Self {
         Self {
             disabled: HashSet::new(),
@@ -2920,7 +2921,7 @@ pub fn build_attention_from_run(run: &RunRecord) -> Option<AttentionItem> {
     }?;
     Some(AttentionItem {
         id: format!("attention-{}", run.id),
-        tool: run.tool.clone(),
+        tool: run.tool,
         run_id: Some(run.id.clone()),
         severity: kind.1.into(),
         kind: kind.0.into(),

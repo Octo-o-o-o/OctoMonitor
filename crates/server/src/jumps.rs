@@ -166,6 +166,7 @@ fn new_terminal_targets(cwd: &str, argv: &[String]) -> Vec<JumpTarget> {
     ]
 }
 
+#[allow(clippy::too_many_arguments)]
 fn jump(
     kind: JumpTargetKind,
     label: impl Into<String>,

@@ -21,6 +21,22 @@ OctoMonitor 用一个统一仪表盘实时查看你的 AI 编码会话状态，�
 - **Hermes 适配器（实验性）**：继续接入监控与用量链路，但不再作为主线扩张
 - **中英文 i18n**：编译期校验翻译完整性
 
+## 集成支持状态
+
+以下结论基于 2026-06-10 对官方文档和上游 GitHub 源码的复核。详细依据见 [docs/integration-support-audit-2026-06-10.md](docs/integration-support-audit-2026-06-10.md)。
+
+| CLI | 级别 | OctoMonitor 当前能力 |
+|-----|------|----------------------|
+| Claude Code | 已监控 | 通过本地 transcript 扫描以及 statusline/hook ingest 统计和展示会话、token、成本、状态、工作区和详情；有 session id 时可复制 resume 命令，但不会启用变更型 operation bridge。 |
+| Codex | 已监控 | 统计和展示本地会话、token、状态、Codex 事件时间线、resume 命令，以及有 thread id 时的桌面深链；Codex hooks 现在以 `[features].hooks` 作为官方配置键。 |
+| OpenClaw | 已监控 | 通过现有 adapter 统计和展示 Gateway/session-store 状态、用量、会话和健康状态；操作保持只读。 |
+| Hermes | 实验性 | 从本地状态和 profile-aware 扫描中统计、展示 Hermes CLI/Gateway 会话；有 profile/session 元数据时可复制 resume 命令，但 adapter 仍保持实验性。 |
+| Gemini CLI / CodeBuddy / Pi Agent | 实验性，fixture-gated | 当对应本地存储存在且符合已锁定 fixture schema 时，可通过被动扫描统计会话与用量。Hook Manager 支持 Gemini 和 CodeBuddy 的显式 opt-in 安装。这些 adapter 不是 stable，也不得读取 OAuth token 或 provider secrets。 |
+| opencode / GitHub Copilot / OpenHands / Continue cn / Qwen Code / Kimi Code / Goose | 实验性，fixture-gated | 对已知本地存储做被动扫描，展示 source health、usage semantics 和安全的复制/打开能力；不会启用 approve/deny/kill/send 等变更操作。 |
+| Cursor Agent | 实验性 opt-in | 只有设置 `OCTOMONITOR_CURSOR_PRIVATE_STORE=1` 后才读取 private store；可展示会话元数据，但上游本地存储不包含 token/cost，因此用量为 `N/A`。 |
+| Cline / Kiro | 实验性元数据 | 仅 fixture-gated metadata/custom-storage 解析；除非明确存在 usage 字段，否则用量保持 `N/A`，也不会启用 operation bridge。 |
+| WorkBuddy / Amazon Q / Aider / Amp / Windsurf / Codebuff / Roo / Kilo | detection-only / watchlist | 仅用于 source control 和后续研究；不是 stable monitored source，也不会贡献 usage，除非未来 adapter 带 fixture 验证后升级。 |
+
 ## 安装
 
 如果你是最终使用者，不想从源码启动，可以直接使用分发包：
@@ -37,7 +53,7 @@ Homebrew 和 npm 分发会安装一个 `octomonitor` 命令，底层由本地服
 
 - [Rust](https://rustup.rs/) 1.75+
 - [Node.js](https://nodejs.org/) 20+，并安装 [pnpm](https://pnpm.io/) 10+
-- 至少安装以下工具之一：[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenClaw](https://github.com/openclaw)，或 Hermes（实验性）
+- 至少安装一个已监控或实验性来源：[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenClaw](https://github.com/openclaw)、Hermes（实验性），或上表中的 fixture-gated 被动 adapter。
 
 ### 运行 Web 版
 
@@ -165,7 +181,7 @@ pnpm build:desktop:notarized
 
 本地管理面固定在 `127.0.0.1:46321`。如果开启远程访问，OctoMonitor 还会在 `0.0.0.0:46322` 启动一个单独的只读 viewer，并在 Settings 中展示可访问地址。远程访问相关配置会保存在 `~/.octomonitor/config.json`，重启后仍然有效。前端显示偏好（主题、密度、筛选条件、通知等）保存在 `localStorage`。
 
-当前“环境与诊断”页面只提供检测与 doctor 能力，不会自动改写 Claude Code、Codex、OpenClaw 或 Hermes 的配置文件。
+当前“环境与诊断”页面只提供检测与 doctor 能力，不会静默改写 Claude Code、Codex、OpenClaw、Hermes、Gemini、Cursor Agent、WorkBuddy/CodeBuddy 或 Pi 的配置文件。Hook Manager 只有在显式 preview/apply 后才写入，并带 backup、verify、uninstall 和 audit。Detection-only/watchlist 集成可以出现在 Settings 中，但只有 fixture-gated 或 monitored adapter 产出非 `N/A` usage semantics 的 run 时才会进入 usage。
 
 ## 许可证
 

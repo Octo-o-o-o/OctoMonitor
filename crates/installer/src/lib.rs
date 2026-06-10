@@ -69,33 +69,36 @@ const TOOLS: &[ToolSpec] = &[
         name: "gemini",
         label: "Gemini CLI",
         commands: &["gemini"],
-        mode: "hooks+telemetry candidate",
-        capability: "official hooks and local/OpenTelemetry paths exist; OctoMonitor adapter not implemented",
-        support_level: SupportLevel::Candidate,
+        mode: "fixture-gated passive JSONL + hooks-ready",
+        capability:
+            "fixture-gated passive scan can count sessions/usage; hooks are opt-in for live metadata",
+        support_level: SupportLevel::Experimental,
     },
     ToolSpec {
         name: "cursor",
         label: "Cursor Agent CLI",
         commands: &["agent"],
-        mode: "ACP+stream-json candidate",
-        capability: "ACP and stream-json paths exist; OctoMonitor adapter not implemented",
-        support_level: SupportLevel::Candidate,
+        mode: "experimental opt-in private store",
+        capability:
+            "private store parser is disabled unless OCTOMONITOR_CURSOR_PRIVATE_STORE is set; usage is N/A",
+        support_level: SupportLevel::Experimental,
     },
     ToolSpec {
         name: "workbuddy",
         label: "WorkBuddy / CodeBuddy CLI",
         commands: &["workbuddy", "codebuddy"],
-        mode: "stream-json+plugins candidate",
-        capability: "CodeBuddy/WorkBuddy CLI paths exist; OctoMonitor adapter not implemented",
+        mode: "codebuddy fixture-gated; workbuddy detection-only",
+        capability:
+            "CodeBuddy passive scan is fixture-gated; WorkBuddy remains detection-only until a real layout is verified",
         support_level: SupportLevel::Candidate,
     },
     ToolSpec {
         name: "pi",
         label: "Pi Coding Agent CLI",
         commands: &["pi"],
-        mode: "json/rpc candidate",
-        capability: "JSON/RPC session paths exist; OctoMonitor adapter not implemented",
-        support_level: SupportLevel::Candidate,
+        mode: "fixture-gated passive JSONL",
+        capability: "fixture-gated passive scan can count sessions and usage; RPC operations remain out of scope",
+        support_level: SupportLevel::Experimental,
     },
 ];
 

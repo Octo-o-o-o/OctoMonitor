@@ -49,7 +49,7 @@ pub async fn get_run_events(
 
     if run.tool != ToolKind::Codex {
         return Ok(Json(EventsPayload {
-            tool: run.tool.clone(),
+            tool: run.tool,
             events: Vec::new(),
             cursor: 0,
             reset: false,
@@ -66,7 +66,7 @@ fn read_codex_events(run: &RunRecord, params: EventsQuery) -> EventsPayload {
         .unwrap_or(DEFAULT_LIMIT);
 
     let empty = || EventsPayload {
-        tool: run.tool.clone(),
+        tool: run.tool,
         events: Vec::new(),
         cursor: params.cursor.unwrap_or(0),
         reset: false,
@@ -78,7 +78,7 @@ fn read_codex_events(run: &RunRecord, params: EventsQuery) -> EventsPayload {
 
     match codex_adapter::read_tail_events(&path, params.cursor, DEFAULT_TAIL_BYTE_LIMIT, limit) {
         Ok(tail) => EventsPayload {
-            tool: run.tool.clone(),
+            tool: run.tool,
             events: codex_adapter::dedupe_adjacent(tail.events),
             cursor: tail.cursor,
             reset: tail.reset,

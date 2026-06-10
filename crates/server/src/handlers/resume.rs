@@ -34,10 +34,10 @@ pub async fn get_run_resume_command(
 }
 
 pub(crate) fn build_resume_command(run: &RunRecord) -> ResumeCommandPayload {
-    let tool = run.tool.clone();
+    let tool = run.tool;
     let note = |msg: &str| ResumeCommandPayload {
         command: None,
-        tool: tool.clone(),
+        tool,
         note: Some(msg.to_string()),
     };
 

@@ -167,8 +167,12 @@ fn parse_event_msg(timestamp: &str, payload: &serde_json::Value) -> Vec<CodexEve
                 .and_then(|v| v.as_str())
                 .map(summarize_preview)
                 .unwrap_or_else(|| "Task complete".to_string());
-            let mut event =
-                mk_event(CodexEventKind::TaskComplete, timestamp, "Task complete", preview);
+            let mut event = mk_event(
+                CodexEventKind::TaskComplete,
+                timestamp,
+                "Task complete",
+                preview,
+            );
             event.turn_id = turn_id_of(payload);
             vec![event]
         }
@@ -182,7 +186,12 @@ fn parse_event_msg(timestamp: &str, payload: &serde_json::Value) -> Vec<CodexEve
             } else {
                 (CodexEventKind::TurnAborted, "Turn aborted", "Turn aborted")
             };
-            let mut event = mk_event(kind, timestamp, title, format!("{preview_prefix}: {reason}"));
+            let mut event = mk_event(
+                kind,
+                timestamp,
+                title,
+                format!("{preview_prefix}: {reason}"),
+            );
             event.turn_id = turn_id_of(payload);
             vec![event]
         }
@@ -222,7 +231,10 @@ fn parse_response_item(timestamp: &str, payload: &serde_json::Value) -> Vec<Code
             let (preview, text) = if summary_text.is_empty() {
                 ("Reasoning (encrypted)".to_string(), None)
             } else {
-                (summarize_preview(&summary_text), Some(truncate_text(&summary_text)))
+                (
+                    summarize_preview(&summary_text),
+                    Some(truncate_text(&summary_text)),
+                )
             };
             let mut event = mk_event(CodexEventKind::Reasoning, timestamp, "Reasoning", preview);
             event.text = text;
@@ -264,8 +276,12 @@ fn parse_response_item(timestamp: &str, payload: &serde_json::Value) -> Vec<Code
                 .as_deref()
                 .map(summarize_preview)
                 .unwrap_or_else(|| "tool output".to_string());
-            let mut event =
-                mk_event(CodexEventKind::ToolOutput, timestamp, "Tool output", preview);
+            let mut event = mk_event(
+                CodexEventKind::ToolOutput,
+                timestamp,
+                "Tool output",
+                preview,
+            );
             event.text = parsed.body.as_deref().map(truncate_text);
             event.exit_code = parsed.exit_code;
             event.call_id = payload
@@ -452,9 +468,7 @@ pub fn read_tail_events(
 }
 
 fn summarize_preview(value: &str) -> String {
-    let cleaned = strip_ansi(value)
-        .replace('\r', " ")
-        .replace('\n', " ⏎ ");
+    let cleaned = strip_ansi(value).replace('\r', " ").replace('\n', " ⏎ ");
     truncate_chars_display(&cleaned, PREVIEW_MAX_CHARS)
 }
 
@@ -467,10 +481,7 @@ fn truncate_text(value: &str) -> String {
     let prefix_chars = 1000;
     let suffix_chars = TEXT_MAX_CHARS - prefix_chars - 5;
     let prefix: String = cleaned.chars().take(prefix_chars).collect();
-    let suffix: String = cleaned
-        .chars()
-        .skip(total_chars - suffix_chars)
-        .collect();
+    let suffix: String = cleaned.chars().skip(total_chars - suffix_chars).collect();
     format!("{prefix}\n…\n{suffix}")
 }
 
@@ -922,16 +933,17 @@ mod real_session_smoke {
         let Some(home) = std::env::var_os("HOME") else {
             return;
         };
-        let root = std::path::PathBuf::from(home).join(".codex").join("sessions");
+        let root = std::path::PathBuf::from(home)
+            .join(".codex")
+            .join("sessions");
         if !root.is_dir() {
             return;
         }
         let Some(sample) = walkdir_find_jsonl(&root) else {
             return;
         };
-        let out =
-            read_tail_events(&sample, None, DEFAULT_TAIL_BYTE_LIMIT, DEFAULT_MAX_EVENTS)
-                .expect("tail read");
+        let out = read_tail_events(&sample, None, DEFAULT_TAIL_BYTE_LIMIT, DEFAULT_MAX_EVENTS)
+            .expect("tail read");
         assert!(out.cursor > 0, "cursor should move when file has content");
     }
 

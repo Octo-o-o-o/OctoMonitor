@@ -398,6 +398,36 @@ fn probe_tool(tool: P0Tool, probed_at: &str) -> P0ToolReport {
 }
 
 #[derive(Debug, Clone)]
+struct SessionSourceSpec {
+    source_mode: &'static str,
+    source_id: &'static str,
+    source_type: P0SourceType,
+    schema_version: &'static str,
+    schema_confidence: P0SchemaConfidence,
+    support_level: &'static str,
+}
+
+impl SessionSourceSpec {
+    fn new(
+        source_mode: &'static str,
+        source_id: &'static str,
+        source_type: P0SourceType,
+        schema_version: &'static str,
+        schema_confidence: P0SchemaConfidence,
+        support_level: &'static str,
+    ) -> Self {
+        Self {
+            source_mode,
+            source_id,
+            source_type,
+            schema_version,
+            schema_confidence,
+            support_level,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct SessionAcc {
     tool: P0Tool,
     session_id: String,
@@ -421,6 +451,7 @@ struct SessionAcc {
     cost_usd: Option<f64>,
     cost_kind: P0CostKind,
     enters_usage_totals: bool,
+    has_usage: bool,
     message_count: u64,
     first_question: Option<String>,
     last_question: Option<String>,
@@ -431,27 +462,18 @@ struct SessionAcc {
 }
 
 impl SessionAcc {
-    fn new(
-        tool: P0Tool,
-        session_id: String,
-        source_mode: &'static str,
-        source_id: &'static str,
-        source_type: P0SourceType,
-        schema_version: &'static str,
-        schema_confidence: P0SchemaConfidence,
-        support_level: &'static str,
-    ) -> Self {
+    fn new(tool: P0Tool, session_id: String, source: SessionSourceSpec) -> Self {
         Self {
             tool,
             session_id,
             workspace_path: None,
             project_name: None,
-            source_mode,
-            source_id,
+            source_mode: source.source_mode,
+            source_id: source.source_id,
             source_path: None,
-            source_type,
-            schema_version,
-            schema_confidence,
+            source_type: source.source_type,
+            schema_version: source.schema_version,
+            schema_confidence: source.schema_confidence,
             model: None,
             provider: Some(tool.provider().into()),
             started_at: None,
@@ -464,11 +486,12 @@ impl SessionAcc {
             cost_usd: None,
             cost_kind: P0CostKind::Partial,
             enters_usage_totals: true,
+            has_usage: false,
             message_count: 0,
             first_question: None,
             last_question: None,
             pending_approval: false,
-            support_level,
+            support_level: source.support_level,
             resume_command: None,
             tool_specific: serde_json::json!({}),
         }
@@ -497,7 +520,7 @@ impl SessionAcc {
         let Some(usage) = usage else {
             return;
         };
-        self.input_tokens = self.input_tokens.saturating_add(u64_field(
+        let input_tokens = u64_field(
             usage,
             &[
                 "input_tokens",
@@ -506,8 +529,8 @@ impl SessionAcc {
                 "prompt_tokens",
                 "input",
             ],
-        ));
-        self.output_tokens = self.output_tokens.saturating_add(u64_field(
+        );
+        let output_tokens = u64_field(
             usage,
             &[
                 "output_tokens",
@@ -516,8 +539,8 @@ impl SessionAcc {
                 "completion_tokens",
                 "output",
             ],
-        ));
-        self.cache_read_tokens = self.cache_read_tokens.saturating_add(u64_field(
+        );
+        let cache_read_tokens = u64_field(
             usage,
             &[
                 "cache_read_tokens",
@@ -525,8 +548,8 @@ impl SessionAcc {
                 "cache_read_input_tokens",
                 "cacheRead",
             ],
-        ));
-        self.cache_write_tokens = self.cache_write_tokens.saturating_add(u64_field(
+        );
+        let cache_write_tokens = u64_field(
             usage,
             &[
                 "cache_write_tokens",
@@ -534,11 +557,22 @@ impl SessionAcc {
                 "cache_creation_input_tokens",
                 "cacheWrite",
             ],
-        ));
+        );
         let total = u64_field(usage, &["total_tokens", "totalTokens", "total"]);
+        let cost_usd = f64_field(usage, &["cost_usd", "costUsd", "cost"]);
+        self.has_usage |= input_tokens > 0
+            || output_tokens > 0
+            || cache_read_tokens > 0
+            || cache_write_tokens > 0
+            || total > 0
+            || cost_usd.is_some();
+        self.input_tokens = self.input_tokens.saturating_add(input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(output_tokens);
+        self.cache_read_tokens = self.cache_read_tokens.saturating_add(cache_read_tokens);
+        self.cache_write_tokens = self.cache_write_tokens.saturating_add(cache_write_tokens);
         self.total_tokens = self.total_tokens.saturating_add(total);
         if self.cost_usd.is_none() {
-            self.cost_usd = f64_field(usage, &["cost_usd", "costUsd", "cost"]);
+            self.cost_usd = cost_usd;
         }
         if self.cost_usd.is_some() {
             self.cost_kind = P0CostKind::Exact;
@@ -555,6 +589,9 @@ impl SessionAcc {
                 .saturating_add(self.output_tokens)
                 .saturating_add(self.cache_read_tokens)
                 .saturating_add(self.cache_write_tokens);
+        }
+        if !self.has_usage && self.total_tokens == 0 && self.cost_usd.is_none() {
+            self.cost_kind = P0CostKind::NotAvailable;
         }
         if matches!(self.cost_kind, P0CostKind::NotAvailable) {
             self.enters_usage_totals = false;
@@ -658,12 +695,14 @@ where
             let mut acc = SessionAcc::new(
                 tool,
                 session_id.clone(),
-                source_mode,
-                source_id,
-                P0SourceType::Jsonl,
-                schema_version,
-                P0SchemaConfidence::High,
-                support_level,
+                SessionSourceSpec::new(
+                    source_mode,
+                    source_id,
+                    P0SourceType::Jsonl,
+                    schema_version,
+                    P0SchemaConfidence::High,
+                    support_level,
+                ),
             );
             acc.source_path = Some(path.display().to_string());
             acc.resume_command = Some(resume(&session_id));
@@ -772,12 +811,14 @@ where
             let mut acc = SessionAcc::new(
                 tool,
                 current_id.clone(),
-                source_mode,
-                source_id,
-                P0SourceType::Jsonl,
-                schema_version,
-                P0SchemaConfidence::High,
-                support_level,
+                SessionSourceSpec::new(
+                    source_mode,
+                    source_id,
+                    P0SourceType::Jsonl,
+                    schema_version,
+                    P0SchemaConfidence::High,
+                    support_level,
+                ),
             );
             acc.source_path = Some(path.display().to_string());
             acc.resume_command = Some(resume(&current_id));
@@ -794,12 +835,14 @@ where
             *acc = SessionAcc::new(
                 tool,
                 current_id.clone(),
-                source_mode,
-                source_id,
-                P0SourceType::Jsonl,
-                schema_version,
-                P0SchemaConfidence::High,
-                support_level,
+                SessionSourceSpec::new(
+                    source_mode,
+                    source_id,
+                    P0SourceType::Jsonl,
+                    schema_version,
+                    P0SchemaConfidence::High,
+                    support_level,
+                ),
             );
             acc.workspace_path = keep.0;
             acc.project_name = keep.1;
@@ -867,12 +910,14 @@ fn parse_pi_jsonl(path: &Path) -> Vec<P0Session> {
     let mut acc = SessionAcc::new(
         P0Tool::Pi,
         fallback_id,
-        "pi_session_jsonl",
-        "pi:session-jsonl",
-        P0SourceType::Jsonl,
-        "session-jsonl-v1",
-        P0SchemaConfidence::High,
-        "fixture-gated-monitored",
+        SessionSourceSpec::new(
+            "pi_session_jsonl",
+            "pi:session-jsonl",
+            P0SourceType::Jsonl,
+            "session-jsonl-v1",
+            P0SchemaConfidence::High,
+            "fixture-gated-monitored",
+        ),
     );
     acc.source_path = Some(path.display().to_string());
     let mut branch_nodes = 0u64;
@@ -931,12 +976,14 @@ fn parse_continue_session_json(path: &Path) -> Option<P0Session> {
     let mut acc = SessionAcc::new(
         P0Tool::ContinueCn,
         session_id.clone(),
-        "continue_session_json",
-        "continue-cn:sessions",
-        P0SourceType::Json,
-        "continue-session-json-v1",
-        P0SchemaConfidence::High,
-        "monitored-lite",
+        SessionSourceSpec::new(
+            "continue_session_json",
+            "continue-cn:sessions",
+            P0SourceType::Json,
+            "continue-session-json-v1",
+            P0SchemaConfidence::High,
+            "monitored-lite",
+        ),
     );
     acc.source_path = Some(path.display().to_string());
     acc.workspace_path = string_field(&value, &["workspaceDirectory", "workspace", "cwd"]);
@@ -983,12 +1030,14 @@ fn parse_kimi_session_root(root: &Path) -> Vec<P0Session> {
             let mut acc = SessionAcc::new(
                 P0Tool::Kimi,
                 session_id.clone(),
-                "kimi_session_index_wire",
-                "kimi:sessions",
-                P0SourceType::Jsonl,
-                "sessions-index-wire-v1",
-                P0SchemaConfidence::High,
-                "fixture-gated-monitored",
+                SessionSourceSpec::new(
+                    "kimi_session_index_wire",
+                    "kimi:sessions",
+                    P0SourceType::Jsonl,
+                    "sessions-index-wire-v1",
+                    P0SchemaConfidence::High,
+                    "fixture-gated-monitored",
+                ),
             );
             acc.source_path = Some(root.display().to_string());
             acc.resume_command = Some(format!("kimi --session {}", shell_quote(&session_id)));
@@ -1006,12 +1055,14 @@ fn parse_kimi_session_root(root: &Path) -> Vec<P0Session> {
                 SessionAcc::new(
                     P0Tool::Kimi,
                     session_id.clone(),
-                    "kimi_session_index_wire",
-                    "kimi:sessions",
-                    P0SourceType::Jsonl,
-                    "sessions-index-wire-v1",
-                    P0SchemaConfidence::High,
-                    "fixture-gated-monitored",
+                    SessionSourceSpec::new(
+                        "kimi_session_index_wire",
+                        "kimi:sessions",
+                        P0SourceType::Jsonl,
+                        "sessions-index-wire-v1",
+                        P0SchemaConfidence::High,
+                        "fixture-gated-monitored",
+                    ),
                 )
             });
             acc.workspace_path = string_field(&state, &["cwd", "workspace"]);
@@ -1032,12 +1083,14 @@ fn parse_kimi_session_root(root: &Path) -> Vec<P0Session> {
                 SessionAcc::new(
                     P0Tool::Kimi,
                     session_id.clone(),
-                    "kimi_session_index_wire",
-                    "kimi:sessions",
-                    P0SourceType::Jsonl,
-                    "sessions-index-wire-v1",
-                    P0SchemaConfidence::High,
-                    "fixture-gated-monitored",
+                    SessionSourceSpec::new(
+                        "kimi_session_index_wire",
+                        "kimi:sessions",
+                        P0SourceType::Jsonl,
+                        "sessions-index-wire-v1",
+                        P0SchemaConfidence::High,
+                        "fixture-gated-monitored",
+                    ),
                 )
             });
             acc.source_path = Some(root.display().to_string());
@@ -1079,12 +1132,14 @@ fn parse_copilot_state_json(path: &Path) -> Option<P0Session> {
     let mut acc = SessionAcc::new(
         P0Tool::Copilot,
         session_id.clone(),
-        "copilot_chronicle",
-        "copilot:chronicle",
-        P0SourceType::Json,
-        "chronicle-state-v1",
-        P0SchemaConfidence::High,
-        "fixture-gated-monitored",
+        SessionSourceSpec::new(
+            "copilot_chronicle",
+            "copilot:chronicle",
+            P0SourceType::Json,
+            "chronicle-state-v1",
+            P0SchemaConfidence::High,
+            "fixture-gated-monitored",
+        ),
     );
     acc.source_path = Some(path.display().to_string());
     acc.workspace_path = string_field(&value, &["workspace", "workspacePath", "cwd"]);
@@ -1124,12 +1179,14 @@ fn parse_openhands_conversation_json(path: &Path) -> Option<P0Session> {
     let mut acc = SessionAcc::new(
         P0Tool::OpenHands,
         session_id.clone(),
-        "openhands_conversation",
-        "openhands:conversations",
-        P0SourceType::Json,
-        "conversation-json-v1",
-        P0SchemaConfidence::High,
-        "fixture-gated-monitored",
+        SessionSourceSpec::new(
+            "openhands_conversation",
+            "openhands:conversations",
+            P0SourceType::Json,
+            "conversation-json-v1",
+            P0SchemaConfidence::High,
+            "fixture-gated-monitored",
+        ),
     );
     acc.source_path = Some(path.display().to_string());
     acc.workspace_path = string_field(&value, &["workspace", "workspacePath", "cwd"]);
@@ -1194,12 +1251,14 @@ fn parse_opencode_db(path: &Path) -> Vec<P0Session> {
         let mut acc = SessionAcc::new(
             P0Tool::OpenCode,
             session_id.clone(),
-            "opencode_sqlite",
-            "opencode:sqlite",
-            P0SourceType::Sqlite,
-            "opencode-db-v1",
-            P0SchemaConfidence::High,
-            "fixture-gated-monitored",
+            SessionSourceSpec::new(
+                "opencode_sqlite",
+                "opencode:sqlite",
+                P0SourceType::Sqlite,
+                "opencode-db-v1",
+                P0SchemaConfidence::High,
+                "fixture-gated-monitored",
+            ),
         );
         acc.source_path = Some(path.display().to_string());
         acc.workspace_path = row_string(row, "workspace");
@@ -1272,12 +1331,14 @@ fn parse_simple_session_db(
         let mut acc = SessionAcc::new(
             tool,
             session_id.clone(),
-            source_mode,
-            source_id,
-            P0SourceType::Sqlite,
-            schema_version,
-            schema_confidence,
-            support_level,
+            SessionSourceSpec::new(
+                source_mode,
+                source_id,
+                P0SourceType::Sqlite,
+                schema_version,
+                schema_confidence,
+                support_level,
+            ),
         );
         acc.source_path = Some(path.display().to_string());
         acc.workspace_path = row_string(row, "workspace");
@@ -1356,12 +1417,14 @@ fn parse_kiro_custom_storage_jsonl(path: &Path) -> Vec<P0Session> {
             let mut acc = SessionAcc::new(
                 P0Tool::Kiro,
                 session_id.clone(),
-                "kiro_custom_storage",
-                "kiro:custom-storage",
-                P0SourceType::Jsonl,
-                "custom-storage-v1",
-                P0SchemaConfidence::Medium,
-                "fixture-gated-cli",
+                SessionSourceSpec::new(
+                    "kiro_custom_storage",
+                    "kiro:custom-storage",
+                    P0SourceType::Jsonl,
+                    "custom-storage-v1",
+                    P0SchemaConfidence::Medium,
+                    "fixture-gated-cli",
+                ),
             );
             acc.source_path = Some(path.display().to_string());
             acc.resume_command = Some(format!(
@@ -1447,12 +1510,14 @@ fn cursor_blob_to_session(path: &Path, key: &str, raw: &str) -> Option<P0Session
     let mut acc = SessionAcc::new(
         P0Tool::Cursor,
         session_id.clone(),
-        "cursor_store_db",
-        "cursor:store-db",
-        P0SourceType::Sqlite,
-        "cursor-store-db-metadata-v1",
-        P0SchemaConfidence::Low,
-        "experimental",
+        SessionSourceSpec::new(
+            "cursor_store_db",
+            "cursor:store-db",
+            P0SourceType::Sqlite,
+            "cursor-store-db-metadata-v1",
+            P0SchemaConfidence::Low,
+            "experimental",
+        ),
     );
     acc.source_path = Some(path.display().to_string());
     acc.workspace_path = string_field(&value, &["workspace", "workspacePath", "cwd"]);
@@ -1943,6 +2008,8 @@ mod tests {
         assert_eq!(sessions[0].session_id, "cline-session-1");
         assert_eq!(sessions[0].support_level, "fixture-gated-metadata");
         assert_eq!(sessions[0].resume_command, None);
+        assert_eq!(sessions[0].cost_kind, P0CostKind::NotAvailable);
+        assert!(!sessions[0].enters_usage_totals);
     }
 
     #[test]

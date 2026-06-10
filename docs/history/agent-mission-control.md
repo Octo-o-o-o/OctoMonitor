@@ -270,7 +270,7 @@ Installer 执行两件事：
 
 ### 官方可用数据面
 
-Codex 本地状态存放在 `CODEX_HOME`，默认 `~/.codex`，常见文件包括 `config.toml`、`auth.json`、`history.jsonl` 等；hooks 文件可放在 `~/.codex/hooks.json` 或 `<repo>/.codex/hooks.json`，并通过 `[features] codex_hooks = true` 启用。([OpenAI Developers][11])
+Codex 本地状态存放在 `CODEX_HOME`，默认 `~/.codex`，常见文件包括 `config.toml`、`auth.json`、`history.jsonl` 等；hooks 文件可放在 `~/.codex/hooks.json` 或 `<repo>/.codex/hooks.json`。2026-06-10 复核：hooks 默认启用；如需配置，应使用 canonical `[features].hooks`，旧的 `codex_hooks` 仅是 deprecated alias。([OpenAI Developers][11])
 
 Codex hooks 仍属 experimental，官方明确写明 **Windows support temporarily disabled**。hooks 事件包括 `SessionStart`、`PreToolUse`、`PostToolUse`、`UserPromptSubmit`、`Stop`；通用输入字段包括 `session_id`、`transcript_path`、`cwd`、`hook_event_name`、`model`。目前 `PreToolUse` / `PostToolUse` 在当前 runtime 下只会发出 `Bash`。([OpenAI Developers][12])
 
@@ -296,7 +296,7 @@ Installer 执行以下动作：
 1. 探测 `CODEX_HOME`。
 2. 若系统支持 hooks：
 
-   * 启用 `[features] codex_hooks = true`
+   * 不自动写入 hooks 配置；如用户显式配置，使用 `[features].hooks`（hooks 默认启用，通常只需在关闭时写 `hooks = false`）
    * 安装 `~/.codex/hooks.json`
 3. 若系统为 Windows：
 

@@ -19,9 +19,9 @@ mod watcher;
 use std::net::{IpAddr, SocketAddr};
 
 use axum::{
-    Router,
-    http::{HeaderValue, Method, header},
+    http::{header, HeaderValue, Method},
     routing::{get, post},
+    Router,
 };
 use tower_http::cors::CorsLayer;
 
@@ -146,9 +146,16 @@ fn apply_saved_config(initial: &mut octomonitor_core::BootstrapPayload) -> bool 
 }
 
 fn parse_bind_ip(raw: Option<&str>) -> anyhow::Result<IpAddr> {
-    raw.unwrap_or("127.0.0.1")
+    let ip = raw
+        .unwrap_or("127.0.0.1")
         .parse::<IpAddr>()
-        .map_err(|e| anyhow::anyhow!("Invalid OCTOMONITOR_BIND_ADDR: {e}"))
+        .map_err(|e| anyhow::anyhow!("Invalid OCTOMONITOR_BIND_ADDR: {e}"))?;
+    if !ip.is_loopback() {
+        anyhow::bail!(
+            "Invalid OCTOMONITOR_BIND_ADDR: local admin API must bind to a loopback address; use Remote Access for the read-only remote viewer"
+        );
+    }
+    Ok(ip)
 }
 
 fn resolve_bind_addr() -> anyhow::Result<SocketAddr> {
@@ -216,13 +223,23 @@ mod tests {
     }
 
     #[test]
-    fn resolve_bind_addr_respects_env_override() {
+    fn resolve_bind_addr_accepts_loopback_env_override() {
         let addr = SocketAddr::from((
-            parse_bind_ip(Some("0.0.0.0")).expect("bind ip should parse"),
+            parse_bind_ip(Some("::1")).expect("bind ip should parse"),
             SERVER_PORT,
         ));
 
-        assert_eq!(addr, SocketAddr::from(([0, 0, 0, 0], SERVER_PORT)));
+        assert_eq!(
+            addr,
+            SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], SERVER_PORT))
+        );
+    }
+
+    #[test]
+    fn resolve_bind_addr_rejects_non_loopback_env_override() {
+        let error = parse_bind_ip(Some("0.0.0.0")).expect_err("non-loopback bind should fail");
+
+        assert!(error.to_string().contains("loopback"));
     }
 
     #[test]

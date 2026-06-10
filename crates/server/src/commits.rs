@@ -237,7 +237,7 @@ fn build_commit_records_for_repo(
             .links
             .push(CommitAttributionLink {
                 run_id: run.id.clone(),
-                tool: run.tool.clone(),
+                tool: run.tool,
                 source_mode: run.source_mode.clone(),
                 project_name: run.project_name.clone(),
                 session_label: run
@@ -273,9 +273,9 @@ fn finalize_commit_record(
     for link in &aggregated_commit.links {
         run_ids.insert(link.run_id.clone());
         let entry = sources_by_tool
-            .entry(link.tool.clone())
+            .entry(link.tool)
             .or_insert_with(|| CommitSourceStat {
-                tool: link.tool.clone(),
+                tool: link.tool,
                 run_count: 0,
                 attributed_tokens: 0,
                 attributed_cost_usd: None,
@@ -955,11 +955,9 @@ mod tests {
 
         let vcs = discover_vcs_context(repo_root.to_str().unwrap()).expect("main vcs");
         let commits = scan_recent_commits(&vcs, None);
-        assert!(
-            commits
-                .iter()
-                .any(|commit| commit.summary == "feature worktree commit")
-        );
+        assert!(commits
+            .iter()
+            .any(|commit| commit.summary == "feature worktree commit"));
     }
 
     #[test]

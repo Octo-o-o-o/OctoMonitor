@@ -169,7 +169,7 @@ pub fn list_run_operations(run: &RunRecord) -> RunOperationsPayload {
         .collect();
     RunOperationsPayload {
         run_id: run.id.clone(),
-        tool: run.tool.clone(),
+        tool: run.tool,
         operations,
     }
 }
@@ -211,7 +211,7 @@ fn audit_result(
     append_operation_audit(&OperationAuditRecord {
         at: Utc::now().to_rfc3339(),
         run_id: run.id.clone(),
-        tool: run.tool.clone(),
+        tool: run.tool,
         action: request.action.clone(),
         status: status.into(),
         reason,
@@ -233,7 +233,7 @@ fn blocked(
     Ok(OperationApplyResult {
         ok: false,
         run_id: run.id.clone(),
-        tool: run.tool.clone(),
+        tool: run.tool,
         action: request.action.clone(),
         command: None,
         opened_path: None,
@@ -291,7 +291,7 @@ pub fn apply_run_operation(
             Ok(OperationApplyResult {
                 ok: true,
                 run_id: run.id.clone(),
-                tool: run.tool.clone(),
+                tool: run.tool,
                 action: request.action,
                 command: Some(command),
                 opened_path: None,
@@ -342,7 +342,7 @@ pub fn apply_run_operation(
             Ok(OperationApplyResult {
                 ok: true,
                 run_id: run.id.clone(),
-                tool: run.tool.clone(),
+                tool: run.tool,
                 action: request.action,
                 command: None,
                 opened_path,

@@ -1,6 +1,6 @@
 use axum::{
-    Json,
     extract::{Path, State},
+    Json,
 };
 use chrono::Utc;
 use octomonitor_core::{
@@ -68,10 +68,11 @@ fn live_lifecycle(
 }
 
 fn usage_semantics(cost_kind: UsageCostKind, source: UsageDataSource) -> UsageSemantics {
+    let enters_usage_totals = !matches!(cost_kind, UsageCostKind::NotAvailable);
     UsageSemantics {
         cost_kind,
         source,
-        enters_usage_totals: true,
+        enters_usage_totals,
         note: None,
     }
 }
@@ -1067,6 +1068,9 @@ mod tests {
             Some("PermissionRequest")
         );
         assert!(tool_specific.get("rawPayload").is_none());
+        let semantics = run.usage_semantics.as_ref().expect("usage semantics");
+        assert_eq!(semantics.cost_kind, UsageCostKind::NotAvailable);
+        assert!(!semantics.enters_usage_totals);
     }
 
     #[tokio::test]

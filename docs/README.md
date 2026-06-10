@@ -9,6 +9,12 @@ This repository keeps current product docs, contributor docs, and historical pla
 - [CONTRIBUTING.md](../CONTRIBUTING.md): contributor setup, architecture overview, conventions, adapter integration checklist
 - [CLAUDE.md](../CLAUDE.md): condensed repo context (goal, commands, structure, current state, rules) for any coding agent working in this workspace. [AGENTS.md](../AGENTS.md) is a stub pointing here.
 - [simplification-plan-2026-04-15.md](./simplification-plan-2026-04-15.md): scope decision log for the current product boundary
+- [integration-support-audit-2026-06-10.md](./integration-support-audit-2026-06-10.md): current CLI support matrix and official-source research for Claude Code, Codex, OpenClaw, Hermes, Gemini CLI, Cursor Agent, WorkBuddy/CodeBuddy, and Pi Agent
+
+## Active Plans
+
+- [plan/2026-06-10-agent-control-plane-roadmap.md](./plan/2026-06-10-agent-control-plane-roadmap.md): target-state roadmap for turning OctoMonitor into a local-first CLI agent control plane with monitoring, live state, operations, hook management, and jump links
+- [plan/2026-06-10-agent-control-plane-implementation-plan.md](./plan/2026-06-10-agent-control-plane-implementation-plan.md): phase-by-phase implementation plan for the full control-plane upgrade, including evidence locks, adapters, Hook Manager, operations, jump links, QA gates, and self-review findings
 
 ## Runtime Surfaces
 

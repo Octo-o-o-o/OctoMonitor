@@ -105,11 +105,8 @@ mod tests {
 
     #[test]
     fn parse_history_range_swaps_when_from_after_to() {
-        let (from, to) = parse_history_range(&q(
-            "2026-04-10T00:00:00Z",
-            "2026-04-01T00:00:00Z",
-        ))
-        .expect("swap should succeed");
+        let (from, to) = parse_history_range(&q("2026-04-10T00:00:00Z", "2026-04-01T00:00:00Z"))
+            .expect("swap should succeed");
         assert!(from < to, "swapped pair should satisfy from < to");
         assert_eq!(from.to_rfc3339(), "2026-04-01T00:00:00+00:00");
         assert_eq!(to.to_rfc3339(), "2026-04-10T00:00:00+00:00");
@@ -119,11 +116,8 @@ mod tests {
     fn parse_history_range_clamps_future_bounds_to_now() {
         // Use a date far in the future so the clamp is observable regardless
         // of wall-clock drift between assertion and parse.
-        let (from, to) = parse_history_range(&q(
-            "2099-01-01T00:00:00Z",
-            "2099-12-31T00:00:00Z",
-        ))
-        .expect("future range should parse");
+        let (from, to) = parse_history_range(&q("2099-01-01T00:00:00Z", "2099-12-31T00:00:00Z"))
+            .expect("future range should parse");
         let now = Utc::now();
         assert!(from <= now, "from should be clamped to <= now");
         assert!(to <= now, "to should be clamped to <= now");
@@ -131,11 +125,8 @@ mod tests {
 
     #[test]
     fn parse_history_range_caps_span_to_ten_years() {
-        let (from, to) = parse_history_range(&q(
-            "1990-01-01T00:00:00Z",
-            "2026-04-01T00:00:00Z",
-        ))
-        .expect("wide range should parse");
+        let (from, to) = parse_history_range(&q("1990-01-01T00:00:00Z", "2026-04-01T00:00:00Z"))
+            .expect("wide range should parse");
         let span = to - from;
         assert!(
             span <= Duration::days(3650),

@@ -1,14 +1,14 @@
 use axum::{
-    Json,
     extract::{Path, Query, State},
     http::StatusCode,
+    Json,
 };
 use serde::Deserialize;
 
 use crate::{
     hooks::{
-        HookAction, HookApplyRequest, apply_hook_transaction, build_hook_plan, list_hook_states,
-        parse_tool_kind,
+        apply_hook_transaction, build_hook_plan, list_hook_states, parse_tool_kind, HookAction,
+        HookApplyRequest,
     },
     state::AppState,
 };
@@ -74,7 +74,7 @@ pub async fn apply_hook(
 #[cfg(test)]
 mod tests {
     use axum::{
-        body::{Body, to_bytes},
+        body::{to_bytes, Body},
         http::{Request, StatusCode},
     };
 
@@ -105,16 +105,12 @@ mod tests {
             .and_then(|value| value.as_array())
             .expect("hooks array");
 
-        assert!(
-            hooks
-                .iter()
-                .any(|row| row["tool"] == "claude" && row["supported"] == true)
-        );
-        assert!(
-            hooks
-                .iter()
-                .any(|row| row["tool"] == "kiro" && row["supported"] == false)
-        );
+        assert!(hooks
+            .iter()
+            .any(|row| row["tool"] == "claude" && row["supported"] == true));
+        assert!(hooks
+            .iter()
+            .any(|row| row["tool"] == "kiro" && row["supported"] == false));
     }
 
     #[tokio::test]

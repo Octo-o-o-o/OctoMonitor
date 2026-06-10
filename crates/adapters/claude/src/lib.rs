@@ -212,8 +212,7 @@ fn message_content_array(val: &serde_json::Value) -> Option<&Vec<serde_json::Val
 }
 
 fn message_has_block(val: &serde_json::Value, kind: &str) -> bool {
-    message_content_array(val)
-        .is_some_and(|arr| arr.iter().any(|b| block_type(b) == Some(kind)))
+    message_content_array(val).is_some_and(|arr| arr.iter().any(|b| block_type(b) == Some(kind)))
 }
 
 fn extract_text_from_content(msg: &serde_json::Value) -> Option<String> {
@@ -389,7 +388,11 @@ fn build_claude_session(
         .unwrap_or_default();
     let pending_elapsed = state
         .pending_user_ts
-        .map(|user_dt| (Utc::now().fixed_offset() - user_dt).num_milliseconds().max(0))
+        .map(|user_dt| {
+            (Utc::now().fixed_offset() - user_dt)
+                .num_milliseconds()
+                .max(0)
+        })
         .unwrap_or(0);
     let active_elapsed_ms = state.completed_active_elapsed_ms + pending_elapsed;
 
@@ -431,7 +434,12 @@ fn update_cached_claude_session(
     for line in delta.lines {
         apply_claude_line(&mut cached.state, &line);
     }
-    Some(build_claude_session(&cached.state, path, workspace_path, project_name))
+    Some(build_claude_session(
+        &cached.state,
+        path,
+        workspace_path,
+        project_name,
+    ))
 }
 
 fn read_legacy_hud_usage_cache(config_dir: &Path) -> Option<ClaudeQuota> {

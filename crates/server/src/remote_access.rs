@@ -197,7 +197,7 @@ pub fn redact_bootstrap(payload: &BootstrapPayload) -> BootstrapPayload {
 fn redact_run(run: &RunRecord) -> RunRecord {
     RunRecord {
         id: run.id.clone(),
-        tool: run.tool.clone(),
+        tool: run.tool,
         source_id: run.source_id.clone(),
         source_mode: run.source_mode.clone(),
         project_name: run.project_name.clone(),
@@ -284,7 +284,7 @@ fn redact_vcs_context(vcs: &VcsContext) -> VcsContext {
 fn redact_attention(attention: &AttentionItem) -> AttentionItem {
     AttentionItem {
         id: attention.id.clone(),
-        tool: attention.tool.clone(),
+        tool: attention.tool,
         run_id: attention.run_id.clone(),
         severity: attention.severity.clone(),
         kind: attention.kind.clone(),
@@ -323,7 +323,7 @@ fn redact_commit(commit: &CommitRecord) -> CommitRecord {
 
 fn redact_identity(identity: &IdentityState) -> IdentityState {
     IdentityState {
-        tool: identity.tool.clone(),
+        tool: identity.tool,
         auth_mode: identity.auth_mode.clone(),
         provider: identity.provider.clone(),
         account_alias: None,
@@ -338,7 +338,7 @@ fn redact_identity(identity: &IdentityState) -> IdentityState {
 fn redact_completion(completion: &CompletionRecord) -> CompletionRecord {
     CompletionRecord {
         id: completion.id.clone(),
-        tool: completion.tool.clone(),
+        tool: completion.tool,
         project_name: String::new(),
         title: "[redacted]".into(),
         finished_at: completion.finished_at.clone(),

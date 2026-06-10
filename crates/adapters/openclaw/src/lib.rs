@@ -197,7 +197,14 @@ fn parse_gateway_status_payload(stdout: &str) -> OpenClawGatewayStatusProbe {
         }
         detail_parts.push(service_part);
     }
-    detail_parts.push(if rpc_ok { "rpc reachable" } else { "rpc unreachable" }.into());
+    detail_parts.push(
+        if rpc_ok {
+            "rpc reachable"
+        } else {
+            "rpc unreachable"
+        }
+        .into(),
+    );
     if !health_ok {
         detail_parts.push("health unhealthy".into());
     }
@@ -258,9 +265,13 @@ fn run_gateway_status_probe() -> (CommandProbeResult, OpenClawGatewayStatusProbe
 /// Derive a human-readable origin label and provider from session data
 fn derive_origin(session_key: &str, session_val: &Value) -> (Option<String>, Option<String>) {
     let origin = session_val.get("origin");
-    let origin_provider_raw = origin.and_then(|o| o.get("provider")).and_then(Value::as_str);
+    let origin_provider_raw = origin
+        .and_then(|o| o.get("provider"))
+        .and_then(Value::as_str);
     let origin_label_raw = origin.and_then(|o| o.get("label")).and_then(Value::as_str);
-    let origin_surface = origin.and_then(|o| o.get("surface")).and_then(Value::as_str);
+    let origin_surface = origin
+        .and_then(|o| o.get("surface"))
+        .and_then(Value::as_str);
     let session_label = session_val.get("label").and_then(Value::as_str);
 
     let provider = origin_provider_raw.map(String::from).or_else(|| {
@@ -617,10 +628,7 @@ fn load_cached_agent_sessions(
             .into_iter()
             .map(|mut session| {
                 if let Some(path) = session.transcript_path.as_deref() {
-                    let cached = cache
-                        .transcript_files
-                        .entry(path.to_string())
-                        .or_default();
+                    let cached = cache.transcript_files.entry(path.to_string()).or_default();
                     let state = update_cached_openclaw_transcript(cached, Path::new(path));
                     session.first_question = state.first_question.clone();
                     session.last_question = state.last_question.clone();

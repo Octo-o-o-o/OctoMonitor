@@ -130,8 +130,14 @@ mod tests {
         // First frame: the initial snapshot pushed on upgrade.
         let initial = next_text(&mut socket).await;
         let payload: serde_json::Value = serde_json::from_str(&initial).unwrap();
-        assert_eq!(payload.get("type").and_then(|v| v.as_str()), Some("snapshot.replace"));
-        assert!(payload.get("payload").is_some(), "snapshot must carry a payload");
+        assert_eq!(
+            payload.get("type").and_then(|v| v.as_str()),
+            Some("snapshot.replace")
+        );
+        assert!(
+            payload.get("payload").is_some(),
+            "snapshot must carry a payload"
+        );
 
         // Mutate state and signal — the connection should receive another
         // snapshot.replace covering the change.
@@ -143,7 +149,10 @@ mod tests {
 
         let second = next_text(&mut socket).await;
         let payload: serde_json::Value = serde_json::from_str(&second).unwrap();
-        assert_eq!(payload.get("type").and_then(|v| v.as_str()), Some("snapshot.replace"));
+        assert_eq!(
+            payload.get("type").and_then(|v| v.as_str()),
+            Some("snapshot.replace")
+        );
         assert_eq!(
             payload
                 .get("payload")

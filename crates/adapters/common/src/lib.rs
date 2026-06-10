@@ -218,6 +218,12 @@ pub fn path_has_sensitive_component(path: &Path) -> bool {
 fn component_name_is_sensitive(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     let normalized = lower.replace(['-', '.'], "_");
+    let has_sensitive_word = |word: &str| {
+        normalized == word
+            || normalized.starts_with(&format!("{word}_"))
+            || normalized.ends_with(&format!("_{word}"))
+            || normalized.contains(&format!("_{word}_"))
+    };
     lower == ".env"
         || lower.ends_with(".env")
         || lower.starts_with(".env.")
@@ -228,6 +234,11 @@ fn component_name_is_sensitive(name: &str) -> bool {
         || normalized.contains("access_token")
         || normalized.contains("refresh_token")
         || normalized.contains("auth_token")
+        || has_sensitive_word("auth")
+        || has_sensitive_word("token")
+        || has_sensitive_word("tokens")
+        || has_sensitive_word("provider")
+        || has_sensitive_word("mcp")
         || normalized.contains("provider_secret")
         || normalized.contains("private_key")
         || normalized.contains("secret")
@@ -444,6 +455,18 @@ mod tests {
         )));
         assert!(path_has_sensitive_component(Path::new(
             "/Users/demo/project/.env.local"
+        )));
+        assert!(path_has_sensitive_component(Path::new(
+            "/Users/demo/.cursor/mcp.json"
+        )));
+        assert!(path_has_sensitive_component(Path::new(
+            "/Users/demo/.tool/provider.json"
+        )));
+        assert!(path_has_sensitive_component(Path::new(
+            "/Users/demo/.tool/auth/cache.json"
+        )));
+        assert!(path_has_sensitive_component(Path::new(
+            "/Users/demo/.tool/tokens.json"
         )));
         assert!(!path_has_sensitive_component(Path::new(
             "/Users/demo/project/session.jsonl"
