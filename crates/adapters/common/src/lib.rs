@@ -111,6 +111,128 @@ pub fn read_jsonl_delta(path: &Path, cursor: &mut JsonlCursor) -> io::Result<Jso
     Ok(JsonlDelta { lines, reset })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretScanFinding {
+    pub pattern: &'static str,
+    pub line_number: usize,
+}
+
+pub fn scan_text_for_secret_patterns(text: &str) -> Vec<SecretScanFinding> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(idx, line)| secret_pattern_for_line(line).map(|pattern| (idx, pattern)))
+        .map(|(idx, pattern)| SecretScanFinding {
+            pattern,
+            line_number: idx + 1,
+        })
+        .collect()
+}
+
+fn secret_pattern_for_line(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.contains("-----BEGIN") && trimmed.contains("PRIVATE KEY-----") {
+        return Some("private-key-block");
+    }
+    if contains_token_prefix(trimmed, "sk-ant-") {
+        return Some("anthropic-key");
+    }
+    if contains_token_prefix(trimmed, "sk-proj-") || contains_token_prefix(trimmed, "sk-") {
+        return Some("openai-key");
+    }
+    if contains_token_prefix(trimmed, "ghp_") || contains_token_prefix(trimmed, "github_pat_") {
+        return Some("github-token");
+    }
+    if contains_token_prefix(trimmed, "AIza") {
+        return Some("google-api-key");
+    }
+    if contains_aws_access_key(trimmed) {
+        return Some("aws-access-key");
+    }
+    if looks_like_secret_assignment(&lower) {
+        return Some("secret-assignment");
+    }
+    None
+}
+
+fn contains_token_prefix(line: &str, prefix: &str) -> bool {
+    line.find(prefix).is_some_and(|idx| {
+        line[idx + prefix.len()..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            .count()
+            >= 16
+    })
+}
+
+fn contains_aws_access_key(line: &str) -> bool {
+    line.find("AKIA").is_some_and(|idx| {
+        line[idx..]
+            .chars()
+            .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            .count()
+            >= 20
+    })
+}
+
+fn looks_like_secret_assignment(lower_line: &str) -> bool {
+    const SECRET_NAMES: &[&str] = &[
+        "api_key",
+        "apikey",
+        "access_token",
+        "refresh_token",
+        "auth_token",
+        "client_secret",
+        "private_key",
+        "secret_key",
+        "bearer_token",
+        "password",
+    ];
+
+    let Some(separator_idx) = lower_line.find(['=', ':']) else {
+        return false;
+    };
+    let key = lower_line[..separator_idx]
+        .trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace());
+    let value = lower_line[separator_idx + 1..]
+        .trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace() || c == ',');
+    if value.is_empty()
+        || value.contains("placeholder")
+        || value.contains("redacted")
+        || value.contains("fixture")
+        || value.contains("example")
+        || value.contains('<')
+    {
+        return false;
+    }
+    value.len() >= 12 && SECRET_NAMES.iter().any(|name| key.ends_with(name))
+}
+
+pub fn path_has_sensitive_component(path: &Path) -> bool {
+    path.components().any(|component| {
+        let name = component.as_os_str().to_string_lossy();
+        component_name_is_sensitive(&name)
+    })
+}
+
+fn component_name_is_sensitive(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let normalized = lower.replace(['-', '.'], "_");
+    lower == ".env"
+        || lower.ends_with(".env")
+        || lower.starts_with(".env.")
+        || normalized.contains("credential")
+        || normalized.contains("oauth")
+        || normalized.contains("api_key")
+        || normalized.contains("apikey")
+        || normalized.contains("access_token")
+        || normalized.contains("refresh_token")
+        || normalized.contains("auth_token")
+        || normalized.contains("provider_secret")
+        || normalized.contains("private_key")
+        || normalized.contains("secret")
+}
+
 /// Mask a sensitive value, showing only the first and last 4 characters.
 /// Values shorter than `min_visible` are fully masked.
 pub fn mask_value(value: &str, min_visible: usize) -> String {
@@ -256,7 +378,10 @@ mod tests {
     #[test]
     fn format_cron_expr_formats_common_patterns() {
         assert_eq!(format_cron_expr("0 9 * * *", "UTC"), "Daily 09:00");
-        assert_eq!(format_cron_expr("30 17 * * 1,3,5", "UTC"), "Mon,Wed,Fri 17:30");
+        assert_eq!(
+            format_cron_expr("30 17 * * 1,3,5", "UTC"),
+            "Mon,Wed,Fri 17:30"
+        );
         assert_eq!(format_cron_expr("* * * * *", "UTC"), "* * * * * (UTC)");
         assert_eq!(format_cron_expr("bad", "UTC"), "bad (UTC)");
     }
@@ -292,5 +417,237 @@ mod tests {
         let third = read_jsonl_delta(&path, &mut cursor).expect("third read");
         assert!(third.reset);
         assert_eq!(third.lines, vec![r#"{"b":1}"#]);
+    }
+
+    #[test]
+    fn secret_scan_detects_common_key_shapes() {
+        let findings =
+            scan_text_for_secret_patterns("OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz\n");
+        assert_eq!(findings[0].pattern, "openai-key");
+
+        let findings = scan_text_for_secret_patterns("refresh_token: live-token-value-12345\n");
+        assert_eq!(findings[0].pattern, "secret-assignment");
+    }
+
+    #[test]
+    fn secret_scan_allows_fixture_placeholders() {
+        assert!(scan_text_for_secret_patterns(
+            "denied path: ~/.tool/credentials/provider.json\napi_key: fixture-placeholder\n"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn sensitive_path_matcher_catches_credential_names() {
+        assert!(path_has_sensitive_component(Path::new(
+            "/Users/demo/.tool/credentials/oauth.json"
+        )));
+        assert!(path_has_sensitive_component(Path::new(
+            "/Users/demo/project/.env.local"
+        )));
+        assert!(!path_has_sensitive_component(Path::new(
+            "/Users/demo/project/session.jsonl"
+        )));
+    }
+}
+
+#[cfg(test)]
+mod agent_fixture_contract_tests {
+    use super::*;
+    use serde_json::Value;
+    use std::{collections::HashMap, collections::HashSet, path::PathBuf};
+
+    const REQUIRED_TOOLS: &[&str] = &[
+        "codebuddy",
+        "continue-cn",
+        "cline",
+        "qwen",
+        "kiro",
+        "kimi",
+        "goose",
+        "cursor",
+        "opencode",
+    ];
+    const REQUIRED_CASE_FILES: &[&str] = &[
+        "evidence_lock.json",
+        "schema_fingerprint.json",
+        "golden_sessions.json",
+        "commands.sh",
+        "README.md",
+    ];
+
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
+    }
+
+    fn fixture_root() -> PathBuf {
+        workspace_root().join("fixtures/agents")
+    }
+
+    fn json_file(path: &Path) -> Value {
+        let text = fs::read_to_string(path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+        serde_json::from_str(&text)
+            .unwrap_or_else(|err| panic!("invalid json {}: {err}", path.display()))
+    }
+
+    fn collect_text_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir)
+            .unwrap_or_else(|err| panic!("failed to read dir {}: {err}", dir.display()))
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_text_files(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn agent_fixture_cases_follow_contract() {
+        let root = fixture_root();
+        assert!(root.is_dir(), "{} must exist", root.display());
+
+        let mut polarity: HashMap<String, (bool, bool)> = HashMap::new();
+        let mut stable_declared: Vec<String> = Vec::new();
+
+        for tool_entry in fs::read_dir(&root)
+            .expect("fixtures/agents readable")
+            .flatten()
+        {
+            let tool_path = tool_entry.path();
+            if !tool_path.is_dir() {
+                continue;
+            }
+            let tool_id = tool_entry.file_name().to_string_lossy().into_owned();
+            polarity.entry(tool_id.clone()).or_default();
+
+            for version_entry in fs::read_dir(&tool_path)
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", tool_path.display()))
+                .flatten()
+            {
+                let version_path = version_entry.path();
+                if !version_path.is_dir() {
+                    continue;
+                }
+                let fixture_version = version_entry.file_name().to_string_lossy().into_owned();
+
+                for case_entry in fs::read_dir(&version_path)
+                    .unwrap_or_else(|err| {
+                        panic!("failed to read {}: {err}", version_path.display())
+                    })
+                    .flatten()
+                {
+                    let case_path = case_entry.path();
+                    if !case_path.is_dir() {
+                        continue;
+                    }
+                    let case_id = case_entry.file_name().to_string_lossy().into_owned();
+                    for required in REQUIRED_CASE_FILES {
+                        assert!(
+                            case_path.join(required).is_file(),
+                            "{} missing {required}",
+                            case_path.display()
+                        );
+                    }
+
+                    let evidence = json_file(&case_path.join("evidence_lock.json"));
+                    assert_eq!(evidence["tool_id"].as_str(), Some(tool_id.as_str()));
+                    assert_eq!(
+                        evidence["fixture_version"].as_str(),
+                        Some(fixture_version.as_str())
+                    );
+                    assert_eq!(evidence["case_id"].as_str(), Some(case_id.as_str()));
+                    assert!(evidence["source_url"]
+                        .as_str()
+                        .is_some_and(|s| s.starts_with("https://")));
+                    assert!(evidence["source_path"]
+                        .as_str()
+                        .is_some_and(|s| !s.is_empty()));
+                    assert!(evidence["evidence_level"]
+                        .as_str()
+                        .is_some_and(|s| !s.is_empty()));
+                    assert!(evidence["local_command_used"]
+                        .as_str()
+                        .is_some_and(|s| !s.is_empty()));
+                    assert!(evidence["denied_paths_observed"].is_array());
+
+                    let support_level = evidence["target_support_level"].as_str().unwrap_or("");
+                    if matches!(support_level, "stable" | "monitored") {
+                        stable_declared.push(format!("{tool_id}/{fixture_version}/{case_id}"));
+                    }
+
+                    let schema = json_file(&case_path.join("schema_fingerprint.json"));
+                    assert_eq!(schema["tool_id"].as_str(), Some(tool_id.as_str()));
+                    assert_eq!(schema["case_id"].as_str(), Some(case_id.as_str()));
+                    assert!(schema["format"].as_str().is_some_and(|s| !s.is_empty()));
+                    assert!(matches!(
+                        schema["schema_confidence"].as_str(),
+                        Some("high" | "medium" | "low" | "unsupported")
+                    ));
+
+                    let golden = json_file(&case_path.join("golden_sessions.json"));
+                    assert!(
+                        golden.is_array(),
+                        "{} golden_sessions.json must be an array",
+                        case_path.display()
+                    );
+
+                    let commands = fs::read_to_string(case_path.join("commands.sh"))
+                        .expect("commands.sh readable");
+                    assert!(commands.contains("set -eu"));
+                    assert!(commands.contains("octomonitor-fixture:"));
+
+                    if case_id.starts_with("positive") {
+                        polarity.get_mut(&tool_id).expect("tool polarity").0 = true;
+                    }
+                    if case_id.starts_with("negative") {
+                        polarity.get_mut(&tool_id).expect("tool polarity").1 = true;
+                    }
+                }
+            }
+        }
+
+        let found_tools: HashSet<&str> = polarity.keys().map(String::as_str).collect();
+        for required in REQUIRED_TOOLS {
+            assert!(
+                found_tools.contains(required),
+                "missing fixture tool {required}"
+            );
+            let (has_positive, has_negative) = polarity[*required];
+            assert!(has_positive, "{required} needs a positive fixture case");
+            assert!(has_negative, "{required} needs a negative fixture case");
+        }
+
+        for stable_case in stable_declared {
+            let tool = stable_case.split('/').next().unwrap_or_default();
+            let (has_positive, has_negative) = polarity[tool];
+            assert!(
+                has_positive && has_negative,
+                "{stable_case} cannot be marked stable without positive and negative fixtures"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_fixtures_do_not_contain_secret_patterns() {
+        let root = fixture_root();
+        let mut files = Vec::new();
+        collect_text_files(&root, &mut files);
+
+        for path in files {
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let findings = scan_text_for_secret_patterns(&text);
+            assert!(
+                findings.is_empty(),
+                "{} contains secret-looking fixture text: {:?}",
+                path.display(),
+                findings
+            );
+        }
     }
 }

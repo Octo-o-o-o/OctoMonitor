@@ -1,0 +1,18 @@
+{
+  "tool_id": "kiro",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-custom-storage-json",
+  "format": "jsonl",
+  "schema_version": "custom-storage-v1",
+  "schema_confidence": "medium",
+  "required_fields": [
+    "sessionId",
+    "workspace",
+    "event",
+    "timestamp"
+  ],
+  "sample_files": [
+    "custom-storage.jsonl"
+  ],
+  "fingerprint": "sha256:fixture-kiro-custom-storage-v1"
+}

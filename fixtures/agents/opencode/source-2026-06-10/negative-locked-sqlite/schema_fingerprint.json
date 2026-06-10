@@ -1,0 +1,15 @@
+{
+  "tool_id": "opencode",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-locked-sqlite",
+  "format": "sqlite",
+  "schema_version": "opencode-db-v1",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "sessions.id"
+  ],
+  "sample_files": [
+    "locked.sqlite.lock"
+  ],
+  "fingerprint": "sha256:fixture-opencode-locked-sqlite"
+}

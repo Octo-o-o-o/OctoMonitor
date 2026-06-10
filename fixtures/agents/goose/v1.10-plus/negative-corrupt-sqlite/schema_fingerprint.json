@@ -1,0 +1,15 @@
+{
+  "tool_id": "goose",
+  "fixture_version": "v1.10-plus",
+  "case_id": "negative-corrupt-sqlite",
+  "format": "sqlite",
+  "schema_version": "sessions-db-v1",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "sessions.id"
+  ],
+  "sample_files": [
+    "sessions.db"
+  ],
+  "fingerprint": "sha256:fixture-goose-corrupt-sqlite"
+}

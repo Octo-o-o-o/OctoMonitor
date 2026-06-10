@@ -1,0 +1,16 @@
+{
+  "tool_id": "cursor",
+  "fixture_version": "beta-cli",
+  "case_id": "positive-store-db-metadata",
+  "tool_version": "beta-cli",
+  "source_url": "https://cursor.com/docs/cli/overview",
+  "source_path": "~/.cursor/chats/<hash>/<uuid>/store.db",
+  "package_integrity": "sha256:fixture-only-cursor-beta-cli",
+  "evidence_level": "reverse-engineered-fixture",
+  "target_support_level": "experimental",
+  "local_command_used": "agent ls && agent --resume <session-id>",
+  "denied_paths_observed": [
+    "~/.cursor/auth",
+    "~/.cursor/.env"
+  ]
+}

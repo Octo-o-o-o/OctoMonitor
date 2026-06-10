@@ -1,0 +1,15 @@
+{
+  "tool_id": "continue-cn",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-missing-path",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://github.com/continuedev/continue/blob/main/extensions/cli/src/session.ts",
+  "source_path": "CONTINUE_GLOBAL_DIR sessions directory",
+  "package_integrity": "sha256:fixture-only-continue-cn-source-2026-06-10",
+  "evidence_level": "source-locked",
+  "target_support_level": "candidate",
+  "local_command_used": "CONTINUE_GLOBAL_DIR=/tmp/missing cn --resume missing",
+  "denied_paths_observed": [
+    "~/.continue/config.yaml"
+  ]
+}

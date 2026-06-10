@@ -1,0 +1,14 @@
+[
+  {
+    "id": "opencode-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "gpt-5-codex",
+    "usage": {
+      "inputTokens": 1400,
+      "outputTokens": 360,
+      "totalTokens": 1760,
+      "costKind": "exact"
+    },
+    "supportLevel": "fixture-gated-monitored"
+  }
+]

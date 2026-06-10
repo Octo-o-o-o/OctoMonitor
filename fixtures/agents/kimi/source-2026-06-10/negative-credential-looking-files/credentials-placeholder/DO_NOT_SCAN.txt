@@ -1,0 +1,1 @@
+This placeholder represents a credential-looking path. It intentionally holds no secret material.

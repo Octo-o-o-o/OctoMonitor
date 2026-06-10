@@ -1,0 +1,10 @@
+[
+  {
+    "key": "session",
+    "decoded": {
+      "id": "cursor-session-1",
+      "workspace": "/Users/demo/workspace/octomonitor",
+      "model": "cursor-agent"
+    }
+  }
+]

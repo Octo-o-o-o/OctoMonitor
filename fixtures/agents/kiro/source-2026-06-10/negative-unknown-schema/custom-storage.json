@@ -1,0 +1,9 @@
+{
+  "version": "future",
+  "records": [
+    {
+      "key": "opaque",
+      "value": "metadata-only"
+    }
+  ]
+}

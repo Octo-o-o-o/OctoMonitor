@@ -1,0 +1,18 @@
+{
+  "tool_id": "qwen",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-chat-jsonl",
+  "format": "jsonl",
+  "schema_version": "chat-recording-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "type",
+    "timestamp",
+    "session_id",
+    "cwd"
+  ],
+  "sample_files": [
+    "chat.jsonl"
+  ],
+  "fingerprint": "sha256:fixture-qwen-chat-recording-v1"
+}

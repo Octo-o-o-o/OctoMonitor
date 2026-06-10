@@ -1,0 +1,16 @@
+{
+  "tool_id": "cursor",
+  "fixture_version": "beta-cli",
+  "case_id": "negative-unknown-schema",
+  "format": "sqlite+hex-json",
+  "schema_version": "unknown",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "meta",
+    "blobs"
+  ],
+  "sample_files": [
+    "schema.sql"
+  ],
+  "fingerprint": "sha256:fixture-cursor-unknown-schema"
+}

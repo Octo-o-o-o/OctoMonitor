@@ -1,0 +1,15 @@
+{
+  "tool_id": "codebuddy",
+  "fixture_version": "2.105.0",
+  "case_id": "negative-corrupt-jsonl",
+  "tool_version": "2.105.0",
+  "source_url": "https://www.codebuddy.ai/docs/cli/codebuddy-dir",
+  "source_path": "@tencent-ai/codebuddy-code@2.105.0 transcript store",
+  "package_integrity": "sha256:fixture-only-codebuddy-2-105-0",
+  "evidence_level": "source-locked",
+  "target_support_level": "candidate",
+  "local_command_used": "codebuddy transcript parser corrupt-jsonl fixture",
+  "denied_paths_observed": [
+    "~/.codebuddy/credentials"
+  ]
+}

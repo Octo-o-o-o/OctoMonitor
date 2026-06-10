@@ -1,0 +1,11 @@
+[
+  {
+    "id": "goose-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "unknown",
+    "usage": {
+      "costKind": "not_available"
+    },
+    "supportLevel": "fixture-gated-monitored"
+  }
+]

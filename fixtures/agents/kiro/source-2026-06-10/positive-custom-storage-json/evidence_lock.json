@@ -1,0 +1,16 @@
+{
+  "tool_id": "kiro",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-custom-storage-json",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://kiro.dev/docs/cli/chat/session-management/",
+  "source_path": "Kiro CLI session commands and custom storage script JSON",
+  "package_integrity": "sha256:fixture-only-kiro-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "fixture-gated-cli",
+  "local_command_used": "kiro-cli chat --resume-id <session-id>",
+  "denied_paths_observed": [
+    "$KIRO_HOME/auth",
+    "$KIRO_HOME/.env"
+  ]
+}

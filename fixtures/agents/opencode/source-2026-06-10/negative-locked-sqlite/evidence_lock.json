@@ -1,0 +1,15 @@
+{
+  "tool_id": "opencode",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-locked-sqlite",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://opencode.ai/docs/server/",
+  "source_path": "opencode db path read-only WAL access",
+  "package_integrity": "sha256:fixture-only-opencode-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "candidate",
+  "local_command_used": "opencode sqlite parser locked database fixture",
+  "denied_paths_observed": [
+    "~/.config/opencode/auth"
+  ]
+}

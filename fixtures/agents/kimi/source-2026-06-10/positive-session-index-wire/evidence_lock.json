@@ -1,0 +1,16 @@
+{
+  "tool_id": "kimi",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-session-index-wire",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://moonshotai.github.io/kimi-code/en/guides/sessions.html",
+  "source_path": "$KIMI_CODE_HOME/sessions session_index/state/wire",
+  "package_integrity": "sha256:fixture-only-kimi-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "fixture-gated-monitored",
+  "local_command_used": "kimi --session <session-id>",
+  "denied_paths_observed": [
+    "$KIMI_CODE_HOME/credentials",
+    "$KIMI_CODE_HOME/.env"
+  ]
+}

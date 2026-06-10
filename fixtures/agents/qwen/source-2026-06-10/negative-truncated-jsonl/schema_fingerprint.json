@@ -1,0 +1,16 @@
+{
+  "tool_id": "qwen",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-truncated-jsonl",
+  "format": "jsonl",
+  "schema_version": "chat-recording-v1",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "type",
+    "session_id"
+  ],
+  "sample_files": [
+    "truncated.jsonl"
+  ],
+  "fingerprint": "sha256:fixture-qwen-truncated-jsonl"
+}

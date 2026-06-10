@@ -1,0 +1,18 @@
+{
+  "sessions": [
+    {
+      "id": "opencode-session-1",
+      "project": "/Users/demo/workspace/octomonitor",
+      "model": "gpt-5-codex",
+      "updated_at": "2026-06-10T01:30:00Z"
+    }
+  ],
+  "messages": [
+    {
+      "id": "message-1",
+      "session_id": "opencode-session-1",
+      "input_tokens": 1400,
+      "output_tokens": 360
+    }
+  ]
+}

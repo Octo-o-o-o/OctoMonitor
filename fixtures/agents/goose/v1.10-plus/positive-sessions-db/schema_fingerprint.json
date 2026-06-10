@@ -1,0 +1,18 @@
+{
+  "tool_id": "goose",
+  "fixture_version": "v1.10-plus",
+  "case_id": "positive-sessions-db",
+  "format": "sqlite",
+  "schema_version": "sessions-db-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "sessions.id",
+    "sessions.title",
+    "sessions.updated_at"
+  ],
+  "sample_files": [
+    "schema.sql",
+    "rows.json"
+  ],
+  "fingerprint": "sha256:fixture-goose-sessions-db-v1"
+}

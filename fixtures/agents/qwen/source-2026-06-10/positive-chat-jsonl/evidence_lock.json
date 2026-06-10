@@ -1,0 +1,16 @@
+{
+  "tool_id": "qwen",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-chat-jsonl",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://github.com/QwenLM/qwen-code/blob/main/docs/users/features/hooks.md",
+  "source_path": "packages/core/src/services/chatRecordingService.ts",
+  "package_integrity": "sha256:fixture-only-qwen-source-2026-06-10",
+  "evidence_level": "source-locked",
+  "target_support_level": "fixture-gated-monitored",
+  "local_command_used": "qwen chat recording parser positive fixture",
+  "denied_paths_observed": [
+    "~/.qwen/oauth",
+    "~/.qwen/.env"
+  ]
+}

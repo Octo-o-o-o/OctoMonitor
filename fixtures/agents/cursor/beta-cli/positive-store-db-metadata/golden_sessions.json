@@ -1,0 +1,11 @@
+[
+  {
+    "id": "cursor-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "cursor-agent",
+    "usage": {
+      "costKind": "not_available"
+    },
+    "supportLevel": "experimental"
+  }
+]

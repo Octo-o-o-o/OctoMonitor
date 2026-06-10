@@ -1,0 +1,16 @@
+{
+  "tool_id": "kimi",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-credential-looking-files",
+  "format": "deny-read-sentinel",
+  "schema_version": "sensitive-paths-v1",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "deniedPaths"
+  ],
+  "sample_files": [
+    "denied-paths.json",
+    "credentials-placeholder/DO_NOT_SCAN.txt"
+  ],
+  "fingerprint": "sha256:fixture-kimi-credential-looking-files"
+}

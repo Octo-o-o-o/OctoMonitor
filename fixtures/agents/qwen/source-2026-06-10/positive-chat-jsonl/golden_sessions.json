@@ -1,0 +1,14 @@
+[
+  {
+    "id": "qwen-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "qwen3-coder",
+    "usage": {
+      "inputTokens": 800,
+      "outputTokens": 210,
+      "totalTokens": 1010,
+      "costKind": "partial"
+    },
+    "supportLevel": "fixture-gated-monitored"
+  }
+]

@@ -1,0 +1,19 @@
+{
+  "sessionId": "continue-session-1",
+  "workspaceDirectory": "/Users/demo/workspace/octomonitor",
+  "title": "Continue monitor check",
+  "history": [
+    {
+      "role": "user",
+      "content": "Check monitor status."
+    },
+    {
+      "role": "assistant",
+      "content": "Status checked.",
+      "usage": {
+        "promptTokens": 700,
+        "completionTokens": 230
+      }
+    }
+  ]
+}

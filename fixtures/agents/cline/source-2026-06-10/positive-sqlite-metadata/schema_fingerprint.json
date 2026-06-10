@@ -1,0 +1,18 @@
+{
+  "tool_id": "cline",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-sqlite-metadata",
+  "format": "sqlite",
+  "schema_version": "metadata-only-v1",
+  "schema_confidence": "medium",
+  "required_fields": [
+    "sessions.id",
+    "sessions.workspace",
+    "sessions.updated_at"
+  ],
+  "sample_files": [
+    "schema.sql",
+    "rows.json"
+  ],
+  "fingerprint": "sha256:fixture-cline-metadata-only-v1"
+}

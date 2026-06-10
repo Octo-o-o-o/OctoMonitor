@@ -1,0 +1,19 @@
+{
+  "tool_id": "cursor",
+  "fixture_version": "beta-cli",
+  "case_id": "positive-store-db-metadata",
+  "format": "sqlite+hex-json",
+  "schema_version": "store-db-meta-blobs-v1",
+  "schema_confidence": "low",
+  "required_fields": [
+    "meta.key",
+    "meta.value",
+    "blobs.key",
+    "blobs.value"
+  ],
+  "sample_files": [
+    "schema.sql",
+    "hex-blobs.json"
+  ],
+  "fingerprint": "sha256:fixture-cursor-store-db-meta-blobs-v1"
+}

@@ -1,0 +1,15 @@
+{
+  "tool_id": "cline",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-unknown-schema",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://docs.cline.bot/cli/cli-reference",
+  "source_path": "CLI --data-dir session metadata",
+  "package_integrity": "sha256:fixture-only-cline-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "candidate",
+  "local_command_used": "cline metadata parser unknown-schema fixture",
+  "denied_paths_observed": [
+    "~/.cline/secrets"
+  ]
+}

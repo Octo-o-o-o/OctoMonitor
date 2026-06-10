@@ -1,0 +1,3 @@
+{"type":"$set","session_id":"qwen-session-1","cwd":"/Users/demo/workspace/octomonitor","model":"qwen3-coder"}
+{"type":"user","session_id":"qwen-session-1","timestamp":"2026-06-10T01:10:00Z","content":"Show source health."}
+{"type":"assistant","session_id":"qwen-session-1","timestamp":"2026-06-10T01:10:08Z","usage":{"input_tokens":800,"output_tokens":210,"total_tokens":1010},"content":"Source health listed."}

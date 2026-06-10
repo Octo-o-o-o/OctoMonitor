@@ -1,0 +1,16 @@
+{
+  "tool_id": "goose",
+  "fixture_version": "v1.10-plus",
+  "case_id": "positive-sessions-db",
+  "tool_version": "v1.10+",
+  "source_url": "https://goose-docs.ai/docs/guides/goose-cli-commands/",
+  "source_path": "~/.local/share/goose/sessions/sessions.db",
+  "package_integrity": "sha256:fixture-only-goose-v1-10-plus",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "fixture-gated-monitored",
+  "local_command_used": "goose session list && goose session export <session-id>",
+  "denied_paths_observed": [
+    "~/.config/goose/credentials",
+    "~/.config/goose/.env"
+  ]
+}

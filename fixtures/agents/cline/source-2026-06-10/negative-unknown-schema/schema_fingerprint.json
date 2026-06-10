@@ -1,0 +1,16 @@
+{
+  "tool_id": "cline",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-unknown-schema",
+  "format": "sqlite",
+  "schema_version": "unknown",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "sessions.id",
+    "sessions.workspace"
+  ],
+  "sample_files": [
+    "schema.sql"
+  ],
+  "fingerprint": "sha256:fixture-cline-unknown-schema"
+}

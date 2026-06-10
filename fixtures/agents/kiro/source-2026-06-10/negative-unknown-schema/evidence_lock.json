@@ -1,0 +1,15 @@
+{
+  "tool_id": "kiro",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-unknown-schema",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://kiro.dev/docs/cli/chat/session-management/",
+  "source_path": "Kiro CLI session commands and custom storage script JSON",
+  "package_integrity": "sha256:fixture-only-kiro-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "candidate",
+  "local_command_used": "kiro custom storage parser unknown-schema fixture",
+  "denied_paths_observed": [
+    "$KIRO_HOME/auth"
+  ]
+}

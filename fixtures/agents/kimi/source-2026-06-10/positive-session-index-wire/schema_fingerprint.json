@@ -1,0 +1,19 @@
+{
+  "tool_id": "kimi",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-session-index-wire",
+  "format": "jsonl+json",
+  "schema_version": "sessions-index-wire-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "session_index.session_id",
+    "state.cwd",
+    "wire.event"
+  ],
+  "sample_files": [
+    "session_index.jsonl",
+    "state.json",
+    "agents/default/wire.jsonl"
+  ],
+  "fingerprint": "sha256:fixture-kimi-session-index-wire-v1"
+}

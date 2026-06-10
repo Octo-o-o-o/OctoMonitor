@@ -1,0 +1,16 @@
+{
+  "tool_id": "opencode",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-sqlite-and-cli",
+  "tool_version": "source-2026-06-10",
+  "source_url": "https://opencode.ai/docs/cli/",
+  "source_path": "opencode db path and session stats/export",
+  "package_integrity": "sha256:fixture-only-opencode-source-2026-06-10",
+  "evidence_level": "docs-plus-fixture",
+  "target_support_level": "fixture-gated-monitored",
+  "local_command_used": "opencode db path && opencode session stats",
+  "denied_paths_observed": [
+    "~/.config/opencode/auth",
+    "~/.config/opencode/.env"
+  ]
+}

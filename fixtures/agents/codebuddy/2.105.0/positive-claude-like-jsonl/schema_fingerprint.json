@@ -1,0 +1,19 @@
+{
+  "tool_id": "codebuddy",
+  "fixture_version": "2.105.0",
+  "case_id": "positive-claude-like-jsonl",
+  "format": "jsonl",
+  "schema_version": "claude-like-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "sessionId",
+    "timestamp",
+    "type",
+    "cwd",
+    "message.usage"
+  ],
+  "sample_files": [
+    "session.jsonl"
+  ],
+  "fingerprint": "sha256:fixture-codebuddy-claude-like-v1"
+}

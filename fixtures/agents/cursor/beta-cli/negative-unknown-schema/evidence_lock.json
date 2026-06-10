@@ -1,0 +1,15 @@
+{
+  "tool_id": "cursor",
+  "fixture_version": "beta-cli",
+  "case_id": "negative-unknown-schema",
+  "tool_version": "beta-cli",
+  "source_url": "https://cursor.com/docs/cli/reference/output-format",
+  "source_path": "~/.cursor/chats/<hash>/<uuid>/store.db",
+  "package_integrity": "sha256:fixture-only-cursor-beta-cli",
+  "evidence_level": "reverse-engineered-fixture",
+  "target_support_level": "candidate",
+  "local_command_used": "cursor store parser unknown-schema fixture",
+  "denied_paths_observed": [
+    "~/.cursor/auth"
+  ]
+}

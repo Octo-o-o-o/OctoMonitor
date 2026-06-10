@@ -1,0 +1,18 @@
+{
+  "tool_id": "opencode",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "positive-sqlite-and-cli",
+  "format": "sqlite",
+  "schema_version": "opencode-db-v1",
+  "schema_confidence": "high",
+  "required_fields": [
+    "sessions.id",
+    "sessions.project",
+    "messages.session_id"
+  ],
+  "sample_files": [
+    "schema.sql",
+    "rows.json"
+  ],
+  "fingerprint": "sha256:fixture-opencode-db-v1"
+}

@@ -1,0 +1,2 @@
+{"event":"session_start","sessionId":"kiro-session-1","workspace":"/Users/demo/workspace/octomonitor","timestamp":"2026-06-10T01:15:00Z"}
+{"event":"message","sessionId":"kiro-session-1","role":"assistant","timestamp":"2026-06-10T01:15:05Z","summary":"Resume id available."}

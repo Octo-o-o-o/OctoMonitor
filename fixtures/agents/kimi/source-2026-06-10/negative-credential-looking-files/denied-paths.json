@@ -1,0 +1,6 @@
+{
+  "deniedPaths": [
+    "$KIMI_CODE_HOME/credentials/provider.json",
+    "$KIMI_CODE_HOME/.env"
+  ]
+}

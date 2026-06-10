@@ -1,0 +1,16 @@
+{
+  "tool_id": "continue-cn",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-missing-path",
+  "format": "json",
+  "schema_version": "continue-cli-session-v1",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "sessionId",
+    "workspaceDirectory"
+  ],
+  "sample_files": [
+    "missing-paths.json"
+  ],
+  "fingerprint": "sha256:fixture-continue-cn-missing-path"
+}

@@ -1,0 +1,16 @@
+{
+  "tool_id": "kiro",
+  "fixture_version": "source-2026-06-10",
+  "case_id": "negative-unknown-schema",
+  "format": "json",
+  "schema_version": "unknown",
+  "schema_confidence": "unsupported",
+  "required_fields": [
+    "sessionId",
+    "event"
+  ],
+  "sample_files": [
+    "custom-storage.json"
+  ],
+  "fingerprint": "sha256:fixture-kiro-unknown-schema"
+}

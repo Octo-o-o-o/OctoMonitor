@@ -1,0 +1,14 @@
+[
+  {
+    "id": "kimi-session-1",
+    "workspace": "/Users/demo/workspace/octomonitor",
+    "model": "kimi-k2",
+    "usage": {
+      "inputTokens": 900,
+      "outputTokens": 260,
+      "totalTokens": 1160,
+      "costKind": "partial"
+    },
+    "supportLevel": "fixture-gated-monitored"
+  }
+]
