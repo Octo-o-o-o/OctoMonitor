@@ -5356,6 +5356,17 @@ input, textarea, select { font: inherit; }
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+.inspect-operation-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: var(--panel-surface);
+}
 .inspect-open-codex-button {
   min-height: 34px;
   padding: 0 14px;
@@ -5368,6 +5379,20 @@ input, textarea, select { font: inherit; }
 .inspect-open-codex-button:disabled {
   cursor: progress;
   opacity: 0.7;
+}
+.inspect-operation-button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 7px;
+  background: var(--control-surface);
+  border: 1px solid var(--shell-border);
+  color: var(--text);
+  font-weight: 700;
+  font-size: var(--font-size-sm);
+}
+.inspect-operation-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .inspect-open-codex-hint {
   color: var(--muted);

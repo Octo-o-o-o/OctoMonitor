@@ -647,6 +647,8 @@ mod tests {
             (Method::POST, "/api/ingest/codex/hook"),
             (Method::GET, "/api/runs/run-1/events"),
             (Method::GET, "/api/runs/run-1/resume-command"),
+            (Method::GET, "/api/runs/run-1/operations"),
+            (Method::POST, "/api/runs/run-1/operations"),
             (Method::POST, "/api/runs/run-1/turn/interrupt"),
         ] {
             let response = app

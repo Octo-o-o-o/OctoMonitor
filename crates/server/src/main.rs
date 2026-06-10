@@ -3,6 +3,7 @@ mod config;
 mod handlers;
 mod hooks;
 mod network;
+mod operations;
 mod perf;
 mod platform;
 mod pricing;
@@ -74,6 +75,11 @@ pub(crate) fn build_app(state: AppState) -> Router {
         .route(
             "/api/runs/{run_id}/resume-command",
             get(resume::get_run_resume_command),
+        )
+        .route(
+            "/api/runs/{run_id}/operations",
+            get(handlers::operations::get_run_operations)
+                .post(handlers::operations::apply_run_operation_handler),
         )
         .route(
             "/api/config",

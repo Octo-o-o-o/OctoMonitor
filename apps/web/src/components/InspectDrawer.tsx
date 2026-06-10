@@ -24,6 +24,28 @@ interface ResumeCommandPayload {
   note: string | null
 }
 
+type OperationDescriptor = {
+  id: string
+  label: string
+  available: boolean
+  blockedReason?: string | null
+  requiresConfirmation: boolean
+  mutatesState: boolean
+  auditLevel: string
+  failureMode: string
+}
+
+type OperationsPayload = {
+  runId: string
+  operations: OperationDescriptor[]
+}
+
+type OperationApplyPayload = {
+  ok: boolean
+  blockedReason?: string | null
+  message?: string
+}
+
 type CodexEventKind =
   | 'userMessage'
   | 'assistantMessage'
@@ -102,6 +124,8 @@ export function InspectDrawer() {
   const [entries, setEntries] = useState<InspectEntry[]>([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [resumeCommand, setResumeCommand] = useState<ResumeCommandPayload | null>(null)
+  const [operations, setOperations] = useState<OperationDescriptor[]>([])
+  const [operationBusy, setOperationBusy] = useState<string | null>(null)
   const [events, setEvents] = useState<CodexEvent[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
   const [openingCodex, setOpeningCodex] = useState(false)
@@ -117,6 +141,7 @@ export function InspectDrawer() {
   const showOpenInCodex = Boolean(
     selectedRun && canUseDesktopOpen && openAffordance === 'openCodex',
   )
+  const openWorkspaceOperation = operations.find((operation) => operation.id === 'open.workspace')
   const usageBucketIndex = useMemo(
     () => buildUsageBucketIndex(usageBuckets ?? []),
     [usageBuckets],
@@ -152,6 +177,32 @@ export function InspectDrawer() {
         if (!cancelled) setResumeCommand(payload)
       } catch {
         // best-effort; resume command is advisory only
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [runtimeMode, selectedRun])
+
+  useEffect(() => {
+    let cancelled = false
+    setOperations([])
+
+    if (!selectedRun || runtimeMode === 'remoteViewer') {
+      return () => { cancelled = true }
+    }
+
+    void (async () => {
+      try {
+        const response = await apiFetch(
+          `/api/runs/${encodeURIComponent(selectedRun.id)}/operations`,
+        )
+        if (!response.ok) return
+        const payload = await response.json() as OperationsPayload
+        if (!cancelled && payload.runId === selectedRun.id) {
+          setOperations(Array.isArray(payload.operations) ? payload.operations : [])
+        }
+      } catch {
+        // best-effort; operation controls fall back to existing local actions
       }
     })()
 
@@ -301,6 +352,35 @@ export function InspectDrawer() {
     }
   }
 
+  async function handleOpenWorkspace() {
+    if (!selectedRun || operationBusy) return
+    setOperationBusy('open.workspace')
+    try {
+      const response = await apiFetch(
+        `/api/runs/${encodeURIComponent(selectedRun.id)}/operations`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'open.workspace',
+            expectedLastActivityAt: selectedRun.lastActivityAt,
+            confirmed: true,
+          }),
+        },
+      )
+      const payload = await response.json() as OperationApplyPayload
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.blockedReason ?? payload.message ?? 'operation failed')
+      }
+      markRunVisited(selectedRun.id)
+      pushToast({ kind: 'info', message: t('drawer.openWorkspace.ok') })
+    } catch {
+      pushToast({ kind: 'error', message: t('drawer.openWorkspace.error') })
+    } finally {
+      setOperationBusy(null)
+    }
+  }
+
   const isError = errorStates.has(selectedRun.state)
   const stateClass = stateClassMap[selectedRun.state]
     ?? (isError ? 'inspect-state--error' : 'inspect-state--done')
@@ -384,6 +464,23 @@ export function InspectDrawer() {
                   </button>
                   <span className="inspect-open-codex-hint">
                     {t('drawer.openInCodex.hint')}
+                  </span>
+                </div>
+              )}
+              {openWorkspaceOperation && (
+                <div className="inspect-operation-card">
+                  <button
+                    type="button"
+                    className="inspect-operation-button"
+                    onClick={handleOpenWorkspace}
+                    disabled={!openWorkspaceOperation.available || operationBusy === 'open.workspace'}
+                  >
+                    {t('drawer.openWorkspace')}
+                  </button>
+                  <span className="inspect-open-codex-hint">
+                    {openWorkspaceOperation.available
+                      ? t('drawer.openWorkspace.hint')
+                      : openWorkspaceOperation.blockedReason ?? t('drawer.operationUnavailable')}
                   </span>
                 </div>
               )}

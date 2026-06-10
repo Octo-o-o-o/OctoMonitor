@@ -33,7 +33,7 @@ pub async fn get_run_resume_command(
     Ok(Json(build_resume_command(&run)))
 }
 
-fn build_resume_command(run: &RunRecord) -> ResumeCommandPayload {
+pub(crate) fn build_resume_command(run: &RunRecord) -> ResumeCommandPayload {
     let tool = run.tool.clone();
     let note = |msg: &str| ResumeCommandPayload {
         command: None,

@@ -917,22 +917,31 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::test_support::ConfigDirGuard;
 
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-    fn set_home(temp: &TempDir) -> MutexGuard<'static, ()> {
-        let guard = ENV_LOCK
+    struct HookEnvGuard {
+        _env: MutexGuard<'static, ()>,
+        _config: ConfigDirGuard,
+    }
+
+    fn set_home(temp: &TempDir) -> HookEnvGuard {
+        let env_guard = ENV_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
             .expect("env lock");
+        let config_guard = ConfigDirGuard::set(&temp.path().join(".octomonitor"));
         env::set_var("HOME", temp.path());
-        env::set_var("OCTOMONITOR_CONFIG_DIR", temp.path().join(".octomonitor"));
         env::remove_var("CLAUDE_CONFIG_DIR");
         env::remove_var("CODEX_HOME");
         env::remove_var("GEMINI_HOME");
         env::remove_var("CODEBUDDY_CONFIG_DIR");
         env::remove_var("QWEN_CONFIG_DIR");
-        guard
+        HookEnvGuard {
+            _env: env_guard,
+            _config: config_guard,
+        }
     }
 
     fn plan(tool: ToolKind, action: HookAction) -> HookPlan {

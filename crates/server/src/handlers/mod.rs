@@ -6,6 +6,7 @@ pub mod hooks;
 pub mod ingest;
 pub mod inspect;
 pub mod installer;
+pub mod operations;
 pub mod remote;
 pub mod resume;
 pub mod stream;

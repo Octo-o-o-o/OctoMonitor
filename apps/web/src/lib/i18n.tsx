@@ -310,6 +310,11 @@ const en = {
   'drawer.openInCodex': 'Open in Codex',
   'drawer.openInCodex.hint': 'If it does not jump, the thread may be archived; copy the command below instead.',
   'drawer.openInCodex.error': 'Codex app was not detected. Copy the command below instead.',
+  'drawer.openWorkspace': 'Open workspace',
+  'drawer.openWorkspace.hint': 'Requires local confirmation and is audited.',
+  'drawer.openWorkspace.ok': 'Workspace open requested',
+  'drawer.openWorkspace.error': 'Could not open workspace',
+  'drawer.operationUnavailable': 'Operation unavailable',
   'drawer.resumeCommand.label': 'Resume (advisory)',
   'drawer.resumeCommand.unavailable': 'Resume command unavailable',
 
@@ -725,6 +730,11 @@ const zh: Record<I18nKey, string> = {
   'drawer.openInCodex': '在 Codex 中打开',
   'drawer.openInCodex.hint': '如果没有跳转，可能是 thread 已归档；可复制下方命令。',
   'drawer.openInCodex.error': '未检测到 Codex 应用，可复制下方命令。',
+  'drawer.openWorkspace': '打开工作区',
+  'drawer.openWorkspace.hint': '需要本地确认并写入审计。',
+  'drawer.openWorkspace.ok': '已请求打开工作区',
+  'drawer.openWorkspace.error': '无法打开工作区',
+  'drawer.operationUnavailable': '操作不可用',
   'drawer.resumeCommand.label': '建议命令（仅复制）',
   'drawer.resumeCommand.unavailable': '暂无可用的恢复命令',
 

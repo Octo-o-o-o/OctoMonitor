@@ -275,4 +275,90 @@ describe('InspectDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Open in Codex' })).not.toBeInTheDocument()
     await act(async () => { await flushPromises() })
   })
+
+  it('executes open workspace through the operation endpoint', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        const url = typeof input === 'string' ? input : (input as Request | URL).toString()
+        if (url.endsWith('/operations') && init?.method !== 'POST') {
+          return new Response(
+            JSON.stringify({
+              runId: 'workspace-run',
+              operations: [
+                {
+                  id: 'open.workspace',
+                  label: 'Open workspace',
+                  available: true,
+                  blockedReason: null,
+                  requiresConfirmation: true,
+                  mutatesState: true,
+                  auditLevel: 'metadata',
+                  failureMode: 'safe',
+                },
+              ],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        if (url.endsWith('/operations') && init?.method === 'POST') {
+          return new Response(
+            JSON.stringify({ ok: true, message: 'Workspace open requested' }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        if (url.includes('/inspect')) {
+          return new Response(JSON.stringify({ entries: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        return new Response('null', { status: 503 })
+      })
+
+    const run = runFixture({
+      id: 'workspace-run',
+      capabilities: [{
+        id: 'open.workspace',
+        source: 'inferred',
+        confidence: 'medium',
+        mutatesState: false,
+        requiresUserConfirmation: false,
+        requiresManagedProcess: false,
+        canExposeSecrets: false,
+        auditLevel: 'metadata',
+        failureMode: 'safe',
+      }],
+    })
+
+    act(() => {
+      useMonitorStore.setState({
+        data: bootstrapWithRuns([run]),
+        selectedRunId: 'workspace-run',
+      })
+    })
+
+    render(
+      <I18nProvider>
+        <ThemeProvider>
+          <InspectDrawer />
+        </ThemeProvider>
+      </I18nProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open workspace' }))
+
+    await waitFor(() => {
+      const post = fetchSpy.mock.calls.find(([input, init]) => {
+        const url = typeof input === 'string' ? input : (input as Request | URL).toString()
+        return url.endsWith('/operations') && init?.method === 'POST'
+      })
+      expect(post).toBeTruthy()
+      expect(JSON.parse(post?.[1]?.body as string)).toMatchObject({
+        action: 'open.workspace',
+        expectedLastActivityAt: '2026-04-16T00:01:00.000Z',
+        confirmed: true,
+      })
+    })
+  })
 })
