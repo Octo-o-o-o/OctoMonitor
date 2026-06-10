@@ -57,6 +57,9 @@ describe('App', () => {
       if (url.endsWith('/api/installer/doctor')) {
         return jsonResponse({ checks: [] })
       }
+      if (url.endsWith('/api/hooks')) {
+        return jsonResponse({ hooks: [] })
+      }
       if (url.endsWith('/api/remote/access')) {
         return jsonResponse({
           enabled: false,

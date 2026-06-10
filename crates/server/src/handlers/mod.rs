@@ -2,6 +2,7 @@ pub mod bootstrap;
 pub mod config;
 pub mod events;
 pub mod history;
+pub mod hooks;
 pub mod ingest;
 pub mod inspect;
 pub mod installer;

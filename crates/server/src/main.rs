@@ -1,6 +1,7 @@
 mod commits;
 mod config;
 mod handlers;
+mod hooks;
 mod network;
 mod perf;
 mod platform;
@@ -16,9 +17,9 @@ mod watcher;
 use std::net::{IpAddr, SocketAddr};
 
 use axum::{
-    http::{header, HeaderValue, Method},
-    routing::{get, post},
     Router,
+    http::{HeaderValue, Method, header},
+    routing::{get, post},
 };
 use tower_http::cors::CorsLayer;
 
@@ -81,6 +82,9 @@ pub(crate) fn build_app(state: AppState) -> Router {
         .route("/api/installer/detect", get(installer::installer_detect))
         .route("/api/installer/doctor", get(installer::installer_doctor))
         .route("/api/installer/verify", get(installer::installer_verify))
+        .route("/api/hooks", get(handlers::hooks::list_hooks))
+        .route("/api/hooks/{tool}/plan", get(handlers::hooks::hook_plan))
+        .route("/api/hooks/{tool}/apply", post(handlers::hooks::apply_hook))
         .route(
             "/api/remote/access",
             get(remote::get_remote_access).patch(remote::patch_remote_access),
@@ -97,6 +101,10 @@ pub(crate) fn build_app(state: AppState) -> Router {
         )
         .route("/api/ingest/claude/hook", post(ingest::ingest_claude_hook))
         .route("/api/ingest/codex/hook", post(ingest::ingest_codex_hook))
+        .route(
+            "/api/hooks/ingest/{tool}/hook",
+            post(ingest::ingest_generic_hook),
+        )
         .route("/api/stream", get(stream::stream))
         .layer(build_cors_layer())
         .with_state(state)

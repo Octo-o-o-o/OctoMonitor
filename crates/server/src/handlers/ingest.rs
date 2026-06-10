@@ -1,4 +1,7 @@
-use axum::{extract::State, Json};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use chrono::Utc;
 use octomonitor_core::{
     AuditLevel, CapabilityDescriptor, CapabilityFailureMode, CapabilitySource, DataSourceHealth,
@@ -183,6 +186,28 @@ pub struct CodexHookIngest {
     pub event: Option<String>,
     pub waiting_on_approval: Option<bool>,
     pub total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericHookIngest {
+    #[serde(alias = "hook_event_name", alias = "name")]
+    pub event: Option<String>,
+    #[serde(
+        alias = "session_id",
+        alias = "conversation_id",
+        alias = "conversationId"
+    )]
+    pub session_id: Option<String>,
+    #[serde(alias = "thread_id")]
+    pub thread_id: Option<String>,
+    #[serde(alias = "workspace_path", alias = "workspacePath")]
+    pub cwd: Option<String>,
+    pub model: Option<String>,
+    #[serde(alias = "transcript_path")]
+    pub transcript_path: Option<String>,
+    pub waiting_on_approval: Option<bool>,
+    pub marker: Option<String>,
 }
 
 pub async fn ingest_claude_statusline(
@@ -483,6 +508,180 @@ pub async fn ingest_codex_hook(
     perf::log_ingest_event("codex_hook", &run_id);
     upsert_runtime_run(&state, run, "ingest_codex_hook").await;
     Json(serde_json::json!({"ok": true}))
+}
+
+pub async fn ingest_generic_hook(
+    State(state): State<AppState>,
+    Path(tool_slug): Path<String>,
+    Json(input): Json<GenericHookIngest>,
+) -> Json<serde_json::Value> {
+    let Some(tool) = crate::hooks::parse_tool_kind(&tool_slug) else {
+        return Json(serde_json::json!({
+            "ok": false,
+            "ignored": true,
+            "reason": "unknown tool",
+            "tool": tool_slug,
+        }));
+    };
+    if !source_ingest_enabled(&state, tool).await {
+        return disabled_source_response(tool);
+    }
+    let slug = tool_slug_for_run(tool);
+    let event = input.event.unwrap_or_else(|| "hook".into());
+    let event_lower = event.to_ascii_lowercase();
+    let pending = input.waiting_on_approval.unwrap_or(false)
+        || event_lower.contains("permission")
+        || event_lower.contains("approval");
+    let workspace_path = input
+        .cwd
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| default_hook_workspace(tool).into());
+    let started_at = Utc::now().to_rfc3339();
+    let last_activity_at = started_at.clone();
+    let run_state = if pending {
+        RunState::WaitingApproval
+    } else if event_lower.contains("stop")
+        || event_lower.contains("afteragent")
+        || event_lower.contains("sessionend")
+    {
+        RunState::Completed
+    } else if event_lower.contains("idle") {
+        RunState::Idle
+    } else {
+        RunState::Active
+    };
+    let session_id = input.session_id.filter(|id| !id.is_empty());
+    let thread_id = input.thread_id.filter(|id| !id.is_empty());
+    let run_key = thread_id
+        .as_deref()
+        .or(session_id.as_deref())
+        .unwrap_or("hook");
+    let transcript_path = input.transcript_path.filter(|path| !path.is_empty());
+    let source_id = format!("{slug}:hook");
+    let has_resume_id = session_id.is_some() || thread_id.is_some();
+    let run = RunRecord {
+        id: format!("ingest-{slug}-{run_key}"),
+        tool,
+        source_id: Some(source_id.clone()),
+        source_mode: format!("{slug}_hook"),
+        project_name: last_path_component(&workspace_path)
+            .unwrap_or("Agent Session")
+            .into(),
+        workspace_short: shorten_path(&workspace_path),
+        model: input.model,
+        provider: provider_for_tool(tool).map(str::to_string),
+        agent_name: Some("hook".into()),
+        agent_display_name: None,
+        account_alias: Some("local-ingest".into()),
+        auth_mode: Some("configured".into()),
+        auth_verified: true,
+        session_id,
+        thread_id,
+        session_key: None,
+        transcript_path: transcript_path.clone(),
+        started_at: started_at.clone(),
+        last_activity_at: last_activity_at.clone(),
+        elapsed_ms: 0,
+        state: run_state.clone(),
+        last_action: Some(format!("hook event: {event}")),
+        last_tail: Some("live hook metadata ingest".into()),
+        pending_approval: pending,
+        first_question: None,
+        last_question: None,
+        error_message: None,
+        message_count: 0,
+        tokens: TokenUsage::default(),
+        cost: MoneyValue {
+            usd: None,
+            confidence: SourceConfidence::Derived,
+        },
+        quota: default_quota(),
+        source: live_source(),
+        lifecycle: Some(live_lifecycle(
+            run_state,
+            &started_at,
+            &last_activity_at,
+            LifecycleStatusSource::Hook,
+        )),
+        usage_semantics: Some(usage_semantics(
+            UsageCostKind::NotAvailable,
+            UsageDataSource::Unknown,
+        )),
+        data_sources: Some(data_source_health(
+            &source_id,
+            DataSourceType::Hook,
+            transcript_path,
+            &last_activity_at,
+        )),
+        capabilities: Some(resume_capabilities(
+            has_resume_id,
+            matches!(tool, ToolKind::Codex),
+        )),
+        jump_targets: Some(Vec::new()),
+        tool_specific: Some(serde_json::json!({
+            "event": event,
+            "hookManager": input.marker.as_deref() == Some("octomonitor-live-state"),
+        })),
+        vcs: crate::commits::discover_vcs_context(&workspace_path),
+        workspace_path,
+        origin_label: None,
+        origin_provider: None,
+    };
+    let run_id = run.id.clone();
+    perf::log_ingest_event("generic_hook", &run_id);
+    upsert_runtime_run(&state, run, "ingest_generic_hook").await;
+    Json(serde_json::json!({"ok": true}))
+}
+
+fn tool_slug_for_run(tool: ToolKind) -> &'static str {
+    match tool {
+        ToolKind::Claude => "claude",
+        ToolKind::Codex => "codex",
+        ToolKind::OpenClaw => "openclaw",
+        ToolKind::Hermes => "hermes",
+        ToolKind::CodeBuddy => "codebuddy",
+        ToolKind::Gemini => "gemini",
+        ToolKind::Pi => "pi",
+        ToolKind::OpenCode => "opencode",
+        ToolKind::Copilot => "copilot",
+        ToolKind::OpenHands => "openhands",
+        ToolKind::ContinueCn => "continuecn",
+        ToolKind::Qwen => "qwen",
+        ToolKind::Kimi => "kimi",
+        ToolKind::Goose => "goose",
+        ToolKind::Cursor => "cursor",
+        ToolKind::Cline => "cline",
+        ToolKind::Kiro => "kiro",
+        ToolKind::WorkBuddy => "workbuddy",
+        ToolKind::AmazonQ => "amazonq",
+        ToolKind::Aider => "aider",
+        ToolKind::Amp => "amp",
+        ToolKind::Windsurf => "windsurf",
+        ToolKind::Codebuff => "codebuff",
+        ToolKind::Roo => "roo",
+        ToolKind::Kilo => "kilo",
+    }
+}
+
+fn default_hook_workspace(tool: ToolKind) -> &'static str {
+    match tool {
+        ToolKind::Claude => "~/.claude",
+        ToolKind::Codex => "~/.codex",
+        ToolKind::CodeBuddy => "~/.codebuddy",
+        ToolKind::Gemini => "~/.gemini",
+        ToolKind::Qwen => "~/.qwen",
+        _ => "~/.octomonitor",
+    }
+}
+
+fn provider_for_tool(tool: ToolKind) -> Option<&'static str> {
+    match tool {
+        ToolKind::Claude | ToolKind::CodeBuddy => Some("anthropic-compatible"),
+        ToolKind::Codex => Some("openai"),
+        ToolKind::Gemini => Some("google"),
+        ToolKind::Qwen => Some("qwen"),
+        _ => None,
+    }
 }
 
 async fn upsert_runtime_run(state: &AppState, mut run: RunRecord, wake_reason: &'static str) {
@@ -826,6 +1025,83 @@ mod tests {
         assert!(
             state.bootstrap.read().await.runs.is_empty(),
             "disabled source hook must not create runtime runs"
+        );
+    }
+
+    #[tokio::test]
+    async fn generic_hook_ingest_stores_metadata_only() {
+        let state = test_state();
+        let _ = ingest_generic_hook(
+            State(state.clone()),
+            Path("gemini".into()),
+            Json(GenericHookIngest {
+                event: Some("PermissionRequest".into()),
+                session_id: Some("session-1".into()),
+                thread_id: None,
+                cwd: Some("/tmp/octomonitor".into()),
+                model: Some("gemini-2.5-pro".into()),
+                transcript_path: Some("/tmp/octomonitor/session.jsonl".into()),
+                waiting_on_approval: None,
+                marker: Some("octomonitor-live-state".into()),
+            }),
+        )
+        .await;
+
+        let payload = state.bootstrap.read().await;
+        let run = payload
+            .runs
+            .iter()
+            .find(|run| run.id == "ingest-gemini-session-1")
+            .expect("generic hook run");
+        assert_eq!(run.tool, ToolKind::Gemini);
+        assert_eq!(run.state, RunState::WaitingApproval);
+        assert!(run.pending_approval);
+        assert_eq!(
+            run.transcript_path.as_deref(),
+            Some("/tmp/octomonitor/session.jsonl")
+        );
+        let tool_specific = run.tool_specific.as_ref().expect("tool specific");
+        assert_eq!(
+            tool_specific.get("event").and_then(|value| value.as_str()),
+            Some("PermissionRequest")
+        );
+        assert!(tool_specific.get("rawPayload").is_none());
+    }
+
+    #[tokio::test]
+    async fn disabled_sources_ignore_generic_hook_ingest() {
+        let state = test_state();
+        state
+            .bootstrap
+            .write()
+            .await
+            .config
+            .disabled_sources
+            .push(ToolKind::Gemini);
+
+        let response = ingest_generic_hook(
+            State(state.clone()),
+            Path("gemini".into()),
+            Json(GenericHookIngest {
+                event: Some("Notification".into()),
+                session_id: Some("disabled".into()),
+                thread_id: None,
+                cwd: None,
+                model: None,
+                transcript_path: None,
+                waiting_on_approval: None,
+                marker: Some("octomonitor-live-state".into()),
+            }),
+        )
+        .await;
+
+        assert_eq!(
+            response.0.get("ignored").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert!(
+            state.bootstrap.read().await.runs.is_empty(),
+            "disabled generic hook must not create runtime runs"
         );
     }
 }

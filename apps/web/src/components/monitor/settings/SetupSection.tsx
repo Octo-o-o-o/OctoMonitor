@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../../../lib/i18n'
 import { apiFetch } from '../../../lib/api'
 import { allTools, sourceLabels } from '../../../lib/constants'
@@ -13,6 +13,33 @@ type Capability = {
   mode: string
   supportLevel?: SupportLevel
   notes: string
+}
+type HookAction = 'install' | 'uninstall'
+type HookState = {
+  tool: ToolKind
+  supported: boolean
+  installed: boolean
+  targetPath?: string | null
+  targetExists: boolean
+  writable: boolean
+  parseError?: string | null
+  warnings: string[]
+  unsupportedReason?: string | null
+  lastAuditAt?: string | null
+}
+type HookPlan = {
+  tool: ToolKind
+  action: HookAction
+  supported: boolean
+  installedBefore: boolean
+  targetPath?: string | null
+  targetExists: boolean
+  beforeSha256: string
+  afterSha256?: string | null
+  backupRequired: boolean
+  diff: string
+  warnings: string[]
+  blockedReason?: string | null
 }
 
 function capabilityLabel(tool: string): string {
@@ -50,7 +77,12 @@ export function SetupSection() {
 
   const [capabilities, setCapabilities] = useState<Capability[]>([])
   const [checks, setChecks] = useState<string[]>([])
+  const [hookRows, setHookRows] = useState<HookState[]>([])
+  const [hookPlan, setHookPlan] = useState<HookPlan | null>(null)
   const [loading, setLoading] = useState(true)
+  const [hookLoading, setHookLoading] = useState(true)
+  const [hookBusy, setHookBusy] = useState<string | null>(null)
+  const [hookStatus, setHookStatus] = useState<string | null>(null)
   const [savingSource, setSavingSource] = useState<string | null>(null)
   const [sourceError, setSourceError] = useState<string | null>(null)
   const [verificationLoading, setVerificationLoading] = useState(false)
@@ -67,6 +99,22 @@ export function SetupSection() {
         return t('setup.support.monitored')
     }
   }
+  const loadHooks = useCallback(async () => {
+    setHookLoading(true)
+    try {
+      const response = await apiFetch('/api/hooks')
+      if (!response.ok) throw new Error('hook list failed')
+      const payload = await response.json()
+      if (mountedRef.current) {
+        setHookRows(payload.hooks ?? [])
+      }
+    } catch (err) {
+      console.warn('[OctoMonitor] hooks.list', err)
+      if (mountedRef.current) setHookStatus(t('setup.hooksLoadFailed'))
+    } finally {
+      if (mountedRef.current) setHookLoading(false)
+    }
+  }, [t])
 
   useEffect(() => {
     mountedRef.current = true
@@ -92,10 +140,11 @@ export function SetupSection() {
         setLoading(false)
       }
     })
+    void loadHooks()
     return () => {
       mountedRef.current = false
     }
-  }, [])
+  }, [loadHooks])
 
   const sourceRows = useMemo(() => {
     const runs = data?.runs ?? []
@@ -177,6 +226,51 @@ export function SetupSection() {
       setVerificationStatus(t('setup.verificationFailed'))
     } finally {
       setVerificationLoading(false)
+    }
+  }
+
+  async function previewHook(tool: ToolKind, action: HookAction) {
+    setHookBusy(`${tool}:${action}:plan`)
+    setHookStatus(null)
+    try {
+      const response = await apiFetch(`/api/hooks/${tool}/plan?action=${action}`)
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error ?? 'hook plan failed')
+      setHookPlan(payload)
+      if (payload.blockedReason) {
+        setHookStatus(payload.blockedReason)
+      }
+    } catch (err) {
+      console.warn('[OctoMonitor] hooks.plan', err)
+      setHookStatus(t('setup.hooksPlanFailed'))
+    } finally {
+      setHookBusy(null)
+    }
+  }
+
+  async function applyHookPlan() {
+    if (!hookPlan || hookPlan.blockedReason || !hookPlan.targetPath) return
+    setHookBusy(`${hookPlan.tool}:${hookPlan.action}:apply`)
+    setHookStatus(null)
+    try {
+      const response = await apiFetch(`/api/hooks/${hookPlan.tool}/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: hookPlan.action,
+          expectedBeforeSha256: hookPlan.beforeSha256,
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error ?? 'hook apply failed')
+      setHookStatus(t('setup.hooksApplied'))
+      setHookPlan(null)
+      await loadHooks()
+    } catch (err) {
+      console.warn('[OctoMonitor] hooks.apply', err)
+      setHookStatus(err instanceof Error ? err.message : t('setup.hooksApplyFailed'))
+    } finally {
+      setHookBusy(null)
     }
   }
 
@@ -262,6 +356,83 @@ export function SetupSection() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="hook-manager-panel">
+        <div className="source-control-header">
+          <h3>{t('setup.hookManager')}</h3>
+          {hookStatus && <span className={`settings-status-text ${hookStatus.includes('failed') ? 'error' : ''}`}>{hookStatus}</span>}
+        </div>
+        <p className="settings-hint">{t('setup.hookManagerHint')}</p>
+        {hookLoading && <div className="setup-loading">{t('setup.hooksLoading')}</div>}
+        <div className="hook-manager-list">
+          {hookRows.map((row) => (
+            <div
+              key={row.tool}
+              className={`hook-manager-row ${row.supported ? '' : 'unsupported'} ${row.installed ? 'installed' : ''}`}
+            >
+              <div className="hook-manager-main">
+                <strong>{sourceLabels[row.tool]}</strong>
+                <span>{row.supported ? (row.installed ? t('setup.hookInstalled') : t('setup.hookNotInstalled')) : t('setup.hookUnsupported')}</span>
+              </div>
+              <div className="hook-manager-meta">
+                <span><b>{t('setup.target')}</b>{row.targetPath ?? t('setup.notAvailable')}</span>
+                <span><b>{t('setup.backupAudit')}</b>{formatDate(row.lastAuditAt)}</span>
+                {row.parseError && <span className="hook-warning"><b>{t('setup.parseErrors')}</b>{row.parseError}</span>}
+                {row.unsupportedReason && <span className="hook-warning">{row.unsupportedReason}</span>}
+                {row.warnings.slice(0, 2).map((warning) => (
+                  <span key={warning} className="hook-warning">{warning}</span>
+                ))}
+              </div>
+              <div className="hook-manager-actions">
+                <button
+                  className="settings-option small"
+                  disabled={!row.supported || hookBusy != null}
+                  onClick={() => void previewHook(row.tool, 'install')}
+                >
+                  {t('setup.previewInstall')}
+                </button>
+                <button
+                  className="settings-option small"
+                  disabled={!row.supported || !row.installed || hookBusy != null}
+                  onClick={() => void previewHook(row.tool, 'uninstall')}
+                >
+                  {t('setup.previewUninstall')}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {hookPlan && (
+          <div className="hook-plan-preview">
+            <div className="hook-plan-header">
+              <strong>{sourceLabels[hookPlan.tool]} · {hookPlan.action === 'install' ? t('setup.install') : t('setup.uninstall')}</strong>
+              <button className="settings-option small" disabled={hookBusy != null} onClick={() => setHookPlan(null)}>
+                {t('setup.cancel')}
+              </button>
+            </div>
+            <div className="hook-plan-grid">
+              <span><b>{t('setup.target')}</b>{hookPlan.targetPath ?? t('setup.notAvailable')}</span>
+              <span><b>{t('setup.backup')}</b>{hookPlan.backupRequired ? t('setup.required') : t('setup.notRequired')}</span>
+              <span><b>{t('setup.beforeSha')}</b>{hookPlan.beforeSha256}</span>
+              <span><b>{t('setup.afterSha')}</b>{hookPlan.afterSha256 ?? t('setup.notAvailable')}</span>
+            </div>
+            {hookPlan.blockedReason && <div className="settings-status-text error">{hookPlan.blockedReason}</div>}
+            {hookPlan.warnings.length > 0 && (
+              <div className="hook-warning-list">
+                {hookPlan.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+              </div>
+            )}
+            <pre className="hook-diff">{hookPlan.diff || t('setup.noDiff')}</pre>
+            <button
+              className="settings-option active"
+              disabled={hookBusy != null || Boolean(hookPlan.blockedReason)}
+              onClick={() => void applyHookPlan()}
+            >
+              {hookBusy?.endsWith(':apply') ? t('setup.applying') : t('setup.applyHookPlan')}
+            </button>
+          </div>
+        )}
       </div>
 
       {checks.length > 0 && (

@@ -42,6 +42,9 @@ describe('SettingsView', () => {
       if (url.endsWith('/api/installer/doctor')) {
         return jsonResponse({ checks: [] })
       }
+      if (url.endsWith('/api/hooks')) {
+        return jsonResponse({ hooks: [] })
+      }
       return jsonResponse(null, 503)
     })
   })
